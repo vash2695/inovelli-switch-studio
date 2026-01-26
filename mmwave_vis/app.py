@@ -1,15 +1,19 @@
+"""
+Inovelli mmWave Visualizer Backend
+Provides a real-time MQTT-to-WebSocket bridge for Home Assistant Ingress.
+Handles device discovery, Zigbee byte array decoding, and two-way configuration.
+"""
+
 import json
 import os
 import traceback
 import time
-import gc # Added for memory management
-import threading # Added for background watchdog
-
+import gc 
+import threading 
 from flask import Flask, render_template, request
 from flask_socketio import SocketIO
 import paho.mqtt.client as mqtt
 import logging
-
 
 # Suppress the Werkzeug development server warning
 log = logging.getLogger('werkzeug')
@@ -35,10 +39,10 @@ except FileNotFoundError:
 Z2M_BASE_TOPIC = "zigbee2mqtt"
 
 app = Flask(__name__)
-# Standard threading to prevent Home Assistant CPU lockup
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 current_topic = None
+
 # Stores device names, topics, and cached zone configurations
 device_list = {} 
 last_update_time = 0
@@ -52,22 +56,19 @@ def on_message(client, userdata, msg):
     try:
         topic = msg.topic
         
-        # 1. THE FAST-BAIL FILTER (CPU/MEMORY SAVER)
-        # Only decode the raw payload, do NOT parse JSON yet.
+        # --- PRE-FILTERING (CPU/MEMORY OPTIMIZATION) ---
+        # Decode string without JSON parsing to quickly reject non-mmWave network traffic.
         payload_str = msg.payload.decode().strip()
         
-        # 0. SAFETY CHECK: Ensure valid JSON wrapper
+        # Ensure valid JSON wrapper
         if not payload_str or not payload_str.startswith('{'):
             return 
             
-        # 2. DISCOVERY BYPASS
-        # If the message is not for our current topic, check if it's an Inovelli device.
-        # We do a fast string search for "mmWaveVersion" before doing expensive JSON parsing.
+        # Bypass JSON parsing for discovery if the message is from an irrelevant device
         if topic != current_topic:
             if "mmWaveVersion" not in payload_str:
-                return # Ignore all other Zigbee devices (bulbs, temp sensors, etc.)
+                return 
                 
-            # It IS an mmWave device. Now we parse the JSON to add it to the list.
             payload = json.loads(payload_str)
             topic_parts = topic.split('/')
             if len(topic_parts) == 2:
@@ -76,24 +77,22 @@ def on_message(client, userdata, msg):
                     print(f"Discovered Inovelli mmWave Switch: {friendly_name}", flush=True)
                     device_list[friendly_name] = {'friendly_name': friendly_name, 'topic': topic, 'interference_zones': []}
                     socketio.emit('device_list', [d for d in device_list.values()])
-            return # Done with discovery
+            return 
 
-        # 3. CURRENT DEVICE PROCESSING
-        # If we reach here, the topic matches our currently monitored switch.
-        # Now it is safe to parse the JSON.
+        # --- CURRENT DEVICE PROCESSING ---
         payload = json.loads(payload_str)
 
         fname = next((name for name, data in device_list.items() if data['topic'] == current_topic), None)
         if not fname: return
 
-        # --- EMIT FULL CONFIG TO UI (For both mmWave and Standard switches) ---
+        # Emit standard HA states (Occupancy, Illuminance, etc.)
         if "state" in payload or "illuminance" in payload:
             socketio.emit('device_config', payload)
 
-        # --- CPU SAVER: IGNORE RAW BYTE PARSING FOR NON-MMWAVE SWITCHES ---
+        # Ignore raw byte processing for standard switches
         is_mmwave = payload.get("mmWaveVersion") is not None
 
-        # --- A) EXTRACT STANDARD DETECTION ZONE ---
+        # --- EXTRACT STANDARD DETECTION ZONE ---
         if "mmWaveDepthMax" in payload:
             zone_config = {
                 "x_min": int(payload.get("mmWaveWidthMin", -400) or -400),
@@ -102,25 +101,25 @@ def on_message(client, userdata, msg):
                 "y_max": int(payload.get("mmWaveDepthMax", 600) or 600)
             }
             
-            # Cache and emit to UI if changed
+            # Cache and emit to UI if the zone has changed
             if 'zone_config' not in device_list[fname] or device_list[fname]['zone_config'] != zone_config:
                 device_list[fname]['zone_config'] = zone_config
                 socketio.emit('zone_config', zone_config)
 
-        # --- B) PROCESS RAW BYTES (ZCL Cluster 0xFC32) ---
+        # --- PROCESS RAW BYTES (ZCL Cluster 0xFC32) ---
         if payload.get("0") == 29 and payload.get("1") == 47 and payload.get("2") == 18:
             cmd_id = payload.get("4")
             
-            # Bitwise parser for Signed Int16 (Fixed NoneType handling)
+            # Bitwise parser for Signed Int16
             def get_int16(idx):
                 low = int(payload.get(str(idx)) or 0)
                 high = int(payload.get(str(idx+1)) or 0)
                 val = (high << 8) | low
                 return val if val < 32768 else val - 65536
 
-            # --- 0x01: Report Target Info (Movement Data) ---
+            # --- 0x01: Target Info Reporting (Movement Data) ---
             if cmd_id == 1:
-                # CPU THROTTLE: 10Hz Max
+                # Throttle UI updates to 10Hz Max
                 current_time = time.time()
                 if (current_time - last_update_time) < 0.1:
                     return 
@@ -140,20 +139,18 @@ def on_message(client, userdata, msg):
                     })
                     offset += 9
                 
-                # Send to browser
                 socketio.emit('new_data', {"seq": seq_num, "targets": targets})
 
-                # MEMORY LEAK FIX: Explicitly delete the array to free RAM immediately
+                # Explicitly delete the array to clear the RAM buffer
                 del targets
 
-            # --- 0x02: Report Interference Area ---
+            # --- 0x02: Interference Area Reporting ---
             elif cmd_id == 2 and fname:
                 try:
                     int_zones = []
-                    offset = 6  # Start reading coordinate data at Key 6
-                    num_zones = payload.get("5", 0) # Key 5 contains the Number of Zones
+                    offset = 6  
+                    num_zones = payload.get("5", 0) 
                     
-                    # Loop based on actual number of zones
                     for _ in range(num_zones):
                         if str(offset+11) not in payload: break
                         x_min = get_int16(offset)
@@ -161,19 +158,17 @@ def on_message(client, userdata, msg):
                         y_min = get_int16(offset+4)
                         y_max = get_int16(offset+6)
                         
-                        # Only add zones with valid coordinates
+                        # Only append zones with valid non-zero configurations
                         if x_max > x_min and y_max > y_min:
                             int_zones.append({"x_min": x_min, "x_max": x_max, "y_min": y_min, "y_max": y_max})
                         
                         # Standard offset for current firmware is 12 bytes per zone
                         offset += 12
                     
-                    # Cache and emit interference zones
                     device_list[fname]['interference_zones'] = int_zones
                     print(f"Interference Zones Updated for {fname}: {int_zones}", flush=True)
                     socketio.emit('interference_zones', int_zones)
 
-                    # MEMORY LEAK FIX: Clean up
                     del int_zones
                     
                 except Exception as parse_error:
@@ -223,30 +218,31 @@ def handle_update_parameter(data):
     param = data.get('param')
     value = data.get('value')
 
-    # Convert numeric strings back to ints
+    # Convert numeric strings back to integers
     if isinstance(value, str) and value.lstrip('-').isnumeric():
         value = int(value)
 
-    # Validated Z2M JSON Structure for setting attributes
     control_payload = { param: value }
-    
     set_topic = f"{current_topic}/set"
     mqtt_client.publish(set_topic, json.dumps(control_payload))
     print(f"Updated {param} to {value} via {set_topic}", flush=True)
 
 
-# --- FORCE SYNC (FETCH LATEST STATE) ---
+# --- FORCE SYNC ---
 @socketio.on('force_sync')
 def handle_force_sync():
+    """
+    Sends an empty payload to the /get topic. 
+    Forces Zigbee2MQTT to query the switch directly and refresh all attributes.
+    """
     if not current_topic: return
     
-    # 1. INSTANT UI RESET: Send the cached coordinates to the browser immediately
+    # Instant UI reset using cached data
     device_data = next((data for data in device_list.values() if data['topic'] == current_topic), None)
     if device_data:
         if 'zone_config' in device_data: socketio.emit('zone_config', device_data['zone_config'])
         if 'interference_zones' in device_data: socketio.emit('interference_zones', device_data['interference_zones'])
 
-    # 2. FETCH LATEST FROM SWITCH: Ask Z2M to read the live values
     get_topic = f"{current_topic}/get"
     payload = {
         "state": "",
@@ -274,9 +270,11 @@ def handle_force_sync():
 # --- CONTROL COMMAND SENDER ---
 @socketio.on('send_command')
 def handle_command(cmd_action):
+    """
+    Sends Z2M mapped strings for standard control commands.
+    """
     if not current_topic: return
     
-    # Map UI button integers to the exact Zigbee2MQTT ZCL strings
     action_map = {
         0: "reset_mmwave_module",
         1: "set_interference",
@@ -290,7 +288,6 @@ def handle_command(cmd_action):
         print(f"Unknown command action: {cmd_action}", flush=True)
         return
 
-    # Validated Z2M JSON Structure
     control_payload = {
         "mmwave_control_commands": {
             "controlID": cmd_string
@@ -302,8 +299,8 @@ def handle_command(cmd_action):
     print(f"Sent mmWave Command: {cmd_string} to {set_topic}", flush=True)
 
 
-# --- MEMORY LEAK WATCHDOG ---
-# Forces Python to clear orphaned socket/thread memory every 30 seconds
+# --- RESOURCE MANAGEMENT ---
+# Explicitly clears orphaned Python references generated by the asynchronous socket loop
 def memory_cleanup():
     while True:
         time.sleep(30) 
