@@ -134,6 +134,10 @@
         .schema-composite-block { border: 1px solid #3a3a3a; border-radius: 4px; padding: 8px; margin-bottom: 8px; background: #1f1f1f; }
         .schema-composite-title { color: #00bcd4; font-weight: 600; margin-bottom: 6px; font-size: 0.86em; }
         .schema-composite-note { color: #777; font-size: 0.78em; margin-top: 4px; }
+        .led-color-select { width: 176px; }
+        .slider-control { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 190px; }
+        .slider-control input[type="range"] { width: 128px; accent-color: #00bcd4; }
+        .slider-value { min-width: 42px; text-align: right; color: #9ec8cf; font-family: Consolas, 'Courier New', monospace; font-size: 0.8em; }
 
         .target-report-card { background: linear-gradient(135deg, rgba(0, 188, 212, 0.14), rgba(24, 24, 24, 0.92)); border: 1px solid rgba(0, 188, 212, 0.45); border-radius: 8px; padding: 10px 12px; }
         .target-report-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
@@ -782,6 +786,18 @@
             return field.name || 'Unknown';
         }
 
+        const defaultLedColorPresets = [
+            { name: 'Red', value: 0 },
+            { name: 'Orange', value: 21 },
+            { name: 'Yellow', value: 42 },
+            { name: 'Green', value: 85 },
+            { name: 'Cyan', value: 127 },
+            { name: 'Blue', value: 170 },
+            { name: 'Violet', value: 212 },
+            { name: 'Pink', value: 234 },
+            { name: 'White', value: 255 }
+        ];
+
         const concisePresenceDescriptions = {
             mmwaveControlWiredDevice: 'Choose how presence controls the wired load.',
             mmWaveRoomSizePreset: 'Pick a room profile, or use Custom for manual zone tuning.',
@@ -793,11 +809,167 @@
             mmWaveVersion: 'Current firmware version of the mmWave module.'
         };
 
+        function isLedField(field) {
+            if (!field) return false;
+            const tabKey = mapFieldTabToKey(field, 'fields');
+            if (tabKey === 'led') return true;
+            const parentTab = String(field.parent_tab || '').toLowerCase();
+            if (parentTab.includes('led')) return true;
+            const parentName = String(field.parent_name || '').toLowerCase();
+            if (parentName.includes('led')) return true;
+            const fieldName = String(field.name || '').toLowerCase();
+            return fieldName.includes('led') || fieldName.includes('notification');
+        }
+
+        function isLedColorField(field) {
+            if (!field || field.type !== 'numeric' || !isLedField(field)) return false;
+            return String(field.name || '').toLowerCase().includes('color');
+        }
+
+        function isLedBrightnessField(field) {
+            if (!field || field.type !== 'numeric' || !isLedField(field)) return false;
+            const name = String(field.name || '').toLowerCase();
+            return name.includes('intensity') || name === 'level';
+        }
+
+        function fieldUsesSyncDefaultColor(field) {
+            const name = String((field && field.name) || '').toLowerCase();
+            if (/^defaultled[1-7]colorwhen(on|off)$/.test(name)) return true;
+            const description = String((field && field.description) || '').toLowerCase();
+            return description.includes('synchronization with default all led strip color parameter');
+        }
+
+        function normalizeColorPreset(preset) {
+            if (!preset || preset.value === undefined || preset.value === null) return null;
+            const numericValue = Number(preset.value);
+            if (!Number.isFinite(numericValue)) return null;
+            return {
+                value: numericValue,
+                name: preset.name ? String(preset.name) : `Value ${numericValue}`
+            };
+        }
+
+        function getLedColorPresets(field) {
+            const explicitPresets = Array.isArray(field && field.presets) ? field.presets.map(normalizeColorPreset).filter(Boolean) : [];
+            if (explicitPresets.length > 0) return explicitPresets;
+
+            if (fieldUsesSyncDefaultColor(field)) {
+                return defaultLedColorPresets
+                    .filter(preset => preset.value !== 255)
+                    .concat([{ name: 'Sync Default', value: 255 }]);
+            }
+
+            return defaultLedColorPresets.slice();
+        }
+
+        function setLedColorSelectValue(select, value) {
+            if (!select || select.tagName !== 'SELECT') return;
+            const normalizedValue = value === undefined || value === null ? '' : String(value);
+
+            Array.from(select.options)
+                .filter(option => option.dataset.customColorValue === '1')
+                .forEach(option => option.remove());
+
+            if (!normalizedValue) {
+                select.selectedIndex = -1;
+                return;
+            }
+
+            const existingOption = Array.from(select.options).find(option => option.value === normalizedValue);
+            if (existingOption) {
+                select.value = normalizedValue;
+                return;
+            }
+
+            const customOption = document.createElement('option');
+            customOption.value = normalizedValue;
+            customOption.textContent = `Current (${normalizedValue})`;
+            customOption.dataset.customColorValue = '1';
+            select.appendChild(customOption);
+            select.value = normalizedValue;
+        }
+
+        function formatLedSliderValue(input) {
+            if (!input) return '--';
+            const rawValue = input.value === '' ? '--' : String(input.value);
+            const maxValue = Number(input.max);
+            if (rawValue !== '--' && maxValue === 101 && Number(rawValue) === 101) {
+                return 'Sync';
+            }
+            return rawValue === '--' ? '--' : `${rawValue}%`;
+        }
+
+        function refreshLedSliderDisplay(input) {
+            if (!input) return;
+            const targetId = input.dataset.sliderValueTarget;
+            if (!targetId) return;
+            const valueElement = document.getElementById(targetId);
+            if (!valueElement) return;
+            valueElement.textContent = formatLedSliderValue(input);
+        }
+
+        function createLedColorPresetControl(field, inputId) {
+            const select = document.createElement('select');
+            select.className = 'control-select led-color-select';
+            select.id = inputId;
+            select.setAttribute('data-param', field.name);
+            select.setAttribute('data-field-type', 'numeric');
+            select.setAttribute('data-led-color-select', '1');
+
+            getLedColorPresets(field).forEach(preset => {
+                const option = document.createElement('option');
+                option.value = String(preset.value);
+                option.textContent = preset.name;
+                select.appendChild(option);
+            });
+            return select;
+        }
+
+        function createLedBrightnessControl(field, inputId) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'slider-control';
+
+            const input = document.createElement('input');
+            input.type = 'range';
+            input.id = inputId;
+            input.setAttribute('data-param', field.name);
+            input.setAttribute('data-field-type', 'numeric');
+            input.setAttribute('data-led-brightness-slider', '1');
+            if (field.value_min !== null && field.value_min !== undefined) input.min = field.value_min;
+            if (field.value_max !== null && field.value_max !== undefined) input.max = field.value_max;
+            if (field.value_step !== null && field.value_step !== undefined) input.step = field.value_step;
+            else input.step = '1';
+            if (field.value_min !== null && field.value_min !== undefined) input.value = String(field.value_min);
+
+            const value = document.createElement('span');
+            value.className = 'slider-value';
+            value.id = `${inputId}__value`;
+            input.dataset.sliderValueTarget = value.id;
+
+            input.addEventListener('input', () => refreshLedSliderDisplay(input));
+            input.addEventListener('change', () => refreshLedSliderDisplay(input));
+
+            wrapper.appendChild(input);
+            wrapper.appendChild(value);
+            refreshLedSliderDisplay(input);
+            return wrapper;
+        }
+
+        function getConciseLedDescription(field) {
+            if (!field) return '';
+            if (isLedColorField(field)) return 'Choose an LED color preset.';
+            if (isLedBrightnessField(field)) return 'Adjust LED brightness.';
+            return field.description || '';
+        }
+
         function getConciseFieldDescription(field) {
             if (!field || !field.name) return field && field.description ? field.description : '';
             const tabKey = mapFieldTabToKey(field, 'fields');
             if (tabKey === 'presence') {
                 return concisePresenceDescriptions[field.name] || field.description || '';
+            }
+            if (tabKey === 'led') {
+                return getConciseLedDescription(field);
             }
             return field.description || '';
         }
@@ -858,6 +1030,12 @@
             }
 
             if (field.type === 'numeric') {
+                if (isLedColorField(field)) {
+                    return createLedColorPresetControl(field, inputId);
+                }
+                if (isLedBrightnessField(field)) {
+                    return createLedBrightnessControl(field, inputId);
+                }
                 const input = document.createElement('input');
                 input.type = 'number';
                 input.id = inputId;
@@ -931,19 +1109,34 @@
             return `${fieldName}__${featureName}`;
         }
 
-        function createCompositeFeatureInput(fieldName, feature) {
+        function resolveCompositeControlInput(control, inputId) {
+            if (!control) return null;
+            if (control.id === inputId) return control;
+            if (typeof control.querySelector === 'function') {
+                return control.querySelector(`[id="${inputId}"]`);
+            }
+            return null;
+        }
+
+        function createCompositeFeatureInput(parentField, feature) {
+            const fieldName = parentField && parentField.name ? parentField.name : '';
             const featureField = {
                 ...feature,
                 name: feature.name,
                 value_on: feature.value_on,
                 value_off: feature.value_off,
+                parent_tab: parentField ? parentField.tab : '',
+                parent_name: fieldName,
             };
             const inputId = getCompositeFeatureInputId(fieldName, feature.name);
-            const input = createSchemaFieldInput(featureField, inputId);
-            input.removeAttribute('data-param');
-            input.setAttribute('data-composite-parent', fieldName);
-            input.setAttribute('data-composite-feature', feature.name);
-            return input;
+            const control = createSchemaFieldInput(featureField, inputId);
+            const controlInput = resolveCompositeControlInput(control, inputId);
+            if (controlInput) {
+                controlInput.removeAttribute('data-param');
+                controlInput.setAttribute('data-composite-parent', fieldName);
+                controlInput.setAttribute('data-composite-feature', feature.name);
+            }
+            return control;
         }
 
         function collectCompositePayload(field) {
@@ -1022,7 +1215,7 @@
                 label.setAttribute('for', getCompositeFeatureInputId(field.name, feature.name));
                 label.textContent = `${feature.label || feature.name}${feature.unit ? ` (${feature.unit})` : ''}:`;
                 row.appendChild(label);
-                row.appendChild(createCompositeFeatureInput(field.name, feature));
+                row.appendChild(createCompositeFeatureInput(field, feature));
                 block.appendChild(row);
             });
 
@@ -1156,7 +1349,9 @@
                     if (!(key in compositeValue)) return;
                     const value = compositeValue[key];
 
-                    if (input.type === 'checkbox') {
+                    if (input.dataset.ledColorSelect === '1') {
+                        setLedColorSelectValue(input, value);
+                    } else if (input.type === 'checkbox') {
                         input.checked = value === true || value === 'ON' || value === 'true';
                     } else if (input.tagName === 'SELECT' && typeof value === 'boolean') {
                         input.value = String(value);
@@ -1166,6 +1361,10 @@
                         input.value = value;
                     } else {
                         input.value = '';
+                    }
+
+                    if (input.dataset.ledBrightnessSlider === '1') {
+                        refreshLedSliderDisplay(input);
                     }
                 });
             });
@@ -1861,10 +2060,15 @@
                     if (element) {
                         if (element.tagName === 'SPAN') {
                             element.innerText = value;
+                        } else if (element.dataset.ledColorSelect === '1') {
+                            setLedColorSelectValue(element, value);
                         } else if (element.type === 'checkbox') {
                             element.checked = value === true || value === 'ON' || value === 'true';
                         } else {
                             element.value = value;
+                        }
+                        if (element.dataset.ledBrightnessSlider === '1') {
+                            refreshLedSliderDisplay(element);
                         }
                     }
                 }

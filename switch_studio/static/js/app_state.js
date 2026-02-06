@@ -42,10 +42,57 @@
         return String(a) === String(b);
     }
 
+    function syncLedColorSelect(element, value) {
+        if (!element || element.tagName !== 'SELECT') return;
+        const normalizedValue = value === undefined || value === null ? '' : String(value);
+
+        Array.from(element.options)
+            .filter((option) => option.dataset.customColorValue === '1')
+            .forEach((option) => option.remove());
+
+        if (!normalizedValue) {
+            element.selectedIndex = -1;
+            return;
+        }
+
+        const existingOption = Array.from(element.options).find((option) => option.value === normalizedValue);
+        if (existingOption) {
+            element.value = normalizedValue;
+            return;
+        }
+
+        const customOption = document.createElement('option');
+        customOption.value = normalizedValue;
+        customOption.textContent = `Current (${normalizedValue})`;
+        customOption.dataset.customColorValue = '1';
+        element.appendChild(customOption);
+        element.value = normalizedValue;
+    }
+
+    function refreshLedSliderDisplay(element) {
+        if (!element || element.type !== 'range') return;
+        const targetId = element.dataset.sliderValueTarget;
+        if (!targetId) return;
+        const valueElement = document.getElementById(targetId);
+        if (!valueElement) return;
+
+        const rawValue = element.value === '' ? '--' : String(element.value);
+        const maxValue = Number(element.max);
+        if (rawValue !== '--' && maxValue === 101 && Number(rawValue) === 101) {
+            valueElement.innerText = 'Sync';
+            return;
+        }
+        valueElement.innerText = rawValue === '--' ? '--' : `${rawValue}%`;
+    }
+
     function setInputValue(element, value) {
         if (!element) return;
         if (element.tagName === 'SPAN') {
             element.innerText = value === undefined || value === null ? '--' : String(value);
+            return;
+        }
+        if (element.tagName === 'SELECT' && element.dataset.ledColorSelect === '1') {
+            syncLedColorSelect(element, value);
             return;
         }
         if (element.type === 'checkbox') {
@@ -64,6 +111,9 @@
             element.value = '';
         } else {
             element.value = value;
+        }
+        if (element.type === 'range' && element.dataset.ledBrightnessSlider === '1') {
+            refreshLedSliderDisplay(element);
         }
     }
 
