@@ -72,14 +72,14 @@ function loadTabsModule(options) {
     };
 
     const buttons = [
-        new MockElement({ 'data-tab-target': 'presence' }),
         new MockElement({ 'data-tab-target': 'zones' }),
         new MockElement({ 'data-tab-target': 'load' }),
+        new MockElement({ 'data-tab-target': 'led' }),
     ];
     const panels = [
-        new MockElement({ 'data-tab-panels': 'presence' }),
         new MockElement({ 'data-tab-panels': 'zones' }),
         new MockElement({ 'data-tab-panels': 'load' }),
+        new MockElement({ 'data-tab-panels': 'led' }),
         new MockElement({ 'data-tab-panels': '' }),
     ];
 
@@ -116,19 +116,19 @@ test('tab module applies default tab, toggles panels, and persists on click', ()
     tabs.init({ root, defaultTab: 'live' });
 
     assert.equal(tabs.getActiveTab(), 'zones');
-    assert.equal(buttons[1].classList.contains('active'), true);
-    assert.equal(buttons[0].classList.contains('active'), false);
-    assert.equal(panels[1].style.display, '');
-    assert.equal(panels[0].style.display, 'none');
-    assert.equal(storageMap.get('switchStudio.activeTab'), 'zones');
-
-    buttons[0].click();
-    assert.equal(tabs.getActiveTab(), 'presence');
     assert.equal(buttons[0].classList.contains('active'), true);
     assert.equal(buttons[1].classList.contains('active'), false);
-    assert.equal(panels[1].style.display, 'none');
     assert.equal(panels[0].style.display, '');
-    assert.equal(storageMap.get('switchStudio.activeTab'), 'presence');
+    assert.equal(panels[1].style.display, 'none');
+    assert.equal(storageMap.get('switchStudio.activeTab'), 'zones');
+
+    buttons[1].click();
+    assert.equal(tabs.getActiveTab(), 'load');
+    assert.equal(buttons[1].classList.contains('active'), true);
+    assert.equal(buttons[0].classList.contains('active'), false);
+    assert.equal(panels[0].style.display, 'none');
+    assert.equal(panels[1].style.display, '');
+    assert.equal(storageMap.get('switchStudio.activeTab'), 'load');
 });
 
 test('tab module restores persisted tab from storage', () => {
@@ -136,8 +136,8 @@ test('tab module restores persisted tab from storage', () => {
     tabs.init({ root, defaultTab: 'live' });
 
     assert.equal(tabs.getActiveTab(), 'zones');
-    assert.equal(buttons[1].classList.contains('active'), true);
-    assert.equal(panels[1].style.display, '');
-    assert.equal(panels[0].style.display, 'none');
+    assert.equal(buttons[0].classList.contains('active'), true);
+    assert.equal(panels[0].style.display, '');
+    assert.equal(panels[1].style.display, 'none');
     assert.equal(panels[2].style.display, 'none');
 });

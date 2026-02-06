@@ -14,6 +14,7 @@
 
     function normalizeTabName(tabName) {
         if (tabName === 'live') return 'zones';
+        if (tabName === 'presence') return 'zones';
         return tabName;
     }
 

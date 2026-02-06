@@ -201,8 +201,7 @@
     </div>
 
     <div class="tab-bar" id="tabBar" role="tablist" aria-label="Inovelli Switch Studio tabs">
-        <button class="tab-btn" type="button" data-tab-target="presence" role="tab" aria-selected="false">Presence</button>
-        <button class="tab-btn" type="button" data-tab-target="zones" role="tab" aria-selected="true">Zones</button>
+        <button class="tab-btn" type="button" data-tab-target="zones" role="tab" aria-selected="true">Presence & Zones</button>
         <button class="tab-btn" type="button" data-tab-target="load" role="tab" aria-selected="false">Load & Dimming</button>
         <button class="tab-btn" type="button" data-tab-target="led" role="tab" aria-selected="false">LED & Notifications</button>
         <button class="tab-btn" type="button" data-tab-target="buttons" role="tab" aria-selected="false">Buttons & Scenes</button>
@@ -222,7 +221,7 @@
 
     <div class="app-container focus-zones" id="appContainer">
         <div class="main-content">
-            <div id="nonMmwaveWarning" data-tab-panels="presence,zones,load,led,buttons,power,maintenance">WARNING: Standard Switch Detected<br><span style="font-size: 0.8em; font-weight: normal;">This device does not have mmWave hardware.</span></div>
+            <div id="nonMmwaveWarning" data-tab-panels="zones,load,led,buttons,power,maintenance">WARNING: Standard Switch Detected<br><span style="font-size: 0.8em; font-weight: normal;">This device does not have mmWave hardware.</span></div>
 
             <div class="target-report-card" data-tab-panels="zones">
                 <div class="target-report-row">
@@ -282,6 +281,18 @@
                     <span id="illuminanceVal" class="sensor-val">-- lx</span>
                 </div>
             </div>
+
+            <details open class="mobile-collapsed" data-tab-panels="zones">
+                <summary>Presence & Motion Settings</summary>
+                <div class="config-content">
+                    <div style="font-size: 0.84em; color: #93b4bc; margin-bottom: 10px;">
+                        Core motion behavior settings for occupancy timing, sensitivity, and load control.
+                    </div>
+                    <div id="schemaPresenceFields">
+                        <div style="font-size: 0.9em; color: #888;">Loading schema...</div>
+                    </div>
+                </div>
+            </details>
 
             <details open class="mobile-collapsed" id="zoneStatusSection" data-tab-panels="zones">
                 <summary>Zone Status</summary>
@@ -405,21 +416,12 @@
                     
                     <div class="config-title" style="margin-top: 15px; border-top: 1px solid #444; padding-top: 5px;">Radar Map Size (cm)</div>
                     <div class="zone-data-grid">
-                        <div class="zone-input-group"><label>X Min</label><input type="number" id="vizXMin" value="-450"></div>
-                        <div class="zone-input-group"><label>X Max</label><input type="number" id="vizXMax" value="450"></div>
-                        <div class="zone-input-group"><label>Y Min</label><input type="number" id="vizYMin" value="-100"></div>
+                        <div class="zone-input-group"><label>X Min</label><input type="number" id="vizXMin" value="-650"></div>
+                        <div class="zone-input-group"><label>X Max</label><input type="number" id="vizXMax" value="650"></div>
+                        <div class="zone-input-group"><label>Y Min</label><input type="number" id="vizYMin" value="-50"></div>
                         <div class="zone-input-group"><label>Y Max</label><input type="number" id="vizYMax" value="650"></div>
                     </div>
                     <button class="cmd-btn btn-full" onclick="updateRadarScale()" style="margin-top:5px; background: #00bcd4; color: #1a1a1a;">Update Scale</button>
-                </div>
-            </details>
-            
-            <details open class="mobile-collapsed" data-tab-panels="presence">
-                <summary>Presence Controls (Schema)</summary>
-                <div class="config-content">
-                    <div id="schemaPresenceFields">
-                        <div style="font-size: 0.9em; color: #888;">Loading schema...</div>
-                    </div>
                 </div>
             </details>
 
@@ -780,6 +782,26 @@
             return field.name || 'Unknown';
         }
 
+        const concisePresenceDescriptions = {
+            mmwaveControlWiredDevice: 'Choose how presence controls the wired load.',
+            mmWaveRoomSizePreset: 'Pick a room profile, or use Custom for manual zone tuning.',
+            mmWaveHoldTime: 'How long occupancy stays active after motion stops.',
+            mmWaveDetectSensitivity: 'Sensitivity for movement detection.',
+            mmWaveDetectTrigger: 'How quickly movement triggers occupancy.',
+            mmWaveTargetInfoReport: 'Streams live target coordinates to the radar map.',
+            mmWaveStayLife: 'Tuning value for stationary-presence retention.',
+            mmWaveVersion: 'Current firmware version of the mmWave module.'
+        };
+
+        function getConciseFieldDescription(field) {
+            if (!field || !field.name) return field && field.description ? field.description : '';
+            const tabKey = mapFieldTabToKey(field, 'fields');
+            if (tabKey === 'presence') {
+                return concisePresenceDescriptions[field.name] || field.description || '';
+            }
+            return field.description || '';
+        }
+
         function mapFieldTabToKey(field, sourceType) {
             const tab = String((field && field.tab) || '').toLowerCase();
             if (tab === 'presence') return 'presence';
@@ -1078,7 +1100,7 @@
                     }
 
                     container.appendChild(createSchemaFieldRow(field));
-                    createSchemaDescriptionRow(field.description, container);
+                    createSchemaDescriptionRow(getConciseFieldDescription(field), container);
                 });
             });
         }
@@ -1212,9 +1234,9 @@
         let showDetection4 = true;
         
         // Custom Scale Defaults
-        let chartXMin = -450;
-        let chartXMax = 450;
-        let chartYMin = -100;
+        let chartXMin = -650;
+        let chartXMax = 650;
+        let chartYMin = -50;
         let chartYMax = 650;
 
         // Init Settings from LocalStorage
@@ -1324,7 +1346,7 @@
                 type: 'path',
                 xref: 'x',
                 yref: 'y',
-                path: `M ${chartXMin} 0 L 0 ${chartYMax} L ${chartXMax} 0 Z`,
+                path: `M 0 0 L ${chartXMax} ${chartYMax} L ${chartXMin} ${chartYMax} Z`,
                 fillcolor: 'rgba(0, 188, 212, 0.06)',
                 line: { color: 'rgba(0, 188, 212, 0.0)', width: 0 },
                 editable: false,
