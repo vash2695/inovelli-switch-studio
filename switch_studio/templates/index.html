@@ -20,6 +20,29 @@
         #timestamp { color: #ff9800; font-family: monospace; }
         #packetAge { color: #666; font-size: 0.85em; font-family: monospace; min-width: 60px; text-align: left; }
 
+        /* Tabs + Dirty State */
+        .tab-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: #181818; border-top: 1px solid #333; border-bottom: 1px solid #333; overflow-x: auto; }
+        .tab-btn { background: #2b2b2b; color: #bfbfbf; border: 1px solid #444; padding: 6px 12px; border-radius: 999px; cursor: pointer; font-size: 0.85em; }
+        .tab-btn:hover { border-color: #00bcd4; color: #e5fafd; }
+        .tab-btn.active { background: #00bcd4; color: #111; border-color: #00bcd4; font-weight: 600; }
+
+        .dirty-bar { display: flex; justify-content: space-between; align-items: center; gap: 10px; background: #1f1f1f; border-bottom: 1px solid #333; padding: 8px 12px; color: #888; }
+        .dirty-bar.dirty-active { color: #ffcc80; border-bottom-color: #ff9800; }
+        .dirty-actions { display: flex; gap: 8px; }
+        .dirty-btn { background: #2b2b2b; color: #ddd; border: 1px solid #555; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 0.82em; }
+        .dirty-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+        .dirty-btn:not(:disabled):hover { border-color: #00bcd4; color: #fff; }
+        .dirty-btn.apply-btn { border-color: #4caf50; }
+        .dirty-btn.apply-btn:not(:disabled):hover { background: #4caf50; color: #111; }
+
+        /* Toasts */
+        #toastContainer { position: fixed; right: 18px; bottom: 18px; z-index: 2500; display: flex; flex-direction: column; gap: 8px; pointer-events: none; max-width: min(420px, 85vw); }
+        .studio-toast { background: rgba(35, 35, 35, 0.98); border: 1px solid #555; color: #f3f3f3; border-radius: 6px; padding: 10px 12px; box-shadow: 0 8px 20px rgba(0,0,0,0.35); font-size: 0.86em; transition: opacity 0.2s ease, transform 0.2s ease; }
+        .studio-toast.fade-out { opacity: 0; transform: translateY(6px); }
+        .studio-toast-saved { border-color: #4caf50; }
+        .studio-toast-syncing { border-color: #00bcd4; }
+        .studio-toast-error { border-color: #ff5252; }
+
         /* Main Layout Grid */
         .app-container { display: grid; grid-template-columns: 1fr 350px; flex-grow: 1; overflow: hidden; transition: 0.3s; }
         .main-content { display: flex; flex-direction: column; padding: 10px; overflow-y: auto; position: relative; gap: 15px; }
@@ -38,7 +61,7 @@
         details { background: #2b2b2b; border-radius: 6px; border: 1px solid #333; }
         details > summary { font-weight: bold; color: #00bcd4; padding: 12px; cursor: pointer; list-style: none; user-select: none; display: flex; justify-content: space-between; align-items: center; }
         details > summary::-webkit-details-marker { display: none; }
-        details > summary::after { content: '▼'; font-size: 0.8em; color: #666; transition: 0.2s; }
+        details > summary::after { content: 'v'; font-size: 0.8em; color: #666; transition: 0.2s; }
         details[open] > summary::after { transform: rotate(180deg); color: #00bcd4; }
         details[open] > summary { border-bottom: 1px solid #444; }
         .config-content { padding: 12px; }
@@ -89,6 +112,20 @@
         .btn-danger:hover { background: #ff5252; color: white; }
         .btn-full { width: 100%; margin-bottom: 5px; }
 
+        .command-log { background: #1a1a1a; border: 1px solid #333; border-radius: 4px; padding: 8px; max-height: 150px; overflow-y: auto; font-size: 0.82em; font-family: Consolas, 'Courier New', monospace; }
+        .command-log-empty { color: #777; font-style: italic; }
+        .command-log-entry { margin-bottom: 5px; }
+        .command-log-entry:last-child { margin-bottom: 0; }
+        .command-log-entry.log-syncing { color: #00bcd4; }
+        .command-log-entry.log-saved { color: #4caf50; }
+        .command-log-entry.log-error { color: #ff5252; }
+        .command-log-entry.log-info { color: #bbb; }
+
+        .schema-section-title { font-size: 0.85em; color: #9ec8cf; margin: 8px 0 6px 0; border-bottom: 1px dashed #3a3a3a; padding-bottom: 4px; }
+        .schema-composite-block { border: 1px solid #3a3a3a; border-radius: 4px; padding: 8px; margin-bottom: 8px; background: #1f1f1f; }
+        .schema-composite-title { color: #00bcd4; font-weight: 600; margin-bottom: 6px; font-size: 0.86em; }
+        .schema-composite-note { color: #777; font-size: 0.78em; margin-top: 4px; }
+
         #zoneStatus { display: none; position: fixed; top: 20px; right: 20px; background: #333; color: white; padding: 15px 20px; border-radius: 6px; z-index: 1000; }
 
         /* Non-mmWave Overlay Warning */
@@ -122,6 +159,10 @@
             .header h2 { display: none; } 
             .header-controls { width: 100%; justify-content: space-between; }
             select#deviceSelect { flex-grow: 1; max-width: unset; margin-right: 5px; }
+            .tab-bar { gap: 6px; padding: 8px 10px; }
+            .tab-btn { padding: 5px 10px; font-size: 0.8em; }
+            .dirty-bar { padding: 8px 10px; flex-wrap: wrap; }
+            .dirty-actions { width: 100%; justify-content: flex-end; }
         }
     </style>
 </head>
@@ -130,7 +171,7 @@
         <h2>Inovelli Switch Studio</h2>
         <div class="header-controls">
             <select id="deviceSelect"><option value="" disabled selected>Loading devices...</option></select>
-            <button class="cmd-btn" id="btnForceSync" onclick="if(isEditingZone) cancelZoneEdit(); else { socket.emit('request_devices'); socket.emit('force_sync'); } packetInfo.innerText = 'Syncing...';">🔄 Force Sync</button>
+            <button class="cmd-btn" id="btnForceSync" onclick="handleForceSyncClick()">Force Sync</button>
         </div>
     </div>
 
@@ -141,20 +182,39 @@
         <span id="packetAge"></span>
     </div>
 
+    <div class="tab-bar" role="tablist" aria-label="Inovelli Switch Studio tabs">
+        <button class="tab-btn" type="button" data-tab-target="live" role="tab" aria-selected="true">Live</button>
+        <button class="tab-btn" type="button" data-tab-target="presence" role="tab" aria-selected="false">Presence</button>
+        <button class="tab-btn" type="button" data-tab-target="zones" role="tab" aria-selected="false">Zones</button>
+        <button class="tab-btn" type="button" data-tab-target="load" role="tab" aria-selected="false">Load & Dimming</button>
+        <button class="tab-btn" type="button" data-tab-target="led" role="tab" aria-selected="false">LED & Notifications</button>
+        <button class="tab-btn" type="button" data-tab-target="buttons" role="tab" aria-selected="false">Buttons & Scenes</button>
+        <button class="tab-btn" type="button" data-tab-target="power" role="tab" aria-selected="false">Power & Device</button>
+        <button class="tab-btn" type="button" data-tab-target="maintenance" role="tab" aria-selected="false">Maintenance</button>
+    </div>
+    <div class="dirty-bar" id="dirtyBar">
+        <span id="dirtyText">No pending changes</span>
+        <div class="dirty-actions">
+            <button class="dirty-btn" id="btnDiscardChanges" type="button" disabled>Discard</button>
+            <button class="dirty-btn apply-btn" id="btnApplyChanges" type="button" disabled>Apply</button>
+        </div>
+    </div>
+
     <div id="zoneStatus"></div>
+    <div id="toastContainer"></div>
 
     <div class="app-container">
         <div class="main-content">
-            <div id="nonMmwaveWarning">⚠ Standard Switch Detected<br><span style="font-size: 0.8em; font-weight: normal;">This device does not have mmWave hardware.</span></div>
+            <div id="nonMmwaveWarning" data-tab-panels="live,presence,zones,load,led,buttons,power,maintenance">WARNING: Standard Switch Detected<br><span style="font-size: 0.8em; font-weight: normal;">This device does not have mmWave hardware.</span></div>
             
-            <details open id="chartContainer">
+            <details open id="chartContainer" data-tab-panels="live,zones">
                 <summary>Live Radar Map</summary>
                 <div class="config-content">
                     <div id="chart"></div>
                 </div>
             </details>
 
-            <div class="table-container">
+            <div class="table-container" data-tab-panels="live,zones">
                 <table>
                     <thead>
                         <tr>
@@ -174,7 +234,7 @@
 
         <div class="sidebar" id="configSidebar">
             
-            <div class="config-group" style="background: #1e1e1e; border-color: #00bcd4;">
+            <div class="config-group" style="background: #1e1e1e; border-color: #00bcd4;" data-tab-panels="live">
                 <div class="config-title" style="color: #00bcd4;">Live Sensors</div>
                 <div class="sensor-row">
                     <span style="color: #ccc;">Area 1 (Primary):</span>
@@ -186,9 +246,13 @@
                 </div>
             </div>
 
-            <details open class="mobile-collapsed" id="zoneStatusSection">
+            <details open class="mobile-collapsed" id="zoneStatusSection" data-tab-panels="live,zones">
                 <summary>Zone Status</summary>
                 <div class="config-content">
+                    <div class="sensor-row">
+                        <span style="color: #ccc;">Area 1:</span>
+                        <span id="area1Val" class="zone-badge">CLEAR</span>
+                    </div>
                     <div class="sensor-row">
                         <span style="color: #ccc;">Area 2:</span>
                         <span id="area2Val" class="zone-badge">CLEAR</span>
@@ -204,7 +268,7 @@
                 </div>
             </details>
 
-            <details open class="mobile-collapsed">
+            <details open class="mobile-collapsed" data-tab-panels="zones">
                 <summary>Zone Editor</summary>
                 <div class="config-content">
                     <div style="margin-bottom: 10px; font-size: 0.9em; color: #ccc;">Select a zone to view, draw, or edit.</div>
@@ -250,7 +314,7 @@
                 </div>
             </details>
 
-            <details open class="mobile-collapsed">
+            <details open class="mobile-collapsed" data-tab-panels="zones">
                 <summary>Studio View Settings</summary>
                 <div class="config-content">
                     
@@ -313,7 +377,7 @@
                 </div>
             </details>
             
-            <details open class="mobile-collapsed">
+            <details open class="mobile-collapsed" data-tab-panels="presence">
                 <summary>Presence Controls (Schema)</summary>
                 <div class="config-content">
                     <div id="schemaPresenceFields">
@@ -322,7 +386,47 @@
                 </div>
             </details>
 
-            <details open class="mobile-collapsed">
+            <details open class="mobile-collapsed" data-tab-panels="load">
+                <summary>Load & Dimming (Schema)</summary>
+                <div class="config-content">
+                    <div id="schemaLoadFields">
+                        <div style="font-size: 0.9em; color: #888;">Loading schema...</div>
+                    </div>
+                </div>
+            </details>
+
+            <details open class="mobile-collapsed" data-tab-panels="led">
+                <summary>LED & Notifications (Schema)</summary>
+                <div class="config-content">
+                    <div id="schemaLedFields">
+                        <div style="font-size: 0.9em; color: #888;">Loading schema...</div>
+                    </div>
+                </div>
+            </details>
+
+            <details open class="mobile-collapsed" data-tab-panels="buttons">
+                <summary>Buttons & Scenes (Schema)</summary>
+                <div class="config-content">
+                    <div id="schemaButtonFields">
+                        <div style="font-size: 0.9em; color: #888;">Loading schema...</div>
+                    </div>
+                </div>
+            </details>
+
+            <details open class="mobile-collapsed" data-tab-panels="power">
+                <summary>Power & Device (Schema)</summary>
+                <div class="config-content">
+                    <div id="schemaPowerFields">
+                        <div style="font-size: 0.9em; color: #888;">Loading schema...</div>
+                    </div>
+                    <div class="config-title" style="margin-top: 12px;">Runtime Options</div>
+                    <div id="schemaOptionFields">
+                        <div style="font-size: 0.9em; color: #888;">Loading options...</div>
+                    </div>
+                </div>
+            </details>
+
+            <details open class="mobile-collapsed" data-tab-panels="maintenance,zones">
                 <summary>Maintenance</summary>
                 <div class="config-content">
                     <button class="cmd-btn btn-full" onclick="sendCommand(1)">Auto-Config Interference</button>
@@ -330,11 +434,18 @@
                     <div style="height: 10px;"></div>
                     <button class="cmd-btn btn-full" onclick="sendCommand(4)">Reset Detection Zones</button>
                     <button class="cmd-btn btn-full" onclick="sendCommand(5)">Clear Stay Zones</button>
+                    <div class="config-title" style="margin-top: 12px;">Command Feedback</div>
+                    <div id="commandLog" class="command-log">
+                        <div class="command-log-empty">No command activity yet.</div>
+                    </div>
                 </div>
             </details>
         </div>
     </div>
 
+    <script src="{{ ingress_path }}/static/js/app_tabs.js"></script>
+    <script src="{{ ingress_path }}/static/js/app_state.js"></script>
+    <script src="{{ ingress_path }}/static/js/app_zones.js"></script>
     <script>
         const INGRESS_PATH = "{{ ingress_path }}";
         const socket = io({ path: INGRESS_PATH + '/socket.io' });
@@ -352,6 +463,12 @@
         const btnForceSync = document.getElementById('btnForceSync');
         const occupancyVal = document.getElementById('occupancyVal');
         const illuminanceVal = document.getElementById('illuminanceVal');
+        const dirtyBar = document.getElementById('dirtyBar');
+        const dirtyText = document.getElementById('dirtyText');
+        const btnApplyChanges = document.getElementById('btnApplyChanges');
+        const btnDiscardChanges = document.getElementById('btnDiscardChanges');
+        const toastContainer = document.getElementById('toastContainer');
+        const commandLog = document.getElementById('commandLog');
 
         // Visualizer Scale Inputs
         const vizXMin = document.getElementById('vizXMin');
@@ -399,17 +516,71 @@
         const editZMin = document.getElementById('editZMin');
         const editZMax = document.getElementById('editZMax');
         const schemaPresenceFields = document.getElementById('schemaPresenceFields');
+        const schemaLoadFields = document.getElementById('schemaLoadFields');
+        const schemaLedFields = document.getElementById('schemaLedFields');
+        const schemaButtonFields = document.getElementById('schemaButtonFields');
+        const schemaPowerFields = document.getElementById('schemaPowerFields');
+        const schemaOptionFields = document.getElementById('schemaOptionFields');
 
         let schemaModel = null;
         let schemaFieldMap = {};
+        let schemaCompositeMap = {};
+        let zoneModule = null;
+
+        if (window.SwitchStudioTabs && typeof window.SwitchStudioTabs.init === 'function') {
+            window.SwitchStudioTabs.init({
+                defaultTab: 'live',
+                onTabChange: () => {
+                    setTimeout(() => {
+                        const chartDiv = document.getElementById('chart');
+                        if (chartDiv && chartDiv.data) {
+                            Plotly.Plots.resize(chartDiv);
+                        }
+                    }, 40);
+                }
+            });
+        }
+
+        if (window.SwitchStudioState && typeof window.SwitchStudioState.init === 'function') {
+            window.SwitchStudioState.init({
+                socket: socket,
+                packetInfoEl: packetInfo,
+                dirtyBarEl: dirtyBar,
+                dirtyTextEl: dirtyText,
+                applyBtnEl: btnApplyChanges,
+                discardBtnEl: btnDiscardChanges,
+                toastContainerEl: toastContainer
+            });
+        }
 
         function getInputValueForEmit(input) {
+            if (!input) return '';
             if (input.type === 'checkbox') return input.checked;
-            if (input.dataset.fieldType === 'numeric') {
+
+            const fieldType = input.dataset.fieldType;
+            if (fieldType === 'numeric') {
                 if (input.value === '') return '';
                 const parsed = Number(input.value);
                 return Number.isFinite(parsed) ? parsed : input.value;
             }
+
+            if (fieldType === 'list') {
+                const raw = (input.value || '').trim();
+                if (!raw) return [];
+                const itemType = input.dataset.itemType || '';
+                return raw
+                    .split(',')
+                    .map(v => v.trim())
+                    .filter(Boolean)
+                    .map(v => {
+                        if (itemType === 'numeric') {
+                            const n = Number(v);
+                            return Number.isFinite(n) ? n : v;
+                        }
+                        return v;
+                    });
+            }
+
             return input.value;
         }
 
@@ -418,11 +589,27 @@
             return field.name || 'Unknown';
         }
 
-        function createSchemaFieldInput(field) {
+        function mapFieldTabToKey(field, sourceType) {
+            const tab = String((field && field.tab) || '').toLowerCase();
+            if (tab === 'presence') return 'presence';
+            if (tab === 'zones') return 'zones';
+            if (tab === 'live') return 'live';
+            if (tab === 'load & dimming') return 'load';
+            if (tab === 'led & notifications') return 'led';
+            if (tab === 'buttons & scenes') return 'buttons';
+            if (tab === 'power & device') return 'power';
+            if (tab === 'advanced') return 'power';
+            if (sourceType === 'options') return 'power';
+            return 'power';
+        }
+
+        function createSchemaFieldInput(field, inputIdOverride) {
+            const inputId = inputIdOverride || field.name;
+
             if (field.type === 'enum') {
                 const select = document.createElement('select');
                 select.className = 'control-select';
-                select.id = field.name;
+                select.id = inputId;
                 select.setAttribute('data-param', field.name);
                 select.setAttribute('data-field-type', field.type);
                 (field.values || []).forEach(optionValue => {
@@ -437,7 +624,7 @@
             if (field.type === 'binary') {
                 const select = document.createElement('select');
                 select.className = 'control-select';
-                select.id = field.name;
+                select.id = inputId;
                 select.setAttribute('data-param', field.name);
                 select.setAttribute('data-field-type', field.type);
 
@@ -460,12 +647,26 @@
             if (field.type === 'numeric') {
                 const input = document.createElement('input');
                 input.type = 'number';
-                input.id = field.name;
+                input.id = inputId;
                 input.setAttribute('data-param', field.name);
                 input.setAttribute('data-field-type', field.type);
                 if (field.value_min !== null && field.value_min !== undefined) input.min = field.value_min;
                 if (field.value_max !== null && field.value_max !== undefined) input.max = field.value_max;
                 if (field.value_step !== null && field.value_step !== undefined) input.step = field.value_step;
+                return input;
+            }
+
+            if (field.type === 'list') {
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.id = inputId;
+                input.className = 'full-width-select';
+                input.placeholder = 'comma-separated values';
+                input.setAttribute('data-param', field.name);
+                input.setAttribute('data-field-type', field.type);
+                if (field.item_type && field.item_type.type) {
+                    input.setAttribute('data-item-type', field.item_type.type);
+                }
                 return input;
             }
 
@@ -475,66 +676,285 @@
             return unsupported;
         }
 
-        function renderSchemaPresenceFields() {
-            if (!schemaPresenceFields) return;
+        function createSchemaDescriptionRow(text, parent) {
+            if (!text) return;
+            const desc = document.createElement('div');
+            desc.style.fontSize = '0.78em';
+            desc.style.color = '#777';
+            desc.style.marginTop = '-4px';
+            desc.style.marginBottom = '8px';
+            desc.textContent = text;
+            parent.appendChild(desc);
+        }
 
-            if (!schemaModel || !Array.isArray(schemaModel.fields)) {
-                schemaPresenceFields.innerHTML = '<div style="font-size: 0.9em; color: #888;">Schema unavailable. Using fallback controls when available.</div>';
+        function createReadOnlyValueElement(field) {
+            const readOnlyVal = document.createElement('span');
+            readOnlyVal.id = field.name;
+            readOnlyVal.className = 'sensor-val';
+            readOnlyVal.style.fontFamily = 'monospace';
+            readOnlyVal.style.color = '#00bcd4';
+            readOnlyVal.innerText = '--';
+            return readOnlyVal;
+        }
+
+        function createSchemaFieldRow(field) {
+            const row = document.createElement('div');
+            row.className = 'input-row';
+
+            const label = document.createElement('label');
+            label.setAttribute('for', field.name);
+            label.textContent = getReadableFieldLabel(field) + (field.unit ? ` (${field.unit})` : '') + ':';
+            row.appendChild(label);
+
+            if (field.can_write) {
+                row.appendChild(createSchemaFieldInput(field));
+            } else {
+                row.appendChild(createReadOnlyValueElement(field));
+            }
+            return row;
+        }
+
+        function getCompositeFeatureInputId(fieldName, featureName) {
+            return `${fieldName}__${featureName}`;
+        }
+
+        function createCompositeFeatureInput(fieldName, feature) {
+            const featureField = {
+                ...feature,
+                name: feature.name,
+                value_on: feature.value_on,
+                value_off: feature.value_off,
+            };
+            const inputId = getCompositeFeatureInputId(fieldName, feature.name);
+            const input = createSchemaFieldInput(featureField, inputId);
+            input.removeAttribute('data-param');
+            input.setAttribute('data-composite-parent', fieldName);
+            input.setAttribute('data-composite-feature', feature.name);
+            return input;
+        }
+
+        function collectCompositePayload(field) {
+            const payload = {};
+            const features = Array.isArray(field.features) ? field.features : [];
+
+            for (const feature of features) {
+                if (!feature || !feature.name || feature.type === 'composite') continue;
+                const inputId = getCompositeFeatureInputId(field.name, feature.name);
+                const input = document.getElementById(inputId);
+                if (!input) continue;
+
+                let value = getInputValueForEmit(input);
+                if (feature.type === 'binary' && typeof value === 'string') {
+                    if (value === 'true') value = true;
+                    else if (value === 'false') value = false;
+                }
+                if (feature.type === 'numeric' && value === '') {
+                    throw new Error(`${feature.label || feature.name} cannot be empty`);
+                }
+
+                const payloadKey = feature.property || feature.name;
+                payload[payloadKey] = value;
+            }
+            return payload;
+        }
+
+        function sendCompositeUpdate(field) {
+            try {
+                const payload = collectCompositePayload(field);
+                socket.emit('update_parameter', {
+                    param: field.name,
+                    value: payload,
+                    request_id: `composite-${Date.now()}-${field.name}`
+                });
+                if (window.SwitchStudioState) {
+                    window.SwitchStudioState.setPacketStatus('syncing', `${getReadableFieldLabel(field)} update sent`);
+                    window.SwitchStudioState.showToast('syncing', `${getReadableFieldLabel(field)} update sent`, 1600);
+                }
+            } catch (err) {
+                const message = err && err.message ? err.message : 'Failed to build composite payload';
+                if (window.SwitchStudioState) {
+                    window.SwitchStudioState.setPacketStatus('error', message);
+                    window.SwitchStudioState.showToast('error', message, 2600);
+                } else {
+                    packetInfo.innerText = `Error: ${message}`;
+                }
+            }
+        }
+
+        function renderCompositeField(field, container) {
+            const block = document.createElement('div');
+            block.className = 'schema-composite-block';
+
+            const title = document.createElement('div');
+            title.className = 'schema-composite-title';
+            title.textContent = getReadableFieldLabel(field);
+            block.appendChild(title);
+
+            const features = Array.isArray(field.features) ? field.features : [];
+            if (features.length === 0) {
+                const empty = document.createElement('div');
+                empty.className = 'schema-composite-note';
+                empty.textContent = 'No editable features available for this composite.';
+                block.appendChild(empty);
+                container.appendChild(block);
                 return;
             }
 
-            const presenceNames = schemaModel.mmwave_presence_fields || [];
-            const fieldByName = new Map(schemaModel.fields.map(field => [field.name, field]));
-            const orderedFields = [];
-
-            presenceNames.forEach(name => {
-                const field = fieldByName.get(name);
-                if (field) orderedFields.push(field);
-            });
-
-            if (orderedFields.length === 0) {
-                schemaPresenceFields.innerHTML = '<div style="font-size: 0.9em; color: #888;">No Presence fields found in schema.</div>';
-                return;
-            }
-
-            schemaPresenceFields.innerHTML = '';
-            schemaFieldMap = {};
-
-            orderedFields.forEach(field => {
-                schemaFieldMap[field.name] = field;
-
+            features.forEach(feature => {
+                if (!feature || !feature.name || feature.type === 'composite') return;
                 const row = document.createElement('div');
                 row.className = 'input-row';
 
                 const label = document.createElement('label');
-                label.setAttribute('for', field.name);
-                label.textContent = getReadableFieldLabel(field) + ':';
+                label.setAttribute('for', getCompositeFeatureInputId(field.name, feature.name));
+                label.textContent = `${feature.label || feature.name}${feature.unit ? ` (${feature.unit})` : ''}:`;
                 row.appendChild(label);
+                row.appendChild(createCompositeFeatureInput(field.name, feature));
+                block.appendChild(row);
+            });
 
-                if (field.can_write) {
-                    const input = createSchemaFieldInput(field);
-                    row.appendChild(input);
-                } else {
-                    const readOnlyVal = document.createElement('span');
-                    readOnlyVal.id = field.name;
-                    readOnlyVal.className = 'sensor-val';
-                    readOnlyVal.style.fontFamily = 'monospace';
-                    readOnlyVal.style.color = '#00bcd4';
-                    readOnlyVal.innerText = '--';
-                    row.appendChild(readOnlyVal);
+            if (field.can_write) {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'cmd-btn btn-full';
+                button.style.marginTop = '5px';
+                button.innerText = `Send ${getReadableFieldLabel(field)}`;
+                button.addEventListener('click', () => sendCompositeUpdate(field));
+                block.appendChild(button);
+            }
+
+            if (field.description) {
+                const note = document.createElement('div');
+                note.className = 'schema-composite-note';
+                note.textContent = field.description;
+                block.appendChild(note);
+            }
+
+            container.appendChild(block);
+        }
+
+        function orderPresenceFields(fields) {
+            const presenceNames = schemaModel && Array.isArray(schemaModel.mmwave_presence_fields)
+                ? schemaModel.mmwave_presence_fields
+                : [];
+            const byName = new Map(fields.map(field => [field.name, field]));
+            const ordered = [];
+            const used = new Set();
+
+            presenceNames.forEach(name => {
+                const field = byName.get(name);
+                if (field) {
+                    ordered.push(field);
+                    used.add(name);
                 }
+            });
 
-                schemaPresenceFields.appendChild(row);
+            fields.forEach(field => {
+                if (!used.has(field.name)) ordered.push(field);
+            });
+            return ordered;
+        }
 
-                if (field.description) {
-                    const desc = document.createElement('div');
-                    desc.style.fontSize = '0.78em';
-                    desc.style.color = '#777';
-                    desc.style.marginTop = '-4px';
-                    desc.style.marginBottom = '8px';
-                    desc.textContent = field.description;
-                    schemaPresenceFields.appendChild(desc);
-                }
+        function renderSchemaFieldCollection(container, fields, emptyMessage) {
+            if (!container) return;
+            container.innerHTML = '';
+
+            if (!fields || fields.length === 0) {
+                container.innerHTML = `<div style="font-size: 0.9em; color: #888;">${emptyMessage}</div>`;
+                return;
+            }
+
+            const grouped = {};
+            fields.forEach(field => {
+                const section = field.section || 'General';
+                if (!grouped[section]) grouped[section] = [];
+                grouped[section].push(field);
+            });
+
+            Object.keys(grouped).forEach(section => {
+                const sectionTitle = document.createElement('div');
+                sectionTitle.className = 'schema-section-title';
+                sectionTitle.textContent = section;
+                container.appendChild(sectionTitle);
+
+                grouped[section].forEach(field => {
+                    schemaFieldMap[field.name] = field;
+
+                    if (field.type === 'composite') {
+                        schemaCompositeMap[field.name] = field;
+                        renderCompositeField(field, container);
+                        return;
+                    }
+
+                    container.appendChild(createSchemaFieldRow(field));
+                    createSchemaDescriptionRow(field.description, container);
+                });
+            });
+        }
+
+        function renderAllSchemaFields() {
+            if (!schemaModel || !Array.isArray(schemaModel.fields)) {
+                const unavailable = '<div style="font-size: 0.9em; color: #888;">Schema unavailable.</div>';
+                if (schemaPresenceFields) schemaPresenceFields.innerHTML = unavailable;
+                if (schemaLoadFields) schemaLoadFields.innerHTML = unavailable;
+                if (schemaLedFields) schemaLedFields.innerHTML = unavailable;
+                if (schemaButtonFields) schemaButtonFields.innerHTML = unavailable;
+                if (schemaPowerFields) schemaPowerFields.innerHTML = unavailable;
+                if (schemaOptionFields) schemaOptionFields.innerHTML = unavailable;
+                return;
+            }
+
+            schemaFieldMap = {};
+            schemaCompositeMap = {};
+
+            const fields = schemaModel.fields.filter(field => field && field.name);
+            const options = Array.isArray(schemaModel.options) ? schemaModel.options.filter(opt => opt && opt.name) : [];
+
+            const presenceFields = orderPresenceFields(fields.filter(field => mapFieldTabToKey(field, 'fields') === 'presence'));
+            const loadFields = fields.filter(field => mapFieldTabToKey(field, 'fields') === 'load');
+            const ledFields = fields.filter(field => mapFieldTabToKey(field, 'fields') === 'led');
+            const buttonFields = fields.filter(field => mapFieldTabToKey(field, 'fields') === 'buttons');
+            const powerFields = fields.filter(field => mapFieldTabToKey(field, 'fields') === 'power');
+            const optionFields = options.map(option => ({ ...option, section: option.section || 'Runtime Options' }));
+
+            renderSchemaFieldCollection(schemaPresenceFields, presenceFields, 'No Presence fields found in schema.');
+            renderSchemaFieldCollection(schemaLoadFields, loadFields, 'No Load & Dimming fields found in schema.');
+            renderSchemaFieldCollection(schemaLedFields, ledFields, 'No LED fields found in schema.');
+            renderSchemaFieldCollection(schemaButtonFields, buttonFields, 'No Button/Scene fields found in schema.');
+            renderSchemaFieldCollection(schemaPowerFields, powerFields, 'No Power & Device fields found in schema.');
+            renderSchemaFieldCollection(schemaOptionFields, optionFields, 'No runtime options found in schema.');
+        }
+
+        function syncCompositeSchemaInputs(config) {
+            if (!config || typeof config !== 'object') return;
+            Object.entries(schemaCompositeMap).forEach(([fieldName, field]) => {
+                if (!(fieldName in config)) return;
+                const compositeValue = config[fieldName];
+                if (!compositeValue || typeof compositeValue !== 'object') return;
+
+                const features = Array.isArray(field.features) ? field.features : [];
+                features.forEach(feature => {
+                    if (!feature || !feature.name) return;
+                    const inputId = getCompositeFeatureInputId(fieldName, feature.name);
+                    const input = document.getElementById(inputId);
+                    if (!input) return;
+
+                    const key = feature.property || feature.name;
+                    if (!(key in compositeValue)) return;
+                    const value = compositeValue[key];
+
+                    if (input.type === 'checkbox') {
+                        input.checked = value === true || value === 'ON' || value === 'true';
+                    } else if (input.tagName === 'SELECT' && typeof value === 'boolean') {
+                        input.value = String(value);
+                    } else if (Array.isArray(value)) {
+                        input.value = value.join(', ');
+                    } else if (value !== undefined && value !== null) {
+                        input.value = value;
+                    } else {
+                        input.value = '';
+                    }
+                });
             });
         }
 
@@ -871,14 +1291,34 @@
 
         function sendCommand(actionId) {
             socket.emit('send_command', actionId);
-            
-            // Set expectation
-            if (actionId === 1 || actionId === 3) {
-                lastCommandId = actionId; 
-                packetInfo.innerText = actionId === 1 ? "Scanning for interference..." : "Clearing interference zones...";
+
+            if (zoneModule && typeof zoneModule.setPendingCommand === 'function') {
+                zoneModule.setPendingCommand(actionId);
+                return;
             }
-            if (actionId === 4) packetInfo.innerText = "Resetting detection zones...";
-            if (actionId === 5) packetInfo.innerText = "Clearing stay zones...";
+
+            // Fallback expectation
+            if (actionId === 1 || actionId === 3) {
+                lastCommandId = actionId;
+                if (window.SwitchStudioState) {
+                    window.SwitchStudioState.setPacketStatus('syncing', actionId === 1 ? "Scanning for interference..." : "Clearing interference zones...");
+                } else {
+                    packetInfo.innerText = actionId === 1 ? "Scanning for interference..." : "Clearing interference zones...";
+                }
+            }
+        }
+
+        function handleForceSyncClick() {
+            if (isEditingZone) {
+                cancelZoneEdit();
+            }
+            socket.emit('request_devices');
+            socket.emit('force_sync');
+            if (window.SwitchStudioState) {
+                window.SwitchStudioState.setPacketStatus('syncing', 'Syncing...');
+            } else {
+                packetInfo.innerText = 'Syncing...';
+            }
         }
 
         configSidebar.addEventListener('change', function(event) {
@@ -899,11 +1339,13 @@
                 else if (value === 'false') value = false;
             }
 
-            socket.emit('update_parameter', {
-                param: param,
-                value: value,
-                request_id: `ui-${Date.now()}-${param}`
-            });
+            if (window.SwitchStudioState && typeof window.SwitchStudioState.queueChange === 'function') {
+                window.SwitchStudioState.queueChange(param, value, input);
+                window.SwitchStudioState.setPacketStatus('info', 'Pending changes');
+                return;
+            }
+
+            socket.emit('update_parameter', { param: param, value: value, request_id: `ui-${Date.now()}-${param}` });
         });
 
         // --- SOCKET EVENT HANDLERS ---
@@ -914,18 +1356,24 @@
 
         socket.on('schema_model', function(schema) {
             schemaModel = schema || null;
-            renderSchemaPresenceFields();
+            renderAllSchemaFields();
         });
 
         socket.on('command_result', function(result) {
             if (!result || !result.status) return;
-            if (result.status === 'error') {
-                packetInfo.innerText = result.message ? `Error: ${result.message}` : "Command failed";
-                return;
+            if (zoneModule && typeof zoneModule.handleCommandResult === 'function') {
+                zoneModule.handleCommandResult(result);
             }
-
-            if (result.action === 'update_parameter' && result.status === 'sent') {
-                packetInfo.innerText = "Setting updated";
+            if (window.SwitchStudioState && typeof window.SwitchStudioState.handleCommandResult === 'function') {
+                window.SwitchStudioState.handleCommandResult(result);
+            } else {
+                if (result.status === 'error') {
+                    packetInfo.innerText = result.message ? `Error: ${result.message}` : "Command failed";
+                    return;
+                }
+                if (result.action === 'update_parameter' && result.status === 'sent') {
+                    packetInfo.innerText = "Setting updated";
+                }
             }
         });
         
@@ -948,7 +1396,12 @@
             socket.emit('force_sync'); 
 
             statusDiv.innerText = `Monitoring: ${this.options[this.selectedIndex].text}`;
-            packetInfo.innerText = "Awaiting data...";
+            if (window.SwitchStudioState) {
+                window.SwitchStudioState.resetForDeviceChange();
+                window.SwitchStudioState.setPacketStatus('info', 'Awaiting data...');
+            } else {
+                packetInfo.innerText = "Awaiting data...";
+            }
             timestampSpan.innerText = "--:--:--";
             packetAgeSpan.innerText = "";
             lastPacketTime = null;
@@ -963,7 +1416,11 @@
             }
 
             // Reset Visualization
-            targetHistory = {}; 
+            if (zoneModule && typeof zoneModule.resetHistory === 'function') {
+                zoneModule.resetHistory();
+            } else {
+                targetHistory = {};
+            }
             // Reset Zone Data
             deviceZones = {
                 global: null,
@@ -1043,10 +1500,20 @@
                 for (let i=1; i<=4; i++) deviceZones.mmwave_interference_areas[`area${i}`] = parseZ2MArea(areas[`area${i}`]);
                 
                 // If we just cleared interference, finish status
-                if (lastCommandId === 3 && (!config.mmwave_interference_areas || Object.keys(config.mmwave_interference_areas).length === 0)) {
-                    packetInfo.innerText = "Interference Cleared";
-                    setTimeout(() => { if(packetInfo.innerText === "Interference Cleared") packetInfo.innerText = "Monitoring..."; }, 2000);
-                    lastCommandId = null;
+                const pendingCommandId = zoneModule && typeof zoneModule.getPendingCommandId === 'function'
+                    ? zoneModule.getPendingCommandId()
+                    : lastCommandId;
+                if (pendingCommandId === 3 && (!config.mmwave_interference_areas || Object.keys(config.mmwave_interference_areas).length === 0)) {
+                    if (window.SwitchStudioState) {
+                        window.SwitchStudioState.setPacketStatus('saved', 'Interference cleared');
+                    } else {
+                        packetInfo.innerText = "Interference Cleared";
+                    }
+                    if (zoneModule && typeof zoneModule.clearPendingCommand === 'function') {
+                        zoneModule.clearPendingCommand();
+                    } else {
+                        lastCommandId = null;
+                    }
                 }
             }
             if ("mmwave_stay_areas" in config) {
@@ -1101,18 +1568,23 @@
             // We removed the logic that forces Warning ON if version is missing, because partial updates (like occupancy) lack it.
 
             // 4. SYNC CONFIG INPUTS
-            for (const [key, value] of Object.entries(config)) {
-                const element = document.getElementById(key);
-                if (element) {
-                    if (element.tagName === 'SPAN') {
-                        element.innerText = value;
-                    } else if (element.type === 'checkbox') {
-                        element.checked = value === true || value === 'ON' || value === 'true';
-                    } else {
-                        element.value = value;
+            if (window.SwitchStudioState && typeof window.SwitchStudioState.syncConfig === 'function') {
+                window.SwitchStudioState.syncConfig(config);
+            } else {
+                for (const [key, value] of Object.entries(config)) {
+                    const element = document.getElementById(key);
+                    if (element) {
+                        if (element.tagName === 'SPAN') {
+                            element.innerText = value;
+                        } else if (element.type === 'checkbox') {
+                            element.checked = value === true || value === 'ON' || value === 'true';
+                        } else {
+                            element.value = value;
+                        }
                     }
                 }
             }
+            syncCompositeSchemaInputs(config);
         });
 
         // --- PLOTLY INIT ---
@@ -1139,6 +1611,21 @@
             { x: [], y: [], mode: 'markers+text', text: [], textposition: 'top center', type: 'scatter' },
             { x: [], y: [], mode: 'lines', line: {color: '#00bcd4', width: 3}, opacity: 0.3, type: 'scatter' }
         ], layout, chartConfig);
+
+        if (window.SwitchStudioZones && typeof window.SwitchStudioZones.init === 'function') {
+            zoneModule = window.SwitchStudioZones.init({
+                chartId: 'chart',
+                dataTableBodyEl: dataTableBody,
+                zoneStatusId: 'zoneStatus',
+                commandLogEl: commandLog,
+                stateApi: window.SwitchStudioState || null,
+                updateTimestamp: updateTimestamp,
+                getLayout: () => layout,
+                getIsEditing: () => isEditingZone,
+                getIsInteracting: () => isInteracting,
+                historyLength: HISTORY_LENGTH
+            });
+        }
         
         // Initial Visualizer Settings Apply
         setTimeout(applyVizSettings, 100);
@@ -1165,53 +1652,46 @@
             // Unpack wrapper
             if (!msg.topic || !msg.payload) return;
             const zones = msg.payload;
-            
+
             // FILTER: IGNORE DATA FROM OTHER DEVICES
             if (msg.topic !== deviceSelect.value) return;
 
             // Update our internal state from the raw packet data
             // Note: The backend sends an array. We try to map it to area1..4
-            for(let i=0; i<4; i++) {
+            for (let i = 0; i < 4; i++) {
+                const areaKey = `area${i + 1}`;
                 if (zones[i]) {
-                    // Raw packets Cmd 2 don't have Z. We must attempt to preserve existing Z if available, else default.
-                    const existingZMin = deviceZones.mmwave_interference_areas[`area${i+1}`]?.z_min || 0;
-                    const existingZMax = deviceZones.mmwave_interference_areas[`area${i+1}`]?.z_max || 300;
-                    
+                    // Raw packets Cmd 2 do not carry Z. Preserve existing Z if available.
+                    const existingZMin = deviceZones.mmwave_interference_areas[areaKey]?.z_min || 0;
+                    const existingZMax = deviceZones.mmwave_interference_areas[areaKey]?.z_max || 300;
+
                     const newArea = parseZ2MArea(zones[i]);
                     if (newArea) {
-                         // Overlay preserved Z onto new X/Y
-                         newArea.z_min = existingZMin;
-                         newArea.z_max = existingZMax;
-                         deviceZones.mmwave_interference_areas[`area${i+1}`] = newArea;
+                        newArea.z_min = existingZMin;
+                        newArea.z_max = existingZMax;
+                        deviceZones.mmwave_interference_areas[areaKey] = newArea;
                     }
                 } else {
-                    deviceZones.mmwave_interference_areas[`area${i+1}`] = null;
+                    deviceZones.mmwave_interference_areas[areaKey] = null;
                 }
             }
-            
-            // Update map if not editing
+
             if (!isEditingZone) Plotly.relayout('chart', {shapes: getChartShapes(), annotations: getChartAnnotations()});
 
-            // Context-aware notification
-            const statusBox = document.getElementById('zoneStatus');
-            if (lastCommandId !== null) {
+            if (zoneModule && typeof zoneModule.handleInterferenceZones === 'function') {
+                zoneModule.handleInterferenceZones(zones);
+            } else if (lastCommandId !== null) {
+                const statusBox = document.getElementById('zoneStatus');
                 statusBox.style.display = 'block';
-
                 if (zones.length === 0) {
-                    statusBox.style.background = 'rgba(76, 175, 80, 0.9)'; // Green
-                    
-                    if (lastCommandId === 1) {
-                        statusBox.innerText = "✓ Scan Complete: No active interference found.";
-                    } else if (lastCommandId === 3) {
-                        statusBox.innerText = "✓ Interference Cleared: Zones reset to zero.";
-                    }
+                    statusBox.style.background = 'rgba(76, 175, 80, 0.9)';
+                    statusBox.innerText = 'Scan complete: no active interference found.';
                 } else {
-                    statusBox.style.background = 'rgba(255, 82, 82, 0.9)'; // Red
-                    statusBox.innerText = `⚠ Auto-Config Complete: Found ${zones.length} zone(s).`;
+                    statusBox.style.background = 'rgba(255, 82, 82, 0.9)';
+                    statusBox.innerText = `Auto-config complete: found ${zones.length} zone(s).`;
                 }
-
                 setTimeout(() => { statusBox.style.display = 'none'; }, 5000);
-                lastCommandId = null; 
+                lastCommandId = null;
             }
         });
 
@@ -1257,6 +1737,10 @@
         });
 
         socket.on('new_data', function(msg) {
+            if (zoneModule && typeof zoneModule.handleNewData === 'function') {
+                if (zoneModule.handleNewData(msg, deviceSelect.value)) return;
+            }
+
             // Unpack wrapper
             if (!msg.topic || !msg.payload) return;
             const data = msg.payload;
@@ -1266,6 +1750,7 @@
 
             updateTimestamp();
             packetInfo.innerText = `Targets Visible: ${data.targets.length}`;
+            packetInfo.style.color = '#00bcd4';
             
             const currentIds = new Set(data.targets.map(t => t.id));
             Object.keys(targetHistory).forEach(id => { if (!currentIds.has(Number(id))) delete targetHistory[id]; });
@@ -1309,11 +1794,11 @@
                 return;
             }
 
-            dataTableBody.innerHTML = ''; 
+            dataTableBody.innerHTML = '';
             data.targets.forEach(t => {
                 let dopStatus = "Stationary", dopColor = "#888";
-                if (t.dop > 10) { dopStatus = `▲ Moving Away (${t.dop})`; dopColor = "#ff9800"; }
-                else if (t.dop < -10) { dopStatus = `▼ Approaching (${t.dop})`; dopColor = "#4caf50"; }
+                if (t.dop > 10) { dopStatus = `Moving Away (${t.dop})`; dopColor = "#ff9800"; }
+                else if (t.dop < -10) { dopStatus = `Approaching (${t.dop})`; dopColor = "#4caf50"; }
 
                 dataTableBody.innerHTML += `<tr><td style="font-weight: bold; color: #00bcd4;">${t.id}</td><td>${t.x} cm</td><td>${t.y} cm</td><td>${t.z} cm</td><td style="color: ${dopColor}; font-weight: bold;">${dopStatus}</td></tr>`;
             });
@@ -1350,6 +1835,9 @@
             // Set draft config and enable edit UI
             // Important: DEEP COPY to prevent reference leakage
             draftZoneConfig = JSON.parse(JSON.stringify(config));
+            if (zoneModule && typeof zoneModule.normalizeZoneConfig === 'function') {
+                draftZoneConfig = zoneModule.normalizeZoneConfig(draftZoneConfig, { allowZeroSpan: true, clampToBounds: true });
+            }
             
             zoneEditorRawData.style.display = 'block';
             updateDraftCoordsText();
@@ -1374,10 +1862,19 @@
 
                 if (activeShape) {
                     // Update only X/Y from drag, preserve Z
-                    draftZoneConfig.x_min = Math.round(activeShape.x0);
-                    draftZoneConfig.x_max = Math.round(activeShape.x1);
-                    draftZoneConfig.y_min = Math.round(activeShape.y0);
-                    draftZoneConfig.y_max = Math.round(activeShape.y1);
+                    const rawDraft = {
+                        x_min: Math.round(activeShape.x0),
+                        x_max: Math.round(activeShape.x1),
+                        y_min: Math.round(activeShape.y0),
+                        y_max: Math.round(activeShape.y1),
+                        z_min: draftZoneConfig.z_min,
+                        z_max: draftZoneConfig.z_max
+                    };
+                    if (zoneModule && typeof zoneModule.normalizeZoneConfig === 'function') {
+                        draftZoneConfig = zoneModule.normalizeZoneConfig(rawDraft, { allowZeroSpan: true, clampToBounds: true });
+                    } else {
+                        draftZoneConfig = rawDraft;
+                    }
                     
                     updateDraftCoordsText();
                 }
@@ -1388,7 +1885,7 @@
         function manualZoneUpdate() {
             if (!isEditingZone) return;
 
-            draftZoneConfig = {
+            const rawDraft = {
                 x_min: parseInt(editXMin.value) || 0,
                 x_max: parseInt(editXMax.value) || 0,
                 y_min: parseInt(editYMin.value) || 0,
@@ -1396,7 +1893,12 @@
                 z_min: parseInt(editZMin.value) || 0,
                 z_max: parseInt(editZMax.value) || 0
             };
-            
+            if (zoneModule && typeof zoneModule.normalizeZoneConfig === 'function') {
+                draftZoneConfig = zoneModule.normalizeZoneConfig(rawDraft, { allowZeroSpan: true, clampToBounds: true });
+            } else {
+                draftZoneConfig = rawDraft;
+            }
+             
             // Update the UI text (and potentially overlay text)
             updateDraftCoordsText();
 
@@ -1422,27 +1924,53 @@
             if (!draftZoneConfig) return;
 
             const [category, area] = editingTarget.split(':');
-            const areaPayload = {};
-            
-            // Auto-sort coordinates to ensure Min < Max
-            const x_vals = [parseInt(draftZoneConfig.x_min), parseInt(draftZoneConfig.x_max)].sort((a,b)=>a-b);
-            const y_vals = [parseInt(draftZoneConfig.y_min), parseInt(draftZoneConfig.y_max)].sort((a,b)=>a-b);
-            const z_vals = [parseInt(draftZoneConfig.z_min), parseInt(draftZoneConfig.z_max)].sort((a,b)=>a-b);
-            
-            // Always use composite payload with width/depth keys
-            areaPayload[area] = {
-                width_min: x_vals[0],
-                width_max: x_vals[1],
-                depth_min: y_vals[0],
-                depth_max: y_vals[1],
-                height_min: z_vals[0],
-                height_max: z_vals[1]
-            };
-            
+            let areaPayload = null;
+
+            if (zoneModule && typeof zoneModule.validateZoneConfig === 'function') {
+                const validation = zoneModule.validateZoneConfig(draftZoneConfig, { allowZeroSpan: false });
+                if (!validation.valid) {
+                    const message = validation.errors && validation.errors.length > 0
+                        ? validation.errors[0]
+                        : 'Invalid zone coordinates';
+                    if (window.SwitchStudioState) {
+                        window.SwitchStudioState.setPacketStatus('error', message);
+                        window.SwitchStudioState.showToast('error', message, 2800);
+                    } else {
+                        packetInfo.innerText = `Error: ${message}`;
+                    }
+                    return;
+                }
+
+                draftZoneConfig = validation.normalized;
+                areaPayload = (typeof zoneModule.buildAreaPayload === 'function')
+                    ? zoneModule.buildAreaPayload(area, draftZoneConfig)
+                    : null;
+            }
+
+            if (!areaPayload) {
+                const x_vals = [parseInt(draftZoneConfig.x_min), parseInt(draftZoneConfig.x_max)].sort((a,b)=>a-b);
+                const y_vals = [parseInt(draftZoneConfig.y_min), parseInt(draftZoneConfig.y_max)].sort((a,b)=>a-b);
+                const z_vals = [parseInt(draftZoneConfig.z_min), parseInt(draftZoneConfig.z_max)].sort((a,b)=>a-b);
+                areaPayload = {};
+                areaPayload[area] = {
+                    width_min: x_vals[0],
+                    width_max: x_vals[1],
+                    depth_min: y_vals[0],
+                    depth_max: y_vals[1],
+                    height_min: z_vals[0],
+                    height_max: z_vals[1]
+                };
+            }
+             
             socket.emit('update_parameter', { param: category, value: areaPayload });
 
             endZoneEdit();
-            packetInfo.innerText = "Zone Saved!";
+            if (window.SwitchStudioState) {
+                window.SwitchStudioState.setPacketStatus('saved', 'Zone saved');
+                window.SwitchStudioState.showToast('saved', 'Zone saved.', 1500);
+            } else {
+                packetInfo.innerText = "Zone Saved!";
+            }
         }
         
         function deleteZone() {
@@ -1459,7 +1987,15 @@
             };
              
             socket.emit('update_parameter', { param: category, value: areaPayload });
-            packetInfo.innerText = "Zone Deleted.";
+            if (zoneModule && typeof zoneModule.appendCommandLog === 'function') {
+                zoneModule.appendCommandLog(`Deleted zone ${area}`, 'info');
+            }
+            if (window.SwitchStudioState) {
+                window.SwitchStudioState.setPacketStatus('saved', 'Zone deleted');
+                window.SwitchStudioState.showToast('saved', 'Zone deleted.', 1500);
+            } else {
+                packetInfo.innerText = "Zone Deleted.";
+            }
             endZoneEdit(); // Close editor
         }
 
@@ -1487,3 +2023,6 @@
     </script>
 </body>
 </html>
+
+
+

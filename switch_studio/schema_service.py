@@ -31,7 +31,8 @@ class SchemaService:
             self.schema = self._build_schema(model_definition)
         else:
             self.schema = self._fallback_schema()
-        self.field_map = {field["name"]: field for field in self.schema.get("fields", []) if field.get("name")}
+        combined_fields = list(self.schema.get("fields", [])) + list(self.schema.get("options", []))
+        self.field_map = {field["name"]: field for field in combined_fields if field.get("name")}
         return self.schema
 
     def get_schema(self):
@@ -346,6 +347,8 @@ class SchemaService:
             return "Advanced"
 
         lname = name.lower()
+        entry_category = (entry.get("category") or "").lower()
+
         if "mmwave" in lname:
             if lname.endswith("_areas") or lname == "mmwave_control_commands":
                 return "Zones"
@@ -355,26 +358,46 @@ class SchemaService:
 
         if lname in {"occupancy", "illuminance", "power", "voltage", "current", "energy", "action", "linkquality"}:
             return "Live"
+        if lname in {"area1occupancy", "area2occupancy", "area3occupancy", "area4occupancy"}:
+            return "Live"
 
-        if any(key in lname for key in ["dimming", "ramprate", "defaultlevel", "minimumlevel", "maximumlevel", "outputmode", "quickstart"]):
+        load_dimming_keywords = [
+            "dimming", "ramprate", "defaultlevel", "minimumlevel", "maximumlevel",
+            "outputmode", "quickstart", "autotimeroff", "stateafterpowerrestored",
+            "loadlevelindicatortimeout", "switchtype", "invertswitch", "smartbulbmode",
+            "bindingofftoonsynclevel", "higheroutputinnonneutral"
+        ]
+        if any(key in lname for key in load_dimming_keywords):
             return "Load & Dimming"
 
-        if "led" in lname or lname in {"led_effect", "individual_led_effect"}:
+        if "led" in lname or "notification" in lname or lname in {"led_effect", "individual_led_effect", "firmwareupdateinprogressindicator"}:
             return "LED & Notifications"
 
-        if any(key in lname for key in ["tap", "button", "scene", "aux"]):
+        if any(key in lname for key in ["tap", "button", "scene", "aux", "multitap", "doubletap", "singletap", "held", "delay"]):
             return "Buttons & Scenes"
 
-        if lname in {"identify", "energy_reset", "otaimagetype", "localprotection", "remoteprotection", "powertype"}:
+        power_device_names = {
+            "identify", "energy_reset", "otaimagetype", "localprotection", "remoteprotection",
+            "powertype", "internaltemperature", "overheat", "devicebindnumber",
+            "activepowerreports", "periodicpowerandenergyreports", "activeenergyreports",
+            "fancontrolmode", "fantimermode", "lowlevelforfancontrolmode", "mediumlevelforfancontrolmode",
+            "highlevelforfancontrolmode"
+        }
+        if lname in power_device_names:
+            return "Power & Device"
+        if any(key in lname for key in ["calibration", "precision", "transition", "identify_timeout", "state_action", "illuminance_raw", "no_occupancy_since"]):
             return "Power & Device"
 
-        if entry.get("category") == "diagnostic":
+        if entry_category == "diagnostic":
             return "Live"
 
         return "Advanced"
 
     def _infer_section(self, name, entry):
         tab = self._infer_tab(name, entry)
+        lname = (name or "").lower()
+        entry_category = (entry.get("category") or "").lower()
+
         if tab == "Presence":
             if name == "mmWaveVersion":
                 return "Presence Diagnostics"
@@ -382,15 +405,23 @@ class SchemaService:
         if tab == "Zones":
             return "Zone Definitions"
         if tab == "Live":
+            if lname in {"action", "linkquality"}:
+                return "Live Diagnostics"
             return "Live Sensors"
         if tab == "Load & Dimming":
-            return "Load Behavior"
+            return "Load Behavior & Dimming"
         if tab == "LED & Notifications":
-            return "LED Configuration"
+            return "LED Effects & Notifications"
         if tab == "Buttons & Scenes":
-            return "Button Mapping"
+            return "Buttons & Scene Behavior"
         if tab == "Power & Device":
-            return "Device Settings"
+            if lname in {"identify", "energy_reset"}:
+                return "Device Actions"
+            if entry_category == "diagnostic" or lname in {"internaltemperature", "overheat", "devicebindnumber", "linkquality", "action"}:
+                return "Diagnostics"
+            if any(key in lname for key in ["calibration", "precision", "transition", "identify_timeout", "state_action", "illuminance_raw", "no_occupancy_since"]):
+                return "Runtime Options"
+            return "Power & Device Settings"
         return "Advanced"
 
     def _normalize_value(self, field, value):

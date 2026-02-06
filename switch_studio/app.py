@@ -156,6 +156,34 @@ def emit_command_result(sid, action, status, topic=None, request_id=None, messag
 def emit_schema_model(room=None):
     socketio.emit('schema_model', schema_service.get_schema(), room=room)
 
+
+def build_force_sync_payload():
+    schema = schema_service.get_schema() or {}
+    payload = {}
+    for field in schema.get('fields', []) or []:
+        if not isinstance(field, dict):
+            continue
+        name = field.get('name')
+        if not name:
+            continue
+        if not field.get('can_read'):
+            continue
+        payload[name] = ""
+
+    if payload:
+        return payload
+
+    # Conservative fallback if schema is unavailable.
+    return {
+        "state": "", "occupancy": "", "illuminance": "",
+        "mmWaveDepthMax": "", "mmWaveDepthMin": "", "mmWaveWidthMax": "", "mmWaveWidthMin": "",
+        "mmWaveHeightMax": "", "mmWaveHeightMin": "", "mmWaveDetectSensitivity": "",
+        "mmWaveDetectTrigger": "", "mmWaveHoldTime": "", "mmWaveStayLife": "",
+        "mmWaveRoomSizePreset": "", "mmWaveTargetInfoReport": "", "mmWaveVersion": "",
+        "mmwaveControlWiredDevice": ""
+    }
+
+
 def on_connect(client, userdata, flags, rc):
     print(f"Connected to MQTT Broker with code {rc}", flush=True)
     client.subscribe(f"{MQTT_BASE_TOPIC}/#")
@@ -530,14 +558,7 @@ def handle_force_sync(data=None):
         if 'stay_zones' in device_data: socketio.emit('stay_zones', {'topic': current_topic, 'payload': device_data['stay_zones']}, room=request.sid)
 
     # 2. Trigger Z2M read
-    payload = {
-        "state": "", "occupancy": "", "illuminance": "",
-        "mmWaveDepthMax": "", "mmWaveDepthMin": "", "mmWaveWidthMax": "", "mmWaveWidthMin": "",
-        "mmWaveHeightMax": "", "mmWaveHeightMin": "", "mmWaveDetectSensitivity": "",
-        "mmWaveDetectTrigger": "", "mmWaveHoldTime": "", "mmWaveStayLife": "",
-        "mmWaveRoomSizePreset": "", "mmWaveTargetInfoReport": "", "mmWaveVersion": "",
-        "mmwaveControlWiredDevice": ""
-    }
+    payload = build_force_sync_payload()
     ok_get, rc_get = publish_json(f"{current_topic}/get", payload, origin='force_sync_get', sid=request.sid)
     emit_command_result(
         request.sid,
