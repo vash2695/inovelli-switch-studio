@@ -4,13 +4,22 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-function loadZonesModule() {
+function loadZonesModule(options) {
+    const opts = options || {};
     const scriptPath = path.resolve(__dirname, '../../switch_studio/static/js/app_zones.js');
     const source = fs.readFileSync(scriptPath, 'utf8');
     const events = { status: [], toast: [] };
+    const plotlyCalls = [];
+    const chartEl = {};
+    const tableEl = { innerHTML: '' };
 
     const context = {
-        window: {},
+        window: {
+            Plotly: {
+                restyle: (...args) => plotlyCalls.push({ kind: 'restyle', args }),
+                react: (...args) => plotlyCalls.push({ kind: 'react', args }),
+            },
+        },
         document: {
             getElementById: () => null,
         },
@@ -25,10 +34,13 @@ function loadZonesModule() {
 
     const zones = context.window.SwitchStudioZones;
     zones.init({
+        chartEl,
+        dataTableBodyEl: tableEl,
         stateApi: {
             setPacketStatus: (mode, message) => events.status.push({ mode, message }),
             showToast: (mode, message) => events.toast.push({ mode, message }),
         },
+        shouldRenderTargets: opts.shouldRenderTargets || null,
         limits: {
             xMin: -200,
             xMax: 200,
@@ -40,7 +52,7 @@ function loadZonesModule() {
         },
     });
 
-    return { zones, events };
+    return { zones, events, plotlyCalls, tableEl };
 }
 
 test('zone payload builder sorts and maps coordinate fields', () => {
@@ -107,4 +119,25 @@ test('interference command lifecycle reports completion and clears pending comma
     assert.equal(zones.getPendingCommandId(), null);
     assert.ok(events.status.some((entry) => entry.message.includes('Interference cleared')));
     assert.ok(events.toast.some((entry) => entry.message.includes('Interference cleared')));
+});
+
+test('target rendering is suppressed when occupancy gate is clear', () => {
+    const { zones, events, plotlyCalls, tableEl } = loadZonesModule({
+        shouldRenderTargets: () => false,
+    });
+
+    const handled = zones.handleNewData(
+        {
+            topic: 'zigbee2mqtt/bedroom_switch',
+            payload: {
+                targets: [{ id: 1, x: 77, y: 44, z: -16, dop: 0 }],
+            },
+        },
+        'zigbee2mqtt/bedroom_switch',
+    );
+
+    assert.equal(handled, true);
+    assert.ok(plotlyCalls.some((entry) => entry.kind === 'restyle'));
+    assert.ok(tableEl.innerHTML.includes('Standby: all occupancy areas clear.'));
+    assert.ok(events.status.some((entry) => entry.message.includes('occupancy areas clear')));
 });

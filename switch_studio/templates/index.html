@@ -44,14 +44,23 @@
         .studio-toast-error { border-color: #ff5252; }
 
         /* Main Layout Grid */
-        .app-container { display: grid; grid-template-columns: 1fr 350px; flex-grow: 1; overflow: hidden; transition: 0.3s; }
-        .main-content { display: flex; flex-direction: column; padding: 10px; overflow-y: auto; position: relative; gap: 15px; }
-        .sidebar { background: #222; border-left: 1px solid #444; padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 15px; transition: opacity 0.3s; }
+        .app-container { display: grid; grid-template-columns: minmax(0, 1fr) 360px; flex-grow: 1; overflow: hidden; transition: 0.3s; }
+        .main-content { display: flex; flex-direction: column; padding: 12px 14px 16px; overflow-y: auto; position: relative; gap: 14px; }
+        .sidebar { background: #222; border-left: 1px solid #444; padding: 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; transition: opacity 0.3s; }
+        .app-container.focus-config { display: block; overflow-y: auto; }
+        .app-container.focus-config .main-content { padding: 10px 14px 2px; min-height: auto; }
+        .app-container.focus-config .sidebar { border-left: none; background: transparent; max-width: 1200px; margin: 0 auto; padding: 8px 14px 24px; }
+        .app-container.focus-config .sidebar details,
+        .app-container.focus-config .sidebar .config-group {
+            background: #262c31;
+            border-color: #3a4650;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+        }
 
         /* Chart & Table */
-        #chart { width: 100%; flex-grow: 1; min-height: 400px; }
+        #chart { width: 100%; flex-grow: 1; min-height: 440px; border-radius: 10px; border: 1px solid rgba(0, 188, 212, 0.22); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03), 0 10px 25px rgba(0, 0, 0, 0.3); }
         
-        .table-container { background: #2b2b2b; border-radius: 8px; overflow-x: auto; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+        .table-container { background: #23282d; border: 1px solid #35404a; border-radius: 8px; overflow-x: auto; box-shadow: 0 10px 24px rgba(0,0,0,0.25); }
         table { width: 100%; border-collapse: collapse; text-align: center; min-width: 500px; }
         th { background: #00bcd4; color: #1a1a1a; padding: 8px; font-weight: bold; }
         td { padding: 8px; border-bottom: 1px solid #444; }
@@ -70,7 +79,7 @@
         #chartContainer[open] .config-content {
             display: flex;
             flex-direction: column;
-            height: 55vh;
+            height: 58vh;
             padding: 0;
             overflow: hidden;
         }
@@ -96,7 +105,7 @@
         .zone-input-group input { width: 100%; box-sizing: border-box; font-family: monospace; color: #00bcd4; font-weight: bold;}
 
         /* Live Sensor Badges */
-        .sensor-row { display: flex; justify-content: space-between; background: #222; padding: 8px 10px; border-radius: 4px; margin-bottom: 5px; }
+        .sensor-row { display: flex; justify-content: space-between; background: #1f2328; border: 1px solid #323b44; padding: 8px 10px; border-radius: 6px; margin-bottom: 6px; }
         .sensor-val { font-weight: bold; color: #fff; }
         .badge-detected { color: #4caf50; font-weight: bold; }
         .badge-clear { color: #888; font-style: italic; }
@@ -211,7 +220,7 @@
     <div id="zoneStatus"></div>
     <div id="toastContainer"></div>
 
-    <div class="app-container">
+    <div class="app-container focus-zones" id="appContainer">
         <div class="main-content">
             <div id="nonMmwaveWarning" data-tab-panels="presence,zones,load,led,buttons,power,maintenance">WARNING: Standard Switch Detected<br><span style="font-size: 0.8em; font-weight: normal;">This device does not have mmWave hardware.</span></div>
 
@@ -486,6 +495,7 @@
         const deviceSelect = document.getElementById('deviceSelect');
         const dataTableBody = document.getElementById('dataTableBody');
         const tabBar = document.getElementById('tabBar');
+        const appContainer = document.getElementById('appContainer');
 
         // UI Elements
         const nonMmwaveWarning = document.getElementById('nonMmwaveWarning');
@@ -533,6 +543,7 @@
             mmwave_interference_areas: { area1: null, area2: null, area3: null, area4: null },
             mmwave_stay_areas: { area1: null, area2: null, area3: null, area4: null }
         };
+        let occupancyState = { global: null, area1: null, area2: null, area3: null, area4: null };
 
         // Zone Editing State
         let isEditingZone = false;
@@ -570,6 +581,45 @@
                 .filter(Boolean);
         }
 
+        function parseOccupancyValue(value) {
+            if (value === true || value === 'ON' || value === 1 || value === '1') return true;
+            if (value === false || value === 'OFF' || value === 0 || value === '0') return false;
+            if (typeof value === 'string') {
+                const lowered = value.trim().toLowerCase();
+                if (lowered === 'true' || lowered === 'detected') return true;
+                if (lowered === 'false' || lowered === 'clear') return false;
+            }
+            return null;
+        }
+
+        function hasActiveOccupancy() {
+            const states = Object.values(occupancyState).filter(v => v === true || v === false);
+            if (states.length === 0) return true;
+            return states.some(v => v === true);
+        }
+
+        function clearTargetsForOccupancyGate() {
+            if (zoneModule && typeof zoneModule.clearTargetVisualization === 'function') {
+                zoneModule.clearTargetVisualization('Standby: all occupancy areas clear');
+                return;
+            }
+            targetHistory = {};
+            const chartDiv = document.getElementById('chart');
+            if (chartDiv && chartDiv.data && window.Plotly) {
+                Plotly.restyle('chart', { x: [[]], y: [[]], text: [[]] }, [0]);
+                Plotly.restyle('chart', { x: [[]], y: [[]] }, [1]);
+            }
+            dataTableBody.innerHTML = '<tr><td colspan="5" class="no-data">Standby: all occupancy areas clear.</td></tr>';
+        }
+
+        function applyLayoutMode(activeTab) {
+            if (!appContainer) return;
+            const tab = String(activeTab || '').toLowerCase();
+            const zoneFocused = tab === 'zones';
+            appContainer.classList.toggle('focus-zones', zoneFocused);
+            appContainer.classList.toggle('focus-config', !zoneFocused);
+        }
+
         function applyLegacyLayout() {
             if (tabBar) {
                 tabBar.style.display = 'none';
@@ -593,17 +643,21 @@
         if (SWITCH_STUDIO_UI_ENABLED && window.SwitchStudioTabs && typeof window.SwitchStudioTabs.init === 'function') {
             window.SwitchStudioTabs.init({
                 defaultTab: 'zones',
-                onTabChange: () => {
-                    setTimeout(() => {
-                        const chartDiv = document.getElementById('chart');
-                        if (chartDiv && chartDiv.data) {
-                            Plotly.Plots.resize(chartDiv);
-                        }
-                    }, 40);
+                onTabChange: (activeTab) => {
+                    applyLayoutMode(activeTab);
+                    if (String(activeTab || '').toLowerCase() === 'zones') {
+                        setTimeout(() => {
+                            const chartDiv = document.getElementById('chart');
+                            if (chartDiv && chartDiv.data) {
+                                Plotly.Plots.resize(chartDiv);
+                            }
+                        }, 40);
+                    }
                 }
             });
         } else {
             applyLegacyLayout();
+            applyLayoutMode('zones');
         }
 
         if (window.SwitchStudioState && typeof window.SwitchStudioState.init === 'function') {
@@ -1265,16 +1319,47 @@
         function getRadarRings() {
             if (!showGrid) return []; // Grid Toggle
 
-            const rings = [100, 200, 300, 400, 500, 600].map(dist => ({
-                type: 'circle', xref: 'x', yref: 'y', x0: -dist, x1: dist, y0: -dist, y1: dist,
-                line: { color: 'rgba(255, 255, 255, 0.1)', width: 1, dash: 'dot' },
-                editable: false, 
-                layer: 'below'
-            }));
+            const rings = [];
             rings.push({
-                type: 'circle', xref: 'x', yref: 'y', x0: -10, x1: 10, y0: -10, y1: 10, 
-                fillcolor: 'red', line: {color: 'red'}, 
-                editable: false, 
+                type: 'path',
+                xref: 'x',
+                yref: 'y',
+                path: `M ${chartXMin} 0 L 0 ${chartYMax} L ${chartXMax} 0 Z`,
+                fillcolor: 'rgba(0, 188, 212, 0.06)',
+                line: { color: 'rgba(0, 188, 212, 0.0)', width: 0 },
+                editable: false,
+                layer: 'below'
+            });
+            [100, 200, 300, 400, 500, 600].forEach((dist) => {
+                rings.push({
+                    type: 'circle', xref: 'x', yref: 'y',
+                    x0: -dist, x1: dist, y0: -dist, y1: dist,
+                    line: { color: 'rgba(186, 221, 230, 0.14)', width: dist % 200 === 0 ? 1.2 : 1, dash: 'dot' },
+                    editable: false,
+                    layer: 'below'
+                });
+            });
+            rings.push({
+                type: 'line', xref: 'x', yref: 'y',
+                x0: chartXMin, y0: 0, x1: chartXMax, y1: 0,
+                line: { color: 'rgba(0, 188, 212, 0.35)', width: 1.4 },
+                editable: false,
+                layer: 'below'
+            });
+            rings.push({
+                type: 'circle', xref: 'x', yref: 'y',
+                x0: -18, x1: 18, y0: -18, y1: 18,
+                fillcolor: 'rgba(255, 82, 82, 0.28)',
+                line: { color: 'rgba(255, 82, 82, 0.65)', width: 1.4 },
+                editable: false,
+                layer: 'below'
+            });
+            rings.push({
+                type: 'circle', xref: 'x', yref: 'y',
+                x0: -8, x1: 8, y0: -8, y1: 8,
+                fillcolor: 'rgba(255, 82, 82, 0.95)',
+                line: { color: 'rgba(255, 255, 255, 0.85)', width: 1.2 },
+                editable: false,
                 layer: 'below'
             });
             return rings;
@@ -1566,6 +1651,7 @@
             
             occupancyVal.innerText = "Waiting..."; occupancyVal.className = "sensor-val badge-clear";
             illuminanceVal.innerText = "-- lx";
+            occupancyState = { global: null, area1: null, area2: null, area3: null, area4: null };
             
             // Reset Zone Indicators
             for(let i=1; i<=4; i++) {
@@ -1686,12 +1772,15 @@
 
             // 2. UPDATE LIVE SENSORS
             if ("occupancy" in config) {
-                if (config.occupancy === true) {
+                const parsedGlobal = parseOccupancyValue(config.occupancy);
+                if (parsedGlobal === true) {
                     occupancyVal.innerText = "DETECTED";
                     occupancyVal.className = "sensor-val badge-detected";
-                } else {
+                    occupancyState.global = true;
+                } else if (parsedGlobal === false) {
                     occupancyVal.innerText = "CLEAR";
                     occupancyVal.className = "sensor-val badge-clear";
+                    occupancyState.global = false;
                 }
             }
             if ("illuminance" in config) {
@@ -1704,17 +1793,29 @@
 
             // Update Zone Status (mmwave_areaX_occupancy)
             for(let i=1; i<=4; i++) {
-                const key = `mmwave_area${i}_occupancy`;
+                const snakeKey = `mmwave_area${i}_occupancy`;
+                const camelKey = `area${i}Occupancy`;
                 const badge = document.getElementById(`area${i}Val`);
-                if(key in config && badge) {
-                    if(config[key] === true || config[key] === "ON") {
+                let rawVal = null;
+                if (snakeKey in config) rawVal = config[snakeKey];
+                else if (camelKey in config) rawVal = config[camelKey];
+
+                if(rawVal !== null && badge) {
+                    const parsedArea = parseOccupancyValue(rawVal);
+                    if(parsedArea === true) {
                         badge.innerText = "DETECTED";
                         badge.className = "zone-badge zone-active";
-                    } else {
+                        occupancyState[`area${i}`] = true;
+                    } else if (parsedArea === false) {
                         badge.innerText = "CLEAR";
                         badge.className = "zone-badge";
+                        occupancyState[`area${i}`] = false;
                     }
                 }
+            }
+
+            if (!hasActiveOccupancy()) {
+                clearTargetsForOccupancyGate();
             }
 
             // 3. CHECK DEVICE TYPE (Fixed: Allow partial updates)
@@ -1751,10 +1852,29 @@
 
         // --- PLOTLY INIT ---
         const layout = {
-            paper_bgcolor: '#1a1a1a', plot_bgcolor: '#1a1a1a',
-            xaxis: { range: [chartXMin, chartXMax], title: 'X - Width (cm)', gridcolor: '#333', zerolinecolor: '#666', fixedrange: true },
-            yaxis: { range: [chartYMin, chartYMax], title: 'Y - Depth (cm)', gridcolor: '#333', zerolinecolor: '#666', fixedrange: true },
-            margin: { t: 10, b: 40, l: 40, r: 40 }, font: { color: '#eee' }, showlegend: false,
+            paper_bgcolor: '#0f171c',
+            plot_bgcolor: '#10242d',
+            xaxis: {
+                range: [chartXMin, chartXMax],
+                title: 'X - Width (cm)',
+                gridcolor: 'rgba(176, 214, 224, 0.12)',
+                zerolinecolor: 'rgba(0, 188, 212, 0.35)',
+                linecolor: 'rgba(129, 162, 172, 0.4)',
+                tickfont: { color: '#bdd9df' },
+                fixedrange: true
+            },
+            yaxis: {
+                range: [chartYMin, chartYMax],
+                title: 'Y - Depth (cm)',
+                gridcolor: 'rgba(176, 214, 224, 0.12)',
+                zerolinecolor: 'rgba(0, 188, 212, 0.35)',
+                linecolor: 'rgba(129, 162, 172, 0.4)',
+                tickfont: { color: '#bdd9df' },
+                fixedrange: true
+            },
+            margin: { t: 10, b: 42, l: 46, r: 30 },
+            font: { color: '#d9edf1' },
+            showlegend: false,
             shapes: getChartShapes(),
             annotations: getChartAnnotations()
         };
@@ -1770,8 +1890,28 @@
         };
 
         Plotly.newPlot('chart', [
-            { x: [], y: [], mode: 'markers+text', text: [], textposition: 'top center', type: 'scatter' },
-            { x: [], y: [], mode: 'lines', line: {color: '#00bcd4', width: 3}, opacity: 0.3, type: 'scatter' }
+            {
+                x: [],
+                y: [],
+                mode: 'markers+text',
+                text: [],
+                textposition: 'top center',
+                marker: {
+                    size: 12,
+                    color: '#58d7f0',
+                    line: { color: '#e3f8fd', width: 1.6 }
+                },
+                textfont: { color: '#d7f5fb' },
+                type: 'scatter'
+            },
+            {
+                x: [],
+                y: [],
+                mode: 'lines',
+                line: { color: '#43cde8', width: 2 },
+                opacity: 0.26,
+                type: 'scatter'
+            }
         ], layout, chartConfig);
 
         if (window.SwitchStudioZones && typeof window.SwitchStudioZones.init === 'function') {
@@ -1785,7 +1925,8 @@
                 getLayout: () => layout,
                 getIsEditing: () => isEditingZone,
                 getIsInteracting: () => isInteracting,
-                historyLength: HISTORY_LENGTH
+                historyLength: HISTORY_LENGTH,
+                shouldRenderTargets: () => hasActiveOccupancy()
             });
         }
         
@@ -1910,6 +2051,11 @@
             // FILTER: IGNORE DATA FROM OTHER DEVICES
             if (msg.topic !== deviceSelect.value) return;
 
+            if (!hasActiveOccupancy()) {
+                clearTargetsForOccupancyGate();
+                return;
+            }
+
             updateTimestamp();
             packetInfo.innerText = `Targets Visible: ${data.targets.length}`;
             packetInfo.style.color = '#00bcd4';
@@ -1946,8 +2092,17 @@
             } else {
                 // Normal update
                 Plotly.react('chart', [
-                    { x: data.targets.map(t => t.x), y: data.targets.map(t => t.y), text: data.targets.map(t => `ID: ${t.id} [Z:${t.z}cm]`), mode: 'markers+text', textposition: 'top center', marker: { size: sizes, color: '#00bcd4', line: {color: 'white', width: 2} }, type: 'scatter' },
-                    { x: historyX, y: historyY, mode: 'lines', line: {color: '#00bcd4', width: 3}, opacity: 0.3, type: 'scatter' }
+                    {
+                        x: data.targets.map(t => t.x),
+                        y: data.targets.map(t => t.y),
+                        text: data.targets.map(t => `ID: ${t.id} [Z:${t.z}cm]`),
+                        mode: 'markers+text',
+                        textposition: 'top center',
+                        marker: { size: sizes, color: '#58d7f0', line: {color: '#e3f8fd', width: 1.6} },
+                        textfont: { color: '#d7f5fb' },
+                        type: 'scatter'
+                    },
+                    { x: historyX, y: historyY, mode: 'lines', line: {color: '#43cde8', width: 2}, opacity: 0.26, type: 'scatter' }
                 ], layout);
             }
 

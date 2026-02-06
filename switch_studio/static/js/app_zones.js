@@ -18,12 +18,14 @@
     let getLayoutFn = null;
     let getIsEditingFn = null;
     let getIsInteractingFn = null;
+    let shouldRenderTargetsFn = null;
     let limits = { ...DEFAULT_LIMITS };
 
     let targetHistory = {};
     let historyLength = 15;
     let lastCommandId = null;
     let hideZoneStatusTimer = null;
+    let targetsSuppressedByGate = false;
 
     function toRoundedInt(value, fallback) {
         const parsed = Number(value);
@@ -306,8 +308,27 @@
 
     function resetHistory() {
         targetHistory = {};
+        targetsSuppressedByGate = false;
         if (dataTableBodyEl) {
             dataTableBodyEl.innerHTML = '<tr><td colspan="5" class="no-data">No targets detected</td></tr>';
+        }
+    }
+
+    function clearTargetVisualization(message) {
+        targetHistory = {};
+        const notice = message || 'No targets detected';
+
+        if (chartEl && window.Plotly) {
+            try {
+                window.Plotly.restyle(chartEl, { x: [[]], y: [[]], text: [[]] }, [0]);
+                window.Plotly.restyle(chartEl, { x: [[]], y: [[]] }, [1]);
+            } catch (err) {
+                // Ignore render failures during transient chart states.
+            }
+        }
+
+        if (dataTableBodyEl) {
+            dataTableBodyEl.innerHTML = `<tr><td colspan="5" class="no-data">${notice}</td></tr>`;
         }
     }
 
@@ -325,6 +346,19 @@
         if (!msg || !msg.topic || !msg.payload) return false;
         if (!currentTopic || msg.topic !== currentTopic) return false;
         if (!chartEl || !window.Plotly) return false;
+
+        const shouldRenderTargets = typeof shouldRenderTargetsFn === 'function'
+            ? !!shouldRenderTargetsFn()
+            : true;
+        if (!shouldRenderTargets) {
+            if (!targetsSuppressedByGate) {
+                clearTargetVisualization('Standby: all occupancy areas clear.');
+                setPacketStatus('info', 'Standby: all occupancy areas clear');
+            }
+            targetsSuppressedByGate = true;
+            return true;
+        }
+        targetsSuppressedByGate = false;
 
         const payload = msg.payload;
         const targets = Array.isArray(payload.targets) ? payload.targets.map(normalizeTarget) : [];
@@ -378,10 +412,11 @@
                     text: data.targets.map((t) => `ID: ${t.id} [Z:${t.z}cm]`),
                     mode: 'markers+text',
                     textposition: 'top center',
-                    marker: { size: sizes, color: '#00bcd4', line: { color: 'white', width: 2 } },
+                    marker: { size: sizes, color: '#58d7f0', line: { color: '#e3f8fd', width: 1.6 } },
+                    textfont: { color: '#d7f5fb' },
                     type: 'scatter'
                 },
-                { x: historyX, y: historyY, mode: 'lines', line: { color: '#00bcd4', width: 3 }, opacity: 0.3, type: 'scatter' }
+                { x: historyX, y: historyY, mode: 'lines', line: { color: '#43cde8', width: 2 }, opacity: 0.26, type: 'scatter' }
             ], layout);
         }
 
@@ -420,6 +455,7 @@
         getLayoutFn = opts.getLayout || null;
         getIsEditingFn = opts.getIsEditing || null;
         getIsInteractingFn = opts.getIsInteracting || null;
+        shouldRenderTargetsFn = opts.shouldRenderTargets || null;
         historyLength = Number.isFinite(opts.historyLength) ? opts.historyLength : 15;
         limits = {
             xMin: Number.isFinite(opts.limits?.xMin) ? opts.limits.xMin : DEFAULT_LIMITS.xMin,
@@ -444,6 +480,7 @@
         clearPendingCommand,
         getPendingCommandId,
         resetHistory,
+        clearTargetVisualization,
         handleNewData,
         appendCommandLog
     };
