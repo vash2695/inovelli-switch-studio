@@ -75,11 +75,13 @@ function loadTabsModule(options) {
         new MockElement({ 'data-tab-target': 'zones' }),
         new MockElement({ 'data-tab-target': 'load' }),
         new MockElement({ 'data-tab-target': 'led' }),
+        new MockElement({ 'data-tab-target': 'advanced' }),
     ];
     const panels = [
         new MockElement({ 'data-tab-panels': 'zones' }),
         new MockElement({ 'data-tab-panels': 'load' }),
         new MockElement({ 'data-tab-panels': 'led' }),
+        new MockElement({ 'data-tab-panels': 'advanced' }),
         new MockElement({ 'data-tab-panels': '' }),
     ];
 
@@ -140,4 +142,15 @@ test('tab module restores persisted tab from storage', () => {
     assert.equal(panels[0].style.display, '');
     assert.equal(panels[1].style.display, 'none');
     assert.equal(panels[2].style.display, 'none');
+});
+
+test('tab module remaps legacy maintenance tab to advanced', () => {
+    const { tabs, buttons, panels, root } = loadTabsModule({ storedTab: 'maintenance' });
+    tabs.init({ root, defaultTab: 'zones' });
+
+    assert.equal(tabs.getActiveTab(), 'advanced');
+    assert.equal(buttons[3].classList.contains('active'), true);
+    assert.equal(buttons[0].classList.contains('active'), false);
+    assert.equal(panels[3].style.display, '');
+    assert.equal(panels[0].style.display, 'none');
 });

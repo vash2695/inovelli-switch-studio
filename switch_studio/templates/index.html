@@ -210,7 +210,7 @@
         <button class="tab-btn" type="button" data-tab-target="led" role="tab" aria-selected="false">LED & Notifications</button>
         <button class="tab-btn" type="button" data-tab-target="buttons" role="tab" aria-selected="false">Buttons & Scenes</button>
         <button class="tab-btn" type="button" data-tab-target="power" role="tab" aria-selected="false">Power & Device</button>
-        <button class="tab-btn" type="button" data-tab-target="maintenance" role="tab" aria-selected="false">Maintenance</button>
+        <button class="tab-btn" type="button" data-tab-target="advanced" role="tab" aria-selected="false">Advanced</button>
     </div>
     <div class="dirty-bar" id="dirtyBar">
         <span id="dirtyText">No pending changes</span>
@@ -225,7 +225,7 @@
 
     <div class="app-container focus-zones" id="appContainer">
         <div class="main-content">
-            <div id="nonMmwaveWarning" data-tab-panels="zones,load,led,buttons,power,maintenance">WARNING: Standard Switch Detected<br><span style="font-size: 0.8em; font-weight: normal;">This device does not have mmWave hardware.</span></div>
+            <div id="nonMmwaveWarning" data-tab-panels="zones,load,led,buttons,power,advanced">WARNING: Standard Switch Detected<br><span style="font-size: 0.8em; font-weight: normal;">This device does not have mmWave hardware.</span></div>
 
             <div class="target-report-card" data-tab-panels="zones">
                 <div class="target-report-row">
@@ -462,15 +462,35 @@
                     <div id="schemaPowerFields">
                         <div style="font-size: 0.9em; color: #888;">Loading schema...</div>
                     </div>
-                    <div class="config-title" style="margin-top: 12px;">Runtime Options</div>
-                    <div id="schemaOptionFields">
-                        <div style="font-size: 0.9em; color: #888;">Loading options...</div>
+                </div>
+            </details>
+
+            <details open class="mobile-collapsed" data-tab-panels="advanced">
+                <summary>Advanced Settings</summary>
+                <div class="config-content">
+                    <div style="font-size: 0.84em; color: #93b4bc; margin-bottom: 10px;">
+                        Set-and-forget settings. Most users only need to change these during initial setup.
+                    </div>
+                    <div id="schemaAdvancedFields">
+                        <div style="font-size: 0.9em; color: #888;">Loading advanced settings...</div>
                     </div>
                 </div>
             </details>
 
-            <details open class="mobile-collapsed" data-tab-panels="maintenance,zones">
-                <summary>Maintenance</summary>
+            <details open class="mobile-collapsed" data-tab-panels="advanced">
+                <summary>Fan Parameters (May Not Apply)</summary>
+                <div class="config-content">
+                    <div style="font-size: 0.84em; color: #ffcc80; margin-bottom: 10px;">
+                        These values are shared firmware fields and may not function on VZM32-SN.
+                    </div>
+                    <div id="schemaFanFields">
+                        <div style="font-size: 0.9em; color: #888;">Loading fan-related fields...</div>
+                    </div>
+                </div>
+            </details>
+
+            <details open class="mobile-collapsed" data-tab-panels="zones">
+                <summary>Maintenance Tools</summary>
                 <div class="config-content">
                     <button class="cmd-btn btn-full" onclick="sendCommand(1)">Auto-Config Interference</button>
                     <button class="cmd-btn btn-full btn-danger" onclick="sendCommand(3)">Clear Interference</button>
@@ -572,7 +592,8 @@
         const schemaLedFields = document.getElementById('schemaLedFields');
         const schemaButtonFields = document.getElementById('schemaButtonFields');
         const schemaPowerFields = document.getElementById('schemaPowerFields');
-        const schemaOptionFields = document.getElementById('schemaOptionFields');
+        const schemaAdvancedFields = document.getElementById('schemaAdvancedFields');
+        const schemaFanFields = document.getElementById('schemaFanFields');
 
         let schemaModel = null;
         let schemaFieldMap = {};
@@ -637,7 +658,7 @@
                 // Ignore storage failures.
             }
 
-            const allowedPanels = new Set(['zones', 'maintenance']);
+            const allowedPanels = new Set(['zones', 'advanced']);
             const panels = Array.from(document.querySelectorAll('[data-tab-panels]'));
             panels.forEach(panel => {
                 const targets = parsePanelTargets(panel.getAttribute('data-tab-panels'));
@@ -1279,6 +1300,63 @@
             return 'power';
         }
 
+        const hiddenFieldKeys = new Set([
+            // Controlled via dedicated top-level toggle card in the zones view.
+            'mmWaveTargetInfoReport'
+        ]);
+
+        const fanFieldKeys = new Set([
+            'fanControlMode',
+            'fanTimerMode',
+            'lowLevelForFanControlMode',
+            'mediumLevelForFanControlMode',
+            'highLevelForFanControlMode',
+            'fanLedLevelType',
+            'ledColorForFanControlMode',
+            'singleTapBehavior'
+        ]);
+
+        const advancedFieldKeys = new Set([
+            // Presence set-and-forget tuning.
+            'mmWaveStayLife',
+            'mmWaveHeightMin',
+            'mmWaveHeightMax',
+            'mmWaveWidthMin',
+            'mmWaveWidthMax',
+            'mmWaveDepthMin',
+            'mmWaveDepthMax',
+
+            // Load/switch setup parameters.
+            'switchType',
+            'outputMode',
+            'invertSwitch',
+            'smartBulbMode',
+            'bindingOffToOnSyncLevel',
+            'higherOutputInNonNeutral',
+            'minimumLevel',
+            'maximumLevel',
+            'stateAfterPowerRestored',
+            'autoTimerOff',
+            'quickStartTime',
+            'quickStartLevel',
+            'localProtection',
+            'otaImageType'
+        ]);
+
+        function isFieldHiddenByDedicatedControl(field) {
+            return !!(field && field.name && hiddenFieldKeys.has(field.name));
+        }
+
+        function isFanField(field) {
+            return !!(field && field.name && fanFieldKeys.has(field.name));
+        }
+
+        function isSetAndForgetField(field, sourceType) {
+            if (!field || !field.name) return false;
+            if (sourceType === 'options') return true;
+            return advancedFieldKeys.has(field.name);
+        }
+
         function createSchemaFieldInput(field, inputIdOverride) {
             const inputId = inputIdOverride || field.name;
 
@@ -1597,7 +1675,8 @@
                 if (schemaLedFields) schemaLedFields.innerHTML = unavailable;
                 if (schemaButtonFields) schemaButtonFields.innerHTML = unavailable;
                 if (schemaPowerFields) schemaPowerFields.innerHTML = unavailable;
-                if (schemaOptionFields) schemaOptionFields.innerHTML = unavailable;
+                if (schemaAdvancedFields) schemaAdvancedFields.innerHTML = unavailable;
+                if (schemaFanFields) schemaFanFields.innerHTML = unavailable;
                 return;
             }
 
@@ -1607,19 +1686,55 @@
             const fields = schemaModel.fields.filter(field => field && field.name);
             const options = Array.isArray(schemaModel.options) ? schemaModel.options.filter(opt => opt && opt.name) : [];
 
-            const presenceFields = orderPresenceFields(fields.filter(field => mapFieldTabToKey(field, 'fields') === 'presence'));
-            const loadFields = fields.filter(field => mapFieldTabToKey(field, 'fields') === 'load');
-            const ledFields = fields.filter(field => mapFieldTabToKey(field, 'fields') === 'led');
-            const buttonFields = fields.filter(field => mapFieldTabToKey(field, 'fields') === 'buttons');
-            const powerFields = fields.filter(field => mapFieldTabToKey(field, 'fields') === 'power');
-            const optionFields = options.map(option => ({ ...option, section: option.section || 'Runtime Options' }));
+            const buckets = {
+                presence: [],
+                load: [],
+                led: [],
+                buttons: [],
+                power: [],
+                advanced: [],
+                fan: []
+            };
 
-            renderSchemaFieldCollection(schemaPresenceFields, presenceFields, 'No Presence fields found in schema.');
-            renderSchemaFieldCollection(schemaLoadFields, loadFields, 'No Load & Dimming fields found in schema.');
+            fields.forEach(field => {
+                if (isFieldHiddenByDedicatedControl(field)) return;
+
+                if (isFanField(field)) {
+                    buckets.fan.push({ ...field, section: 'Fan Parameters (May Not Apply)' });
+                    return;
+                }
+
+                if (isSetAndForgetField(field, 'fields')) {
+                    buckets.advanced.push({ ...field, section: field.section || 'Set-and-Forget' });
+                    return;
+                }
+
+                const tabKey = mapFieldTabToKey(field, 'fields');
+                if (tabKey === 'presence') buckets.presence.push(field);
+                else if (tabKey === 'load') buckets.load.push(field);
+                else if (tabKey === 'led') buckets.led.push(field);
+                else if (tabKey === 'buttons') buckets.buttons.push(field);
+                else if (tabKey === 'power') buckets.power.push(field);
+            });
+
+            const optionFields = options.map(option => ({ ...option, section: option.section || 'Runtime Options' }));
+            buckets.advanced.push(...optionFields);
+
+            const presenceFields = orderPresenceFields(buckets.presence);
+            const loadFields = buckets.load;
+            const ledFields = buckets.led;
+            const buttonFields = buckets.buttons;
+            const powerFields = buckets.power;
+            const advancedFields = buckets.advanced;
+            const fanFields = buckets.fan;
+
+            renderSchemaFieldCollection(schemaPresenceFields, presenceFields, 'No presence controls found.');
+            renderSchemaFieldCollection(schemaLoadFields, loadFields, 'No load or dimming controls found.');
             renderSchemaFieldCollection(schemaLedFields, ledFields, 'No LED fields found in schema.');
-            renderSchemaFieldCollection(schemaButtonFields, buttonFields, 'No Button/Scene fields found in schema.');
-            renderSchemaFieldCollection(schemaPowerFields, powerFields, 'No Power & Device fields found in schema.');
-            renderSchemaFieldCollection(schemaOptionFields, optionFields, 'No runtime options found in schema.');
+            renderSchemaFieldCollection(schemaButtonFields, buttonFields, 'No button or scene fields found.');
+            renderSchemaFieldCollection(schemaPowerFields, powerFields, 'No power/device fields found.');
+            renderSchemaFieldCollection(schemaAdvancedFields, advancedFields, 'No advanced settings found.');
+            renderSchemaFieldCollection(schemaFanFields, fanFields, 'No fan-specific fields exposed for this device.');
         }
 
         function syncCompositeSchemaInputs(config) {

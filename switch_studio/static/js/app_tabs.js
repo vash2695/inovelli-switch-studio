@@ -15,6 +15,7 @@
     function normalizeTabName(tabName) {
         if (tabName === 'live') return 'zones';
         if (tabName === 'presence') return 'zones';
+        if (tabName === 'maintenance') return 'advanced';
         return tabName;
     }
 
