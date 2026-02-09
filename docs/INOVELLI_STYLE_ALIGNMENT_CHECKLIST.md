@@ -60,10 +60,10 @@ Acceptance:
 - Bottom data/action area matches desired polish and hierarchy.
 
 ## Phase A6: Motion + Interaction + QA
-- [ ] SA-601 Normalize hover/focus/active states across interactive elements.
-- [ ] SA-602 Validate reduced-motion behavior and keyboard focus visibility.
-- [ ] SA-603 Verify desktop/mobile layout stability.
-- [ ] SA-604 Run full automated test suite and manual ingress smoke checks.
+- [x] SA-601 Normalize hover/focus/active states across interactive elements.
+- [x] SA-602 Validate reduced-motion behavior and keyboard focus visibility.
+- [x] SA-603 Verify desktop/mobile layout stability.
+- [x] SA-604 Run full automated test suite and manual ingress smoke checks.
 
 Acceptance:
 - No regressions in behavior, accessibility, or responsiveness.

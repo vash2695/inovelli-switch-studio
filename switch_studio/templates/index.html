@@ -108,7 +108,14 @@
 
         :focus-visible {
             outline: 2px solid var(--accent);
-            outline-offset: 1px;
+            outline-offset: 2px;
+        }
+
+        button,
+        select,
+        input,
+        [role="tab"] {
+            -webkit-tap-highlight-color: transparent;
         }
         
         /* Header */
@@ -229,6 +236,11 @@
             color: #e9fffd;
             background: rgba(13, 212, 192, 0.06);
         }
+        .tab-btn:focus-visible {
+            outline: none;
+            box-shadow: inset 0 -2px 0 var(--accent), 0 0 0 2px rgba(13, 212, 192, 0.3);
+            border-radius: 2px;
+        }
         .tab-btn.active {
             background: transparent;
             color: var(--accent);
@@ -266,6 +278,12 @@
         }
         .dirty-btn:disabled { opacity: 0.45; cursor: not-allowed; }
         .dirty-btn:not(:disabled):hover { border-color: var(--accent); color: #fff; background: rgba(13, 212, 192, 0.12); }
+        .dirty-btn:not(:disabled):active { transform: translateY(1px); }
+        .dirty-btn:focus-visible {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px rgba(13, 212, 192, 0.24);
+        }
         .dirty-btn.apply-btn { border-color: var(--success); }
         .dirty-btn.apply-btn:not(:disabled):hover { background: linear-gradient(135deg, var(--accent), #0bbeb0); color: #061216; border-color: transparent; }
         .dirty-btn.apply-btn:not(:disabled) {
@@ -298,6 +316,10 @@
         .zones-sidebar-tab:hover {
             color: #dce8f2;
             background: rgba(255, 255, 255, 0.02);
+        }
+        .zones-sidebar-tab:focus-visible {
+            outline: none;
+            box-shadow: inset 0 -2px 0 var(--accent), 0 0 0 2px rgba(13, 212, 192, 0.24);
         }
         .zones-sidebar-tab.active {
             color: var(--accent);
@@ -355,6 +377,8 @@
             flex: 1 1 auto;
             overflow-x: auto;
             padding-bottom: 1px;
+            scrollbar-width: thin;
+            scrollbar-color: var(--border-subtle) transparent;
         }
         .zones-status-item {
             max-width: 34ch;
@@ -482,6 +506,10 @@
         }
         .zones-report-toggle input[type="checkbox"]:checked::before {
             transform: translateX(16px);
+        }
+        .zones-report-toggle input[type="checkbox"]:focus-visible {
+            outline: none;
+            box-shadow: 0 0 0 2px rgba(13, 212, 192, 0.3);
         }
         .zones-report-state {
             border-radius: 999px;
@@ -776,6 +804,10 @@
         .input-row input[type="checkbox"]:checked::before {
             transform: translateX(16px);
         }
+        .input-row input[type="checkbox"]:focus-visible {
+            outline: none;
+            box-shadow: 0 0 0 2px rgba(13, 212, 192, 0.28);
+        }
 
         /* Grid for Raw Zone Data */
         .zone-data-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
@@ -810,6 +842,14 @@
             background: rgba(13, 212, 192, 0.16);
             color: #dffffb;
         }
+        .cmd-btn:active {
+            transform: translateY(1px);
+        }
+        .cmd-btn:focus-visible {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px rgba(13, 212, 192, 0.22);
+        }
         .cmd-btn:disabled {
             opacity: 0.5;
             cursor: not-allowed;
@@ -818,7 +858,7 @@
         }
         .cmd-btn:disabled:hover {
             border-color: var(--border-strong);
-            background: linear-gradient(180deg, #2a3449 0%, #222c3e 100%);
+            background: var(--bg-elev-3);
             color: var(--text-primary);
         }
         .btn-danger { border-color: #d86e6e; }
@@ -962,6 +1002,22 @@
             .control-select,
             .full-width-select { width: 100%; }
             .map-standby-chip { left: 10px; bottom: 10px; font-size: 0.72rem; }
+        }
+
+        @media (max-width: 1180px) {
+            .zones-live-status {
+                gap: 6px;
+            }
+            .zones-status-item {
+                max-width: 26ch;
+            }
+            .zones-meta-item {
+                font-size: 0.66rem;
+                padding: 3px 7px;
+            }
+            .zones-live-meta {
+                gap: 6px;
+            }
         }
     </style>
 </head>
