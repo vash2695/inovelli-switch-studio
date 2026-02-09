@@ -155,6 +155,15 @@
             background: var(--success);
             box-shadow: 0 0 8px rgba(74, 197, 109, 0.75);
         }
+        .status-chip.offline {
+            color: #ffd6d6;
+            border-color: rgba(255, 98, 98, 0.55);
+            background: rgba(89, 41, 52, 0.58);
+        }
+        .status-chip.offline .status-dot {
+            background: var(--danger);
+            box-shadow: 0 0 8px rgba(255, 98, 98, 0.8);
+        }
         .btn-force-sync {
             border-color: var(--accent);
             background: linear-gradient(135deg, var(--accent), var(--accent-strong));
@@ -844,7 +853,7 @@
                 <select id="deviceSelect"><option value="" disabled selected>Loading devices...</option></select>
             </div>
             <div class="header-right">
-                <span class="status-chip"><span class="status-dot"></span>Connected</span>
+                <span class="status-chip" id="connectionChip"><span class="status-dot" id="connectionDot"></span><span id="connectionText">Connecting...</span></span>
                 <button class="cmd-btn btn-force-sync" id="btnForceSync" onclick="handleForceSyncClick()">Force Sync</button>
             </div>
         </div>
@@ -942,12 +951,12 @@
 
         <div class="sidebar" id="configSidebar">
             <div class="zones-sidebar-tabs" id="zonesSidebarTabs" data-tab-panels="zones" role="tablist" aria-label="Presence and zones sidebar views">
-                <button class="zones-sidebar-tab active" type="button" data-zones-pane-target="controls" aria-selected="true">Controls & Zones</button>
-                <button class="zones-sidebar-tab" type="button" data-zones-pane-target="config" aria-selected="false">Configuration</button>
-                <button class="zones-sidebar-tab" type="button" data-zones-pane-target="view" aria-selected="false">View</button>
+                <button class="zones-sidebar-tab active" type="button" id="zonesPaneTabControls" role="tab" data-zones-pane-target="controls" aria-selected="true" aria-controls="zonesPaneControls">Controls & Zones</button>
+                <button class="zones-sidebar-tab" type="button" id="zonesPaneTabConfig" role="tab" data-zones-pane-target="config" aria-selected="false" aria-controls="zonesPaneConfig">Configuration</button>
+                <button class="zones-sidebar-tab" type="button" id="zonesPaneTabView" role="tab" data-zones-pane-target="view" aria-selected="false" aria-controls="zonesPaneView">View</button>
             </div>
 
-            <div class="zones-pane is-active" data-zones-pane="controls" data-tab-panels="zones">
+            <div class="zones-pane is-active" id="zonesPaneControls" role="tabpanel" aria-labelledby="zonesPaneTabControls" data-zones-pane="controls" data-tab-panels="zones">
             <div class="config-group live-sensor-card">
                 <div class="config-title">Live Sensors</div>
                 <div class="sensor-row">
@@ -1029,7 +1038,7 @@
             </details>
             </div>
 
-            <div class="zones-pane" data-zones-pane="config" data-tab-panels="zones">
+            <div class="zones-pane" id="zonesPaneConfig" role="tabpanel" aria-labelledby="zonesPaneTabConfig" data-zones-pane="config" data-tab-panels="zones">
             <details open class="mobile-collapsed">
                 <summary>Presence Configuration</summary>
                 <div class="config-content">
@@ -1043,7 +1052,7 @@
             </details>
             </div>
 
-            <div class="zones-pane" data-zones-pane="view" data-tab-panels="zones">
+            <div class="zones-pane" id="zonesPaneView" role="tabpanel" aria-labelledby="zonesPaneTabView" data-zones-pane="view" data-tab-panels="zones">
             <details open class="mobile-collapsed">
                 <summary>Studio View Settings</summary>
                 <div class="config-content">
@@ -1228,6 +1237,8 @@
         const zonesSidebarTabs = document.getElementById('zonesSidebarTabs');
         const zonesSidebarTabButtons = Array.from(document.querySelectorAll('[data-zones-pane-target]'));
         const zonesSidebarPanes = Array.from(document.querySelectorAll('[data-zones-pane]'));
+        const connectionChip = document.getElementById('connectionChip');
+        const connectionText = document.getElementById('connectionText');
         const TARGET_REPORT_AUTO_OFF_STORAGE_KEY = 'switchStudio.targetReportAutoOff';
         const ZONES_SIDEBAR_TAB_STORAGE_KEY = 'switchStudio.zonesSidebarTab';
 
@@ -1387,6 +1398,7 @@
                 const isActive = target === normalizedPane;
                 button.classList.toggle('active', isActive);
                 button.setAttribute('aria-selected', String(isActive));
+                button.tabIndex = isActive ? 0 : -1;
             });
 
             zonesSidebarPanes.forEach(panel => {
@@ -1394,6 +1406,8 @@
                 const isActive = target === normalizedPane;
                 panel.classList.toggle('is-active', isActive);
                 panel.style.display = isActive ? '' : 'none';
+                panel.hidden = !isActive;
+                panel.setAttribute('aria-hidden', String(!isActive));
             });
 
             try {
@@ -1415,7 +1429,37 @@
                 });
             });
 
+            zonesSidebarTabs.addEventListener('keydown', (event) => {
+                const key = event.key;
+                if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(key)) return;
+
+                const currentIndex = zonesSidebarTabButtons.findIndex(button =>
+                    normalizeZonesSidebarPane(button.getAttribute('data-zones-pane-target')) === activeZonesSidebarPane
+                );
+                if (currentIndex < 0) return;
+
+                event.preventDefault();
+                let nextIndex = currentIndex;
+                if (key === 'ArrowRight') nextIndex = (currentIndex + 1) % zonesSidebarTabButtons.length;
+                if (key === 'ArrowLeft') nextIndex = (currentIndex - 1 + zonesSidebarTabButtons.length) % zonesSidebarTabButtons.length;
+                if (key === 'Home') nextIndex = 0;
+                if (key === 'End') nextIndex = zonesSidebarTabButtons.length - 1;
+
+                const nextButton = zonesSidebarTabButtons[nextIndex];
+                if (!nextButton) return;
+                const nextPane = nextButton.getAttribute('data-zones-pane-target');
+                applyZonesSidebarPane(nextPane);
+                nextButton.focus();
+            });
+
             applyZonesSidebarPane(activeZonesSidebarPane);
+        }
+
+        function setConnectionState(isConnected) {
+            if (!connectionChip || !connectionText) return;
+            const connected = !!isConnected;
+            connectionChip.classList.toggle('offline', !connected);
+            connectionText.textContent = connected ? 'Connected' : 'Disconnected';
         }
 
         function applyLegacyLayout() {
@@ -2982,9 +3026,16 @@
 
         // --- SOCKET EVENT HANDLERS ---
         socket.on('connect', () => {
+            setConnectionState(true);
             socket.emit('request_devices');
             socket.emit('request_schema');
             syncTargetReportingAutoOffPreference();
+        });
+        socket.on('disconnect', () => {
+            setConnectionState(false);
+        });
+        socket.on('connect_error', () => {
+            setConnectionState(false);
         });
 
         socket.on('schema_model', function(schema) {

@@ -54,15 +54,14 @@ Switch Studio includes an in-app `Live Position Reporting` toggle and optional `
 
 ### Presence & Zones
 
-- Target reporting toggle
-- Live radar map
-- Target table
-- Live sensors
-- Zone status
-- Zone editor
-- Presence and motion controls
-- Studio view/map settings
-- Maintenance tools (auto-config interference, clear/reset actions)
+- Live occupancy status strip (Area 1-4, illuminance, target-reporting state)
+- Target reporting controls (immediate apply, optional auto-off on disconnect)
+- Live radar map with standby state chip
+- Target telemetry table (styled action/state badges)
+- Right sidebar subtabs:
+  - Controls & Zones: Live Sensors, Zone Status, Zone Editor
+  - Configuration: Presence controls and motion behavior settings
+  - View: Map visibility/scale settings and maintenance tools
 
 ### Load & Dimming
 
@@ -96,6 +95,7 @@ Operational power/device controls and diagnostics that are not classified as adv
 - `Discard` reverts pending controls to latest device state.
 - Device routing is session-scoped: each browser session can monitor/configure a different device safely.
 - Legacy stored tab values are normalized automatically (`live`/`presence` -> `zones`, `maintenance` -> `advanced`).
+- Presence sidebar subtab selection (`Controls & Zones` / `Configuration` / `View`) is persisted per browser.
 
 ## Testing
 
