@@ -264,6 +264,62 @@
             background: linear-gradient(135deg, rgba(74, 197, 109, 0.18), rgba(74, 197, 109, 0.12));
         }
 
+        .zones-sidebar-tabs {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px;
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            background: rgba(25, 33, 48, 0.92);
+            box-shadow: var(--shadow-soft);
+        }
+        .zones-sidebar-tab {
+            flex: 1;
+            border: 1px solid transparent;
+            border-radius: var(--radius-sm);
+            background: transparent;
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 0.01em;
+            padding: 8px 6px;
+            cursor: pointer;
+            transition: border-color var(--anim-fast), background var(--anim-fast), color var(--anim-fast);
+        }
+        .zones-sidebar-tab:hover {
+            color: #e8fffd;
+            border-color: rgba(22, 215, 203, 0.34);
+            background: rgba(22, 215, 203, 0.1);
+        }
+        .zones-sidebar-tab.active {
+            color: #081318;
+            border-color: rgba(22, 215, 203, 0.75);
+            background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+        }
+        .zones-pane {
+            display: none;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .zones-pane.is-active {
+            display: flex;
+        }
+        .live-sensor-card {
+            background: linear-gradient(135deg, rgba(22, 215, 203, 0.12), rgba(31, 40, 57, 0.9));
+            border-color: rgba(22, 215, 203, 0.42);
+        }
+        .live-sensor-card .config-title {
+            color: var(--accent);
+            border-bottom-color: rgba(22, 215, 203, 0.34);
+        }
+        .panel-lede {
+            margin-bottom: 10px;
+            font-size: 0.83em;
+            color: #9bc1cc;
+            line-height: 1.45;
+        }
+
         .zones-live-strip {
             display: flex;
             align-items: center;
@@ -713,6 +769,8 @@
             .zones-live-strip { padding: 8px 10px; }
             .zones-live-meta { width: 100%; margin-left: 0; justify-content: flex-start; }
             .zones-meta-item { font-size: 0.74rem; }
+            .zones-sidebar-tabs { overflow-x: auto; padding: 5px; }
+            .zones-sidebar-tab { min-width: 126px; flex: 0 0 auto; }
             .map-standby-chip { left: 10px; bottom: 10px; font-size: 0.72rem; }
         }
     </style>
@@ -825,9 +883,15 @@
         </div>
 
         <div class="sidebar" id="configSidebar">
-            
-            <div class="config-group" style="background: #1e1e1e; border-color: #00bcd4;" data-tab-panels="zones">
-                <div class="config-title" style="color: #00bcd4;">Live Sensors</div>
+            <div class="zones-sidebar-tabs" id="zonesSidebarTabs" data-tab-panels="zones" role="tablist" aria-label="Presence and zones sidebar views">
+                <button class="zones-sidebar-tab active" type="button" data-zones-pane-target="controls" aria-selected="true">Controls & Zones</button>
+                <button class="zones-sidebar-tab" type="button" data-zones-pane-target="config" aria-selected="false">Configuration</button>
+                <button class="zones-sidebar-tab" type="button" data-zones-pane-target="view" aria-selected="false">View</button>
+            </div>
+
+            <div class="zones-pane is-active" data-zones-pane="controls" data-tab-panels="zones">
+            <div class="config-group live-sensor-card">
+                <div class="config-title">Live Sensors</div>
                 <div class="sensor-row">
                     <span style="color: #ccc;">Area 1 (Primary):</span>
                     <span id="occupancyVal" class="sensor-val badge-clear">Waiting...</span>
@@ -905,11 +969,13 @@
                     <button class="cmd-btn btn-full btn-danger" onclick="deleteZone()" style="margin-top:5px;">Delete Selected Zone</button>
                 </div>
             </details>
+            </div>
 
-            <details open class="mobile-collapsed" data-tab-panels="zones">
-                <summary>Presence & Motion Settings</summary>
+            <div class="zones-pane" data-zones-pane="config" data-tab-panels="zones">
+            <details open class="mobile-collapsed">
+                <summary>Presence Configuration</summary>
                 <div class="config-content">
-                    <div style="font-size: 0.84em; color: #93b4bc; margin-bottom: 10px;">
+                    <div class="panel-lede">
                         Core motion behavior settings for occupancy timing, sensitivity, and load control.
                     </div>
                     <div id="schemaPresenceFields">
@@ -917,8 +983,10 @@
                     </div>
                 </div>
             </details>
+            </div>
 
-            <details open class="mobile-collapsed" data-tab-panels="zones">
+            <div class="zones-pane" data-zones-pane="view" data-tab-panels="zones">
+            <details open class="mobile-collapsed">
                 <summary>Studio View Settings</summary>
                 <div class="config-content">
                     
@@ -980,6 +1048,21 @@
                     <button class="cmd-btn btn-full" onclick="updateRadarScale()" style="margin-top:5px; background: #00bcd4; color: #1a1a1a;">Update Scale</button>
                 </div>
             </details>
+            <details open class="mobile-collapsed">
+                <summary>Maintenance Tools</summary>
+                <div class="config-content">
+                    <button class="cmd-btn btn-full" onclick="sendCommand(1)">Auto-Config Interference</button>
+                    <button class="cmd-btn btn-full btn-danger" onclick="sendCommand(3)">Clear Interference</button>
+                    <div style="height: 10px;"></div>
+                    <button class="cmd-btn btn-full" onclick="sendCommand(4)">Reset Detection Zones</button>
+                    <button class="cmd-btn btn-full" onclick="sendCommand(5)">Clear Stay Zones</button>
+                    <div class="config-title" style="margin-top: 12px;">Command Feedback</div>
+                    <div id="commandLog" class="command-log">
+                        <div class="command-log-empty">No command activity yet.</div>
+                    </div>
+                </div>
+            </details>
+            </div>
 
             <details open class="mobile-collapsed" data-tab-panels="load">
                 <summary>Load & Dimming (Schema)</summary>
@@ -1041,20 +1124,6 @@
                 </div>
             </details>
 
-            <details open class="mobile-collapsed" data-tab-panels="zones">
-                <summary>Maintenance Tools</summary>
-                <div class="config-content">
-                    <button class="cmd-btn btn-full" onclick="sendCommand(1)">Auto-Config Interference</button>
-                    <button class="cmd-btn btn-full btn-danger" onclick="sendCommand(3)">Clear Interference</button>
-                    <div style="height: 10px;"></div>
-                    <button class="cmd-btn btn-full" onclick="sendCommand(4)">Reset Detection Zones</button>
-                    <button class="cmd-btn btn-full" onclick="sendCommand(5)">Clear Stay Zones</button>
-                    <div class="config-title" style="margin-top: 12px;">Command Feedback</div>
-                    <div id="commandLog" class="command-log">
-                        <div class="command-log-empty">No command activity yet.</div>
-                    </div>
-                </div>
-            </details>
         </div>
     </div>
 
@@ -1094,7 +1163,11 @@
         const stripIlluminanceVal = document.getElementById('stripIlluminanceVal');
         const stripTargetReportState = document.getElementById('stripTargetReportState');
         const mapStandbyChip = document.getElementById('mapStandbyChip');
+        const zonesSidebarTabs = document.getElementById('zonesSidebarTabs');
+        const zonesSidebarTabButtons = Array.from(document.querySelectorAll('[data-zones-pane-target]'));
+        const zonesSidebarPanes = Array.from(document.querySelectorAll('[data-zones-pane]'));
         const TARGET_REPORT_AUTO_OFF_STORAGE_KEY = 'switchStudio.targetReportAutoOff';
+        const ZONES_SIDEBAR_TAB_STORAGE_KEY = 'switchStudio.zonesSidebarTab';
 
         // Visualizer Scale Inputs
         const vizXMin = document.getElementById('vizXMin');
@@ -1104,6 +1177,7 @@
 
         let targetHistory = {}; 
         const HISTORY_LENGTH = 15; 
+        let activeZonesSidebarPane = 'controls';
         
         // Interaction Lock for Jitter Prevention
         let isInteracting = false;
@@ -1228,6 +1302,60 @@
             appContainer.classList.toggle('focus-config', !zoneFocused);
         }
 
+        function normalizeZonesSidebarPane(paneName) {
+            const raw = String(paneName || '').trim().toLowerCase();
+            if (raw === 'controls' || raw === 'config' || raw === 'view') return raw;
+            return 'controls';
+        }
+
+        function getStoredZonesSidebarPane() {
+            try {
+                return normalizeZonesSidebarPane(localStorage.getItem(ZONES_SIDEBAR_TAB_STORAGE_KEY));
+            } catch (err) {
+                return 'controls';
+            }
+        }
+
+        function applyZonesSidebarPane(paneName) {
+            const normalizedPane = normalizeZonesSidebarPane(paneName);
+            activeZonesSidebarPane = normalizedPane;
+
+            zonesSidebarTabButtons.forEach(button => {
+                const target = normalizeZonesSidebarPane(button.getAttribute('data-zones-pane-target'));
+                const isActive = target === normalizedPane;
+                button.classList.toggle('active', isActive);
+                button.setAttribute('aria-selected', String(isActive));
+            });
+
+            zonesSidebarPanes.forEach(panel => {
+                const target = normalizeZonesSidebarPane(panel.getAttribute('data-zones-pane'));
+                const isActive = target === normalizedPane;
+                panel.classList.toggle('is-active', isActive);
+                panel.style.display = isActive ? '' : 'none';
+            });
+
+            try {
+                localStorage.setItem(ZONES_SIDEBAR_TAB_STORAGE_KEY, normalizedPane);
+            } catch (err) {
+                // Ignore storage failures.
+            }
+        }
+
+        function initZonesSidebarTabs() {
+            if (!zonesSidebarTabs || zonesSidebarTabButtons.length === 0 || zonesSidebarPanes.length === 0) return;
+            activeZonesSidebarPane = getStoredZonesSidebarPane();
+
+            zonesSidebarTabButtons.forEach(button => {
+                button.addEventListener('click', () => {
+                    const nextPane = button.getAttribute('data-zones-pane-target');
+                    if (!nextPane) return;
+                    applyZonesSidebarPane(nextPane);
+                });
+            });
+
+            applyZonesSidebarPane(activeZonesSidebarPane);
+        }
+
         function applyLegacyLayout() {
             if (tabBar) {
                 tabBar.style.display = 'none';
@@ -1254,6 +1382,7 @@
                 onTabChange: (activeTab) => {
                     applyLayoutMode(activeTab);
                     if (String(activeTab || '').toLowerCase() === 'zones') {
+                        applyZonesSidebarPane(activeZonesSidebarPane);
                         setTimeout(() => {
                             const chartDiv = document.getElementById('chart');
                             if (chartDiv && chartDiv.data) {
@@ -1267,6 +1396,7 @@
             applyLegacyLayout();
             applyLayoutMode('zones');
         }
+        initZonesSidebarTabs();
 
         if (window.SwitchStudioState && typeof window.SwitchStudioState.init === 'function') {
             window.SwitchStudioState.init({
@@ -1681,6 +1811,10 @@
             if (fieldOverrides && Object.prototype.hasOwnProperty.call(fieldOverrides, raw)) {
                 return fieldOverrides[raw];
             }
+            if (raw === 'Yes') return 'Enabled';
+            if (raw === 'No') return 'Disabled';
+            if (raw === 'True') return 'Enabled';
+            if (raw === 'False') return 'Disabled';
             return raw;
         }
 
