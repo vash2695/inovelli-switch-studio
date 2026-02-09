@@ -340,12 +340,35 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
-            gap: 12px;
-            flex-wrap: wrap;
+            gap: 8px;
+            flex-wrap: nowrap;
             padding: 7px 10px;
             border: 1px solid var(--border-subtle);
             border-radius: var(--radius-md);
             background: rgba(18, 23, 34, 0.88);
+        }
+        .zones-live-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
+            flex: 1 1 auto;
+            overflow-x: auto;
+            padding-bottom: 1px;
+        }
+        .zones-status-item {
+            max-width: 34ch;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .zones-status-item > span {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: block;
+        }
+        .zones-status-item.zones-last-packet {
+            max-width: none;
+            flex-shrink: 0;
         }
         .zones-pill-row {
             display: flex;
@@ -394,9 +417,10 @@
         .zones-live-meta {
             display: flex;
             align-items: center;
-            gap: 10px;
-            flex-wrap: wrap;
-            margin-left: auto;
+            gap: 8px;
+            flex-wrap: nowrap;
+            margin-left: 8px;
+            flex: 0 0 auto;
         }
         .zones-meta-item {
             display: inline-flex;
@@ -496,7 +520,7 @@
         .studio-toast-error { border-color: var(--danger); }
 
         /* Main Layout Grid */
-        .app-container { display: grid; grid-template-columns: minmax(0, 1fr) 340px; flex-grow: 1; overflow: hidden; transition: var(--anim-med); }
+        .app-container { display: grid; grid-template-columns: minmax(0, 1fr) 390px; flex-grow: 1; overflow: hidden; transition: var(--anim-med); }
         .main-content { display: flex; flex-direction: column; padding: 8px 6px 10px; overflow-y: auto; position: relative; gap: 8px; }
         .sidebar {
             background: var(--bg-elev-2);
@@ -928,8 +952,9 @@
             .dirty-bar { padding: 8px 10px; flex-wrap: wrap; }
             .dirty-actions { width: 100%; justify-content: flex-end; }
             .dirty-btn { min-width: 88px; }
-            .zones-live-strip { padding: 8px 10px; }
-            .zones-live-meta { width: 100%; margin-left: 0; justify-content: flex-start; }
+            .zones-live-strip { padding: 8px 10px; flex-wrap: wrap; }
+            .zones-live-status { width: 100%; }
+            .zones-live-meta { width: 100%; margin-left: 0; justify-content: flex-end; }
             .zones-meta-item { font-size: 0.74rem; }
             .zones-sidebar-tabs { overflow-x: auto; padding: 5px; }
             .zones-sidebar-tab { min-width: 126px; flex: 0 0 auto; }
@@ -974,11 +999,10 @@
             <div id="nonMmwaveWarning" data-tab-panels="zones,load,led,buttons,power,advanced">WARNING: Standard Switch Detected<br><span style="font-size: 0.8em; font-weight: normal;">This device does not have mmWave hardware.</span></div>
 
             <div class="zones-live-strip" data-tab-panels="zones">
-                <div class="zones-pill-row">
-                    <span id="area1Pill" class="zone-live-pill"><span class="zone-live-dot"></span><span class="zone-live-label">Area 1 (Primary)</span><span id="area1PillState" class="zone-live-state">CLEAR</span></span>
-                    <span id="area2Pill" class="zone-live-pill"><span class="zone-live-dot"></span><span class="zone-live-label">Area 2</span><span id="area2PillState" class="zone-live-state">CLEAR</span></span>
-                    <span id="area3Pill" class="zone-live-pill"><span class="zone-live-dot"></span><span class="zone-live-label">Area 3</span><span id="area3PillState" class="zone-live-state">CLEAR</span></span>
-                    <span id="area4Pill" class="zone-live-pill"><span class="zone-live-dot"></span><span class="zone-live-label">Area 4</span><span id="area4PillState" class="zone-live-state">CLEAR</span></span>
+                <div class="zones-live-status">
+                    <span class="zones-meta-item zones-status-item"><span id="statusDiv">Waiting for connection...</span></span>
+                    <span class="zones-meta-item zones-status-item"><span id="packetInfo">Awaiting data...</span></span>
+                    <span class="zones-meta-item zones-status-item zones-last-packet">Last packet: <span id="timestamp">--:--:--</span> <span id="packetAge"></span></span>
                 </div>
                 <div class="zones-live-meta">
                     <span class="zones-meta-item">Illuminance <strong id="stripIlluminanceVal">-- lx</strong></span>
@@ -987,9 +1011,6 @@
                         <input type="checkbox" id="targetReportToggle">
                         <span id="stripTargetReportState" class="zones-report-state zones-report-off">OFF</span>
                     </label>
-                    <span class="zones-meta-item"><span id="statusDiv">Waiting for connection...</span></span>
-                    <span class="zones-meta-item"><span id="packetInfo">Awaiting data...</span></span>
-                    <span class="zones-meta-item">Last packet: <span id="timestamp">--:--:--</span> <span id="packetAge"></span></span>
                 </div>
             </div>
             
@@ -2899,31 +2920,8 @@
         }
 
         function buildVerticalBandShapes() {
-            const bands = [];
-            const mapWidth = chartXMax - chartXMin;
-            if (!Number.isFinite(mapWidth) || mapWidth <= 0) return bands;
-            const bandCount = 22;
-            const slotWidth = mapWidth / bandCount;
-            const bandWidth = slotWidth * 0.56;
-            for (let i = 0; i < bandCount; i += 1) {
-                if (i % 2 !== 0) continue;
-                const x0 = chartXMin + i * slotWidth;
-                const x1 = x0 + bandWidth;
-                bands.push({
-                    type: 'rect',
-                    xref: 'x',
-                    yref: 'y',
-                    x0: x0,
-                    x1: x1,
-                    y0: chartYMin,
-                    y1: chartYMax,
-                    fillcolor: i % 4 === 0 ? 'rgba(13, 212, 192, 0.022)' : 'rgba(13, 212, 192, 0.014)',
-                    line: { width: 0, color: 'rgba(0,0,0,0)' },
-                    editable: false,
-                    layer: 'below'
-                });
-            }
-            return bands;
+            // Disabled per feedback: keep radar background clean with no vertical bands.
+            return [];
         }
 
         // Radar Rings - Generate fresh objects
