@@ -365,8 +365,8 @@
             : true;
         if (!shouldRenderTargets) {
             if (!targetsSuppressedByGate) {
-                clearTargetVisualization('Standby: all occupancy areas clear.');
-                setPacketStatus('info', 'Standby: all occupancy areas clear');
+                clearTargetVisualization('No targets detected');
+                setPacketStatus('info', 'No active occupancy');
             }
             targetsSuppressedByGate = true;
             return true;

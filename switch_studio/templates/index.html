@@ -213,39 +213,44 @@
         .tab-bar {
             display: flex;
             align-items: center;
-            gap: 2px;
-            padding: 0 10px;
+            gap: 6px;
+            padding: 6px 10px;
             background: var(--bg-elev-2);
             border-bottom: 1px solid var(--border-subtle);
+            flex-wrap: nowrap;
             overflow-x: auto;
         }
         .tab-btn {
-            background: transparent;
-            color: var(--text-secondary);
-            border: none;
-            border-bottom: 2px solid transparent;
-            padding: 10px 10px 8px;
+            background: rgba(26, 31, 43, 0.92);
+            color: #b4bfd4;
+            border: 1px solid var(--border-subtle);
+            border-bottom-color: var(--border-subtle);
+            padding: 8px 12px;
             cursor: pointer;
-            font-size: 0.73rem;
-            font-weight: 500;
-            transition: border-color var(--anim-fast), color var(--anim-fast), background var(--anim-fast);
-            border-radius: 0;
+            font-size: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 0.01em;
+            transition: border-color var(--anim-fast), color var(--anim-fast), background var(--anim-fast), box-shadow var(--anim-fast), transform var(--anim-fast);
+            border-radius: var(--radius-sm);
             white-space: nowrap;
+            line-height: 1.12;
         }
         .tab-btn:hover {
-            color: #e9fffd;
-            background: rgba(13, 212, 192, 0.06);
+            color: #ebfffc;
+            background: rgba(13, 212, 192, 0.16);
+            border-color: rgba(13, 212, 192, 0.45);
+            transform: translateY(-1px);
         }
         .tab-btn:focus-visible {
             outline: none;
-            box-shadow: inset 0 -2px 0 var(--accent), 0 0 0 2px rgba(13, 212, 192, 0.3);
-            border-radius: 2px;
+            box-shadow: 0 0 0 2px rgba(13, 212, 192, 0.3);
         }
         .tab-btn.active {
-            background: transparent;
-            color: var(--accent);
-            border-bottom-color: var(--accent);
+            background: linear-gradient(135deg, rgba(13, 212, 192, 0.36), rgba(13, 212, 192, 0.2));
+            color: #f2fffe;
+            border-color: rgba(13, 212, 192, 0.72);
             font-weight: 600;
+            box-shadow: 0 0 0 1px rgba(13, 212, 192, 0.26) inset;
         }
 
         .dirty-bar {
@@ -359,11 +364,10 @@
         }
 
         .zones-live-strip {
-            display: flex;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
             align-items: center;
-            justify-content: space-between;
-            gap: 8px;
-            flex-wrap: nowrap;
+            gap: 8px 10px;
             padding: 7px 10px;
             border: 1px solid var(--border-subtle);
             border-radius: var(--radius-md);
@@ -372,18 +376,18 @@
         .zones-live-status {
             display: flex;
             align-items: center;
+            flex-wrap: wrap;
             gap: 8px;
             min-width: 0;
-            flex: 1 1 auto;
-            overflow-x: auto;
+            overflow: hidden;
             padding-bottom: 1px;
-            scrollbar-width: thin;
-            scrollbar-color: var(--border-subtle) transparent;
         }
         .zones-status-item {
-            max-width: 34ch;
+            max-width: 100%;
             overflow: hidden;
             text-overflow: ellipsis;
+            flex: 0 1 auto;
+            min-width: 0;
         }
         .zones-status-item > span {
             overflow: hidden;
@@ -391,8 +395,9 @@
             display: block;
         }
         .zones-status-item.zones-last-packet {
-            max-width: none;
-            flex-shrink: 0;
+            max-width: 100%;
+            flex: 1 1 auto;
+            min-width: 0;
         }
         .zones-pill-row {
             display: flex;
@@ -441,10 +446,10 @@
         .zones-live-meta {
             display: flex;
             align-items: center;
+            justify-content: flex-end;
             gap: 8px;
             flex-wrap: nowrap;
-            margin-left: 8px;
-            flex: 0 0 auto;
+            min-width: max-content;
         }
         .zones-meta-item {
             display: inline-flex;
@@ -582,9 +587,11 @@
             display: none;
         }
         #chart {
+            position: absolute;
+            inset: 0;
             width: 100%;
             height: 100%;
-            min-height: 440px;
+            min-height: 0;
             border-radius: var(--radius-lg);
             border: 1px solid rgba(34, 42, 58, 0.9);
             box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
@@ -592,27 +599,7 @@
         .chart-canvas-wrap {
             position: relative;
             width: 100%;
-            height: 100%;
-        }
-        .map-standby-chip {
-            position: absolute;
-            left: 14px;
-            bottom: 14px;
-            border-radius: var(--radius-sm);
-            border: 1px solid var(--border-subtle);
-            background: rgba(13, 16, 24, 0.88);
-            backdrop-filter: blur(4px);
-            color: var(--text-muted);
-            font-size: 0.64rem;
-            padding: 5px 9px;
-            pointer-events: none;
-            opacity: 0;
-            transform: translateY(2px);
-            transition: opacity var(--anim-fast), transform var(--anim-fast);
-        }
-        .map-standby-chip.visible {
-            opacity: 1;
-            transform: translateY(0);
+            aspect-ratio: 13 / 7;
         }
         
         .table-container {
@@ -718,9 +705,7 @@
 
         /* Radar Container needs flex to handle Plotly resizing */
         #chartContainer .config-content {
-            display: flex;
-            flex-direction: column;
-            height: 60vh;
+            display: block;
             padding: 0;
             overflow: hidden;
             position: relative;
@@ -973,7 +958,7 @@
                 gap: 6px;
             }
             .zones-status-item {
-                max-width: 26ch;
+                max-width: 100%;
             }
             .zones-meta-item {
                 font-size: 0.66rem;
@@ -1036,12 +1021,17 @@
             }
 
             .tab-bar {
-                gap: 2px;
-                padding: 0 6px;
+                gap: 6px;
+                padding: 7px 8px;
+                flex-wrap: wrap;
+                overflow-x: visible;
             }
             .tab-btn {
-                padding: 8px 8px;
-                font-size: 0.7rem;
+                padding: 8px 10px;
+                font-size: 0.73rem;
+                min-width: 116px;
+                flex: 1 1 auto;
+                text-align: center;
             }
 
             .app-container {
@@ -1065,42 +1055,34 @@
                 padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
             }
 
-            #chartContainer .config-content {
-                height: min(56vh, 420px);
-                min-height: 280px;
-            }
-            #chart {
-                min-height: 280px;
-                height: 100%;
-                border-radius: var(--radius-md);
-            }
+            #chart { border-radius: var(--radius-md); }
 
             .zones-live-strip {
                 padding: 7px 8px;
-                flex-direction: column;
-                align-items: stretch;
+                grid-template-columns: minmax(0, 1fr);
                 gap: 7px;
             }
             .zones-live-meta {
                 width: 100%;
-                margin-left: 0;
-                justify-content: flex-end;
+                justify-content: flex-start;
                 order: 1;
                 gap: 6px;
+                min-width: 0;
+                flex-wrap: wrap;
             }
             .zones-live-status {
                 width: 100%;
                 order: 2;
                 gap: 6px;
-                overflow-x: auto;
+                overflow: visible;
                 padding-bottom: 1px;
             }
             .zones-status-item {
-                max-width: min(72vw, 30ch);
-                flex: 0 0 auto;
+                max-width: 100%;
+                flex: 1 1 45%;
             }
             .zones-status-item.zones-last-packet {
-                max-width: min(92vw, 46ch);
+                flex: 1 1 100%;
             }
             .zones-meta-item,
             .zones-report-toggle {
@@ -1168,12 +1150,6 @@
             .full-width-select {
                 width: 100%;
             }
-            .map-standby-chip {
-                left: 10px;
-                bottom: 10px;
-                font-size: 0.68rem;
-                max-width: min(72vw, 320px);
-            }
             #toastContainer {
                 right: 10px;
                 bottom: calc(10px + env(safe-area-inset-bottom, 0px));
@@ -1199,7 +1175,9 @@
 
             .tab-btn {
                 padding: 7px 8px;
-                font-size: 0.66rem;
+                font-size: 0.68rem;
+                min-width: 0;
+                flex: 1 1 calc(50% - 3px);
             }
 
             .zones-live-meta {
@@ -1207,7 +1185,7 @@
                 flex-wrap: wrap;
             }
             .zones-status-item {
-                max-width: min(86vw, 28ch);
+                flex-basis: 100%;
             }
 
             table {
@@ -1299,7 +1277,6 @@
                 <div class="config-content">
                     <div class="chart-canvas-wrap">
                         <div id="chart"></div>
-                        <div class="map-standby-chip" id="mapStandbyChip">Standby: all occupancy areas clear.</div>
                     </div>
                 </div>
             </section>
@@ -1630,7 +1607,6 @@
         const targetReportAutoOffToggle = document.getElementById('targetReportAutoOffToggle');
         const stripIlluminanceVal = document.getElementById('stripIlluminanceVal');
         const stripTargetReportState = document.getElementById('stripTargetReportState');
-        const mapStandbyChip = document.getElementById('mapStandbyChip');
         const zonesSidebarTabs = document.getElementById('zonesSidebarTabs');
         const zonesSidebarTabButtons = Array.from(document.querySelectorAll('[data-zones-pane-target]'));
         const zonesSidebarPanes = Array.from(document.querySelectorAll('[data-zones-pane]'));
@@ -1738,10 +1714,9 @@
             }
         }
 
-        function setMapStandbyState(isStandby, message) {
-            if (!mapStandbyChip) return;
-            if (message) mapStandbyChip.textContent = message;
-            mapStandbyChip.classList.toggle('visible', !!isStandby);
+        function setMapStandbyState(isStandby) {
+            // Standby map chip removed from UI per product feedback.
+            return !!isStandby;
         }
 
         function hasActiveOccupancy() {
@@ -1751,9 +1726,9 @@
         }
 
         function clearTargetsForOccupancyGate() {
-            setMapStandbyState(true, 'Standby: all occupancy areas clear.');
+            setMapStandbyState(false);
             if (zoneModule && typeof zoneModule.clearTargetVisualization === 'function') {
-                zoneModule.clearTargetVisualization('Standby: all occupancy areas clear.');
+                zoneModule.clearTargetVisualization('No targets detected');
                 return;
             }
             targetHistory = {};
@@ -1762,7 +1737,7 @@
                 Plotly.restyle('chart', { x: [[]], y: [[]], text: [[]] }, [0]);
                 Plotly.restyle('chart', { x: [[]], y: [[]] }, [1]);
             }
-            dataTableBody.innerHTML = '<tr><td colspan="5" class="no-data">Standby: all occupancy areas clear.</td></tr>';
+            dataTableBody.innerHTML = '<tr><td colspan="5" class="no-data">No targets detected</td></tr>';
         }
 
         function applyLayoutMode(activeTab) {
@@ -3600,7 +3575,7 @@
             for(let i=1; i<=4; i++) {
                 setAreaStatusIndicators(i, false);
             }
-            setMapStandbyState(false, 'Standby: all occupancy areas clear.');
+            setMapStandbyState(false);
 
             // Reset Visualization
             if (zoneModule && typeof zoneModule.resetHistory === 'function') {
@@ -3758,7 +3733,7 @@
             if (!hasActiveOccupancy()) {
                 clearTargetsForOccupancyGate();
             } else {
-                setMapStandbyState(false, 'Standby: all occupancy areas clear.');
+                setMapStandbyState(false);
             }
 
             // 3. CHECK DEVICE TYPE (Fixed: Allow partial updates)
@@ -4005,7 +3980,7 @@
                 clearTargetsForOccupancyGate();
                 return;
             }
-            setMapStandbyState(false, 'Standby: all occupancy areas clear.');
+            setMapStandbyState(false);
 
             updateTimestamp();
             packetInfo.innerText = `Targets Visible: ${data.targets.length}`;

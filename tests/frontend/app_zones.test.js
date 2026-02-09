@@ -138,6 +138,6 @@ test('target rendering is suppressed when occupancy gate is clear', () => {
 
     assert.equal(handled, true);
     assert.ok(plotlyCalls.some((entry) => entry.kind === 'restyle'));
-    assert.ok(tableEl.innerHTML.includes('Standby: all occupancy areas clear.'));
-    assert.ok(events.status.some((entry) => entry.message.includes('occupancy areas clear')));
+    assert.ok(tableEl.innerHTML.includes('No targets detected'));
+    assert.ok(events.status.some((entry) => entry.message.includes('No active occupancy')));
 });
