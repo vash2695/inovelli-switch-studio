@@ -122,7 +122,7 @@
         .header {
             background: var(--bg-elev-2);
             padding: 0 12px;
-            min-height: 50px;
+            min-height: 52px;
             border-bottom: 1px solid var(--border-subtle);
             display: flex;
             justify-content: space-between;
@@ -135,7 +135,7 @@
         .header h2 { color: var(--text-primary); margin: 0; white-space: nowrap; letter-spacing: -0.01em; font-size: 0.92rem; font-weight: 600; }
         
         /* Header Controls Group */
-        .header-controls { display: flex; align-items: center; gap: 8px; flex-grow: 1; justify-content: flex-start; min-width: 0; }
+        .header-controls { display: flex; align-items: center; gap: 8px; flex-grow: 1; justify-content: flex-start; min-width: 0; min-height: 38px; }
         .header-device-wrap { width: min(340px, 100%); min-width: 150px; }
         select#deviceSelect {
             background: var(--bg-elev-3);
@@ -212,13 +212,14 @@
         /* Tabs + Dirty State */
         .tab-bar {
             display: flex;
-            align-items: center;
+            align-items: stretch;
             gap: 6px;
             padding: 6px 10px;
             background: var(--bg-elev-2);
             border-bottom: 1px solid var(--border-subtle);
             flex-wrap: nowrap;
             overflow-x: auto;
+            min-height: 52px;
         }
         .tab-btn {
             background: rgba(26, 31, 43, 0.92);
@@ -226,6 +227,7 @@
             border: 1px solid var(--border-subtle);
             border-bottom-color: var(--border-subtle);
             padding: 8px 12px;
+            margin: 0;
             cursor: pointer;
             font-size: 0.75rem;
             font-weight: 600;
@@ -233,13 +235,18 @@
             transition: border-color var(--anim-fast), color var(--anim-fast), background var(--anim-fast), box-shadow var(--anim-fast), transform var(--anim-fast);
             border-radius: var(--radius-sm);
             white-space: nowrap;
-            line-height: 1.12;
+            line-height: 1.1;
+            min-height: 38px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            vertical-align: middle;
         }
         .tab-btn:hover {
             color: #ebfffc;
             background: rgba(13, 212, 192, 0.16);
             border-color: rgba(13, 212, 192, 0.45);
-            transform: translateY(-1px);
+            transform: none;
         }
         .tab-btn:focus-visible {
             outline: none;
@@ -251,6 +258,7 @@
             border-color: rgba(13, 212, 192, 0.72);
             font-weight: 600;
             box-shadow: 0 0 0 1px rgba(13, 212, 192, 0.26) inset;
+            transform: none;
         }
 
         .dirty-bar {
