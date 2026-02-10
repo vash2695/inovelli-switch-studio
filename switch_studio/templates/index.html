@@ -215,7 +215,6 @@
             color: #041015;
         }
         
-        #statusDiv { color: var(--text-secondary); }
         #packetInfo { color: var(--accent); font-weight: 700; }
         #timestamp { color: var(--warning); font-family: monospace; }
         #packetAge { color: var(--text-muted); font-size: 0.85em; font-family: monospace; min-width: 60px; text-align: left; }
@@ -413,7 +412,7 @@
 
         .zones-live-strip {
             display: grid;
-            grid-template-columns: minmax(0, 1fr) auto;
+            grid-template-columns: 1fr;
             align-items: center;
             gap: 8px 10px;
             padding: 7px 10px;
@@ -493,11 +492,17 @@
         }
         .zones-live-meta {
             display: flex;
-            align-items: center;
-            justify-content: flex-end;
+            align-items: stretch;
+            justify-content: flex-start;
             gap: 8px;
             flex-wrap: nowrap;
-            min-width: max-content;
+            min-width: 0;
+        }
+        .zones-live-meta > .zones-meta-item,
+        .zones-live-meta > .zones-report-toggle {
+            min-height: 30px;
+            display: inline-flex;
+            align-items: center;
         }
         .zones-meta-item {
             display: inline-flex;
@@ -1116,15 +1121,15 @@
             }
             .zones-live-meta {
                 width: 100%;
-                justify-content: flex-start;
-                order: 1;
+                justify-content: stretch;
+                order: 2;
                 gap: 6px;
                 min-width: 0;
-                flex-wrap: wrap;
+                flex-wrap: nowrap;
             }
             .zones-live-status {
                 width: 100%;
-                order: 2;
+                order: 1;
                 gap: 6px;
                 overflow: visible;
                 padding-bottom: 1px;
@@ -1135,6 +1140,18 @@
             }
             .zones-status-item.zones-last-packet {
                 flex: 1 1 100%;
+            }
+            .zones-live-meta > .zones-meta-item,
+            .zones-live-meta > .zones-report-toggle {
+                flex: 1 1 0;
+                width: 50%;
+                min-width: 0;
+                justify-content: space-between;
+            }
+            .zones-live-meta > .zones-report-toggle > span:first-child {
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
             }
             .zones-meta-item,
             .zones-report-toggle {
@@ -1257,7 +1274,7 @@
 
             .zones-live-meta {
                 justify-content: flex-start;
-                flex-wrap: wrap;
+                flex-wrap: nowrap;
             }
             .zones-status-item {
                 flex-basis: 100%;
@@ -1350,7 +1367,6 @@
 
             <div class="zones-live-strip" data-tab-panels="zones">
                 <div class="zones-live-status">
-                    <span class="zones-meta-item zones-status-item"><span id="statusDiv">Waiting for connection...</span></span>
                     <span class="zones-meta-item zones-status-item"><span id="packetInfo">Awaiting data...</span></span>
                     <span class="zones-meta-item zones-status-item zones-last-packet">Last packet: <span id="timestamp">--:--:--</span> <span id="packetAge"></span></span>
                 </div>
@@ -1421,18 +1437,6 @@
             </div>
 
             <div class="zones-pane is-active" id="zonesPaneControls" role="tabpanel" aria-labelledby="zonesPaneTabControls" data-zones-pane="controls" data-tab-panels="zones">
-            <div class="config-group live-sensor-card">
-                <div class="config-title">Live Sensors</div>
-                <div class="sensor-row">
-                    <span style="color: #ccc;">Area 1 (Primary):</span>
-                    <span id="occupancyVal" class="sensor-val badge-clear">Waiting...</span>
-                </div>
-                <div class="sensor-row">
-                    <span style="color: #ccc;">Illuminance:</span>
-                    <span id="illuminanceVal" class="sensor-val">-- lx</span>
-                </div>
-            </div>
-
             <section class="panel-section" data-tab-panels="zones">
                 <div class="panel-section-title">Zone Editor</div>
                 <div class="config-content">
@@ -1684,7 +1688,6 @@
         const SWITCH_STUDIO_UI_ENABLED = {{ 'true' if switch_studio_ui else 'false' }};
         const socket = io({ path: INGRESS_PATH + '/socket.io' });
 
-        const statusDiv = document.getElementById('statusDiv');
         const packetInfo = document.getElementById('packetInfo');
         const timestampSpan = document.getElementById('timestamp');
         const packetAgeSpan = document.getElementById('packetAge');
@@ -1697,8 +1700,6 @@
         const nonMmwaveWarning = document.getElementById('nonMmwaveWarning');
         const configSidebar = document.getElementById('configSidebar');
         const btnForceSync = document.getElementById('btnForceSync');
-        const occupancyVal = document.getElementById('occupancyVal');
-        const illuminanceVal = document.getElementById('illuminanceVal');
         const dirtyBar = document.getElementById('dirtyBar');
         const dirtyText = document.getElementById('dirtyText');
         const btnApplyChanges = document.getElementById('btnApplyChanges');
@@ -3668,7 +3669,6 @@
             // FIRE A FORCE SYNC TO PREVENT STALE DATA ON LOAD
             socket.emit('force_sync'); 
 
-            statusDiv.innerText = `Monitoring: ${this.options[this.selectedIndex].text}`;
             if (window.SwitchStudioState) {
                 window.SwitchStudioState.resetForDeviceChange();
                 window.SwitchStudioState.setPacketStatus('info', 'Awaiting data...');
@@ -3679,8 +3679,6 @@
             packetAgeSpan.innerText = "";
             lastPacketTime = null;
             
-            occupancyVal.innerText = "Waiting..."; occupancyVal.className = "sensor-val badge-clear";
-            illuminanceVal.innerText = "-- lx";
             if (stripIlluminanceVal) stripIlluminanceVal.innerText = "-- lx";
             occupancyState = { global: null, area1: null, area2: null, area3: null, area4: null };
             setTargetReportingState(false, 'Disable');
@@ -3806,17 +3804,12 @@
             if ("occupancy" in config) {
                 const parsedGlobal = parseOccupancyValue(config.occupancy);
                 if (parsedGlobal === true) {
-                    occupancyVal.innerText = "DETECTED";
-                    occupancyVal.className = "sensor-val badge-detected";
                     occupancyState.global = true;
                 } else if (parsedGlobal === false) {
-                    occupancyVal.innerText = "CLEAR";
-                    occupancyVal.className = "sensor-val badge-clear";
                     occupancyState.global = false;
                 }
             }
             if ("illuminance" in config) {
-                illuminanceVal.innerText = `${config.illuminance} lx`;
                 if (stripIlluminanceVal) stripIlluminanceVal.innerText = `${config.illuminance} lx`;
             }
             if ("mmWaveTargetInfoReport" in config) {
