@@ -132,7 +132,8 @@
         }
         .header-brand { display: flex; align-items: center; gap: 8px; min-width: 0; }
         .header-logo { height: 18px; width: auto; object-fit: contain; }
-        .header h2 { color: var(--text-primary); margin: 0; white-space: nowrap; letter-spacing: -0.01em; font-size: 0.92rem; font-weight: 600; }
+        .header-wordmark { height: 15px; width: auto; object-fit: contain; display: block; opacity: 0.98; }
+        .studio-title { color: var(--text-primary); margin: 0; white-space: nowrap; letter-spacing: -0.01em; font-size: 0.92rem; font-weight: 600; }
         
         /* Header Controls Group */
         .header-controls { display: flex; align-items: center; gap: 8px; flex-grow: 1; justify-content: flex-start; min-width: 0; min-height: 38px; }
@@ -153,6 +154,16 @@
         select#deviceSelect:focus-visible {
             border-color: var(--accent);
             box-shadow: 0 0 0 2px var(--accent-soft);
+        }
+        select#deviceSelect.device-unselected {
+            border-color: rgba(251, 191, 36, 0.75);
+            background: linear-gradient(180deg, rgba(45, 40, 24, 0.42) 0%, rgba(32, 31, 27, 0.4) 100%), var(--bg-elev-3);
+            box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.16);
+        }
+        select#deviceSelect.device-unselected:focus-visible,
+        select#deviceSelect.device-unselected:hover {
+            border-color: rgba(251, 191, 36, 0.92);
+            box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.24);
         }
         .header-right {
             margin-left: auto;
@@ -1290,8 +1301,9 @@
 <body>
     <div class="header">
         <div class="header-brand">
-            <img class="header-logo" src="{{ ingress_path }}/static/logo.png" alt="Inovelli logo">
-            <h2>Inovelli Switch Studio</h2>
+            <img class="header-logo" src="{{ ingress_path }}/static/logo.png" alt="Switch Studio icon">
+            <img class="header-wordmark" src="{{ ingress_path }}/static/brand_name.svg" alt="Inovelli">
+            <h2 class="studio-title">Switch Studio</h2>
         </div>
         <div class="header-controls">
             <div class="header-device-wrap">
@@ -1909,6 +1921,13 @@
             connectionText.textContent = connected ? 'Connected' : 'Disconnected';
         }
 
+        function updateDeviceSelectState() {
+            if (!deviceSelect) return;
+            const hasSelection = !!String(deviceSelect.value || '').trim();
+            deviceSelect.classList.toggle('device-unselected', !hasSelection);
+            deviceSelect.setAttribute('aria-label', hasSelection ? 'Select a Device' : 'Select a Device (required)');
+        }
+
         function applyLegacyLayout() {
             if (tabBar) {
                 tabBar.style.display = 'none';
@@ -1949,6 +1968,7 @@
             applyLegacyLayout();
             applyLayoutMode('zones');
         }
+        updateDeviceSelectState();
         initZonesSidebarTabs();
 
         if (window.SwitchStudioState && typeof window.SwitchStudioState.init === 'function') {
@@ -3614,17 +3634,19 @@
         
         socket.on('device_list', function(devices) {
             const currentSelection = deviceSelect.value;
-            deviceSelect.innerHTML = '<option value="" disabled selected>Select an Inovelli Switch</option>';
+            deviceSelect.innerHTML = '<option value="" disabled selected>Select a Device</option>';
             devices.forEach(device => {
                 const option = document.createElement('option');
                 option.value = device.topic; option.text = device.friendly_name;
                 deviceSelect.appendChild(option);
             });
             if (currentSelection) deviceSelect.value = currentSelection;
+            updateDeviceSelectState();
             // else deviceSelect.selectedIndex = 0; // Don't auto-select to prevent confusion
         });
 
         deviceSelect.addEventListener('change', function() {
+            updateDeviceSelectState();
             socket.emit('change_device', this.value);
             
             // FIRE A FORCE SYNC TO PREVENT STALE DATA ON LOAD
