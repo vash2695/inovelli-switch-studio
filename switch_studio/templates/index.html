@@ -1183,7 +1183,13 @@
             }
 
             .zone-status-inline .config-content {
-                grid-template-columns: repeat(2, minmax(0, 1fr));
+                grid-template-columns: repeat(4, minmax(0, 1fr));
+                gap: 6px;
+                padding: 7px;
+            }
+            .zone-status-inline .sensor-row {
+                padding: 6px 7px;
+                font-size: 0.67rem;
             }
 
             .dirty-bar {
@@ -1257,7 +1263,17 @@
                 flex-basis: 100%;
             }
             .zone-status-inline .config-content {
-                grid-template-columns: 1fr;
+                grid-template-columns: repeat(4, minmax(0, 1fr));
+                gap: 5px;
+                padding: 6px;
+            }
+            .zone-status-inline .sensor-row {
+                padding: 5px 6px;
+                font-size: 0.64rem;
+            }
+            .zone-status-inline .zone-badge {
+                font-size: 0.78em;
+                padding: 1px 4px;
             }
 
             table {
