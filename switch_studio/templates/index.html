@@ -412,7 +412,7 @@
 
         .zones-live-strip {
             display: grid;
-            grid-template-columns: 1fr;
+            grid-template-columns: minmax(0, 1fr) auto;
             align-items: center;
             gap: 8px 10px;
             padding: 7px 10px;
@@ -492,11 +492,11 @@
         }
         .zones-live-meta {
             display: flex;
-            align-items: stretch;
-            justify-content: flex-start;
+            align-items: center;
+            justify-content: flex-end;
             gap: 8px;
             flex-wrap: nowrap;
-            min-width: 0;
+            min-width: max-content;
         }
         .zones-live-meta > .zones-meta-item,
         .zones-live-meta > .zones-report-toggle {
