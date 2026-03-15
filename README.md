@@ -19,6 +19,9 @@ Huge thanks for creating the initial tooling that made this expanded Switch Stud
 - Added richer Presence & Zones tooling (zone editor, inline zone status, live target telemetry)
 - Added in-strip `Target Reporting` control with optional auto-off on disconnect
 
+## Current UI
+<img width="3516" height="1986" alt="image" src="https://github.com/user-attachments/assets/8cac3ba6-b850-4cf6-8b25-5f9fef140c5c" />
+
 ## :dart: Current Scope
 
 Primary target today:
