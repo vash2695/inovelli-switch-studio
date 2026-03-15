@@ -78,6 +78,7 @@
         defaultLevelLocal: 254,
     };
     let linkPreferences = {};
+    let timingInteractionDrafts = {};
     let syncUnsubscribers = [];
     let controlRefs = null;
 
@@ -228,6 +229,46 @@
         };
     }
 
+    function setTimingInteractionDraft(groupOrId, roleKey, value) {
+        const group = getTimingGroup(groupOrId);
+        if (!group) return null;
+        timingInteractionDrafts[group.id] = {
+            roleKey: roleKey === 'local' ? 'local' : 'remote',
+            value: clamp(toInt(value, 0), 0, 126),
+            linked: getLinkedState(group),
+        };
+        return timingInteractionDrafts[group.id];
+    }
+
+    function clearTimingInteractionDraft(groupOrId) {
+        const group = getTimingGroup(groupOrId);
+        if (!group) return;
+        delete timingInteractionDrafts[group.id];
+    }
+
+    function getTimingCardDisplayState(groupOrId) {
+        const group = getTimingGroup(groupOrId);
+        const state = getTimingGroupUiState(group);
+        if (!group || !state) return null;
+
+        const draft = timingInteractionDrafts[group.id];
+        if (!draft) return state;
+
+        if (draft.linked) {
+            return {
+                remoteValue: draft.value,
+                localValue: draft.value,
+                linked: true,
+            };
+        }
+
+        return {
+            remoteValue: draft.roleKey === 'remote' ? draft.value : state.remoteValue,
+            localValue: draft.roleKey === 'local' ? draft.value : state.localValue,
+            linked: false,
+        };
+    }
+
     function getExplicitTimingPayload(overrides) {
         const payload = {};
         const nextValues = overrides || {};
@@ -257,8 +298,11 @@
     }
 
     function applyTimingPayload(payload) {
-        Object.entries(payload || {}).forEach(([param, value]) => {
+        const entries = Object.entries(payload || {});
+        entries.forEach(([param, value]) => {
             setRawValue(param, value);
+        });
+        entries.forEach(([param, value]) => {
             stageChange(param, value);
         });
     }
@@ -394,6 +438,7 @@
 
         slider.addEventListener('input', () => {
             controlRefs.timing[group.id].lastEditedRole = roleKey;
+            setTimingInteractionDraft(group, roleKey, slider.value);
             value.textContent = formatTimingValue(slider.value);
             if (getLinkedState(group)) {
                 const peerRef = roleKey === 'remote' ? controlRefs.timing[group.id].local : controlRefs.timing[group.id].remote;
@@ -415,6 +460,7 @@
                     [param]: selected,
                 }));
             }
+            clearTimingInteractionDraft(group);
             syncTimingCard(group);
         });
 
@@ -623,7 +669,7 @@
     function syncTimingCard(group) {
         const refs = controlRefs && controlRefs.timing ? controlRefs.timing[group.id] : null;
         if (!refs) return;
-        const state = getTimingGroupUiState(group);
+        const state = getTimingCardDisplayState(group);
         refs.linkToggle.checked = !!(state && state.linked);
         refs.remote.slider.value = String(state ? state.remoteValue : 0);
         refs.remote.value.textContent = formatTimingValue(state ? state.remoteValue : 0);
@@ -750,6 +796,7 @@
     function resetForDeviceChange() {
         rawValues = {};
         linkPreferences = {};
+        timingInteractionDrafts = {};
         lastManualDefaultLevels = {
             defaultLevelRemote: 254,
             defaultLevelLocal: 254,
@@ -787,10 +834,17 @@
             percentToRawDefaultLevel,
             deriveLinkedState,
             getTimingGroupUiState,
+            getTimingCardDisplayState,
             setTimingGroupLinked,
             getExplicitTimingPayload,
             setLinkPreferenceForTest: (groupId, linked) => {
                 linkPreferences[groupId] = !!linked;
+            },
+            setTimingInteractionDraftForTest: (groupId, roleKey, value) => {
+                setTimingInteractionDraft(groupId, roleKey, value);
+            },
+            clearTimingInteractionDraftForTest: (groupId) => {
+                clearTimingInteractionDraft(groupId);
             },
         },
     };

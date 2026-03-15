@@ -121,6 +121,26 @@ test('explicit timing payload preserves other timing groups when one group chang
     assert.equal(payload.rampRateOnToOffLocal, 25);
 });
 
+test('timing card display state preserves in-progress slider value during sync races', () => {
+    const api = loadLoadDimmingModule();
+    api.setRawValuesForTest({
+        dimmingSpeedUpRemote: 0,
+        dimmingSpeedUpLocal: 0,
+    });
+
+    api.setTimingInteractionDraftForTest('dimUp', 'remote', 25);
+    const state = api.getTimingCardDisplayState('dimUp');
+
+    assert.equal(state.remoteValue, 25);
+    assert.equal(state.localValue, 25);
+    assert.equal(state.linked, true);
+
+    api.clearTimingInteractionDraftForTest('dimUp');
+    const clearedState = api.getTimingCardDisplayState('dimUp');
+    assert.equal(clearedState.remoteValue, 0);
+    assert.equal(clearedState.localValue, 0);
+});
+
 test('linked state falls back to unlinked when underlying values diverge', () => {
     const api = loadLoadDimmingModule();
     api.setRawValuesForTest({
