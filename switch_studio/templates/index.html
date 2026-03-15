@@ -1031,6 +1031,87 @@
         .command-log-entry.log-error { color: var(--danger); }
         .command-log-entry.log-info { color: #bbb; }
 
+        .firmware-shell {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .firmware-summary-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+        }
+        .firmware-stat-card {
+            background: #161d2a;
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
+            padding: 10px 12px;
+            min-width: 0;
+        }
+        .firmware-stat-label {
+            color: #7f8aa0;
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            margin-bottom: 6px;
+        }
+        .firmware-stat-value {
+            color: var(--text-primary);
+            font-size: 0.92rem;
+            font-weight: 600;
+            overflow-wrap: anywhere;
+        }
+        .firmware-progress-shell {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .firmware-progress-bar {
+            width: 100%;
+            height: 10px;
+            border-radius: 999px;
+            background: #161d2a;
+            border: 1px solid var(--border-subtle);
+            overflow: hidden;
+        }
+        .firmware-progress-fill {
+            width: 0%;
+            height: 100%;
+            background: linear-gradient(90deg, rgba(13, 212, 192, 0.85), rgba(52, 211, 153, 0.95));
+            transition: width var(--anim-med);
+        }
+        .firmware-progress-meta {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            color: #8d97ad;
+            font-size: 0.74rem;
+        }
+        .firmware-status-note {
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
+            background: rgba(22, 29, 42, 0.88);
+            color: #a8b3c8;
+            padding: 10px 12px;
+            line-height: 1.45;
+        }
+        .firmware-status-note.status-error {
+            border-color: rgba(255, 111, 111, 0.42);
+            color: #ffd1d1;
+        }
+        .firmware-status-note.status-ready {
+            border-color: rgba(13, 212, 192, 0.34);
+            color: #c9fbf2;
+        }
+        .firmware-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .firmware-actions .cmd-btn {
+            flex: 1 1 220px;
+        }
+
         .schema-fields-shell {
             display: flex;
             flex-direction: column;
@@ -1466,6 +1547,15 @@
                 width: 100%;
                 min-width: 0;
             }
+            .firmware-summary-grid {
+                grid-template-columns: 1fr;
+            }
+            .firmware-actions {
+                flex-direction: column;
+            }
+            .firmware-actions .cmd-btn {
+                width: 100%;
+            }
 
             .zones-sidebar-tab {
                 min-width: 102px;
@@ -1794,6 +1884,56 @@
             </div>
 
             <div class="config-tab-shell" data-tab-panels="power">
+                <section class="panel-section" data-tab-section="power-firmware">
+                    <div class="panel-section-title">Firmware Updates</div>
+                    <div class="config-content">
+                        <div class="panel-lede">Check for Zigbee2MQTT OTA updates and install them online without leaving Switch Studio.</div>
+                        <div class="firmware-shell">
+                            <div class="firmware-summary-grid">
+                                <div class="firmware-stat-card">
+                                    <div class="firmware-stat-label">Installed Version</div>
+                                    <div class="firmware-stat-value" id="firmwareInstalledVersion">--</div>
+                                </div>
+                                <div class="firmware-stat-card">
+                                    <div class="firmware-stat-label">Latest Version</div>
+                                    <div class="firmware-stat-value" id="firmwareLatestVersion">--</div>
+                                </div>
+                                <div class="firmware-stat-card">
+                                    <div class="firmware-stat-label">Availability</div>
+                                    <div class="firmware-stat-value" id="firmwareAvailability">Unknown</div>
+                                </div>
+                                <div class="firmware-stat-card">
+                                    <div class="firmware-stat-label">Update Status</div>
+                                    <div class="firmware-stat-value" id="firmwareState">Idle</div>
+                                </div>
+                            </div>
+
+                            <div class="firmware-progress-shell" id="firmwareProgressShell" hidden>
+                                <div class="firmware-progress-bar">
+                                    <div class="firmware-progress-fill" id="firmwareProgressFill"></div>
+                                </div>
+                                <div class="firmware-progress-meta">
+                                    <span id="firmwareProgressText">0%</span>
+                                    <span id="firmwareRemainingText"></span>
+                                </div>
+                            </div>
+
+                            <div class="firmware-status-note" id="firmwareStatusMessage">
+                                Select a device, then check for updates.
+                            </div>
+
+                            <div class="firmware-actions">
+                                <button class="cmd-btn" id="btnFirmwareCheck" type="button">Check for Updates</button>
+                                <button class="cmd-btn" id="btnFirmwareInstall" type="button" disabled>Install Available Update</button>
+                            </div>
+
+                            <div class="schema-description">
+                                Updates are requested through Zigbee2MQTT. Keep the switch powered and nearby until the process completes.
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
                 <section class="panel-section" data-tab-section="power-main">
                     <div class="panel-section-title">Power & Device</div>
                     <div class="config-content">
@@ -1862,6 +2002,8 @@
         const nonMmwaveWarning = document.getElementById('nonMmwaveWarning');
         const configSidebar = document.getElementById('configSidebar');
         const btnForceSync = document.getElementById('btnForceSync');
+        const btnFirmwareCheck = document.getElementById('btnFirmwareCheck');
+        const btnFirmwareInstall = document.getElementById('btnFirmwareInstall');
         const dirtyBar = document.getElementById('dirtyBar');
         const dirtyText = document.getElementById('dirtyText');
         const btnApplyChanges = document.getElementById('btnApplyChanges');
@@ -1884,6 +2026,15 @@
         const zonesSidebarPanes = Array.from(document.querySelectorAll('[data-zones-pane]'));
         const connectionChip = document.getElementById('connectionChip');
         const connectionText = document.getElementById('connectionText');
+        const firmwareInstalledVersion = document.getElementById('firmwareInstalledVersion');
+        const firmwareLatestVersion = document.getElementById('firmwareLatestVersion');
+        const firmwareAvailability = document.getElementById('firmwareAvailability');
+        const firmwareStateValue = document.getElementById('firmwareState');
+        const firmwareStatusMessage = document.getElementById('firmwareStatusMessage');
+        const firmwareProgressShell = document.getElementById('firmwareProgressShell');
+        const firmwareProgressFill = document.getElementById('firmwareProgressFill');
+        const firmwareProgressText = document.getElementById('firmwareProgressText');
+        const firmwareRemainingText = document.getElementById('firmwareRemainingText');
         const TARGET_REPORT_AUTO_OFF_STORAGE_KEY = 'switchStudio.targetReportAutoOff';
         const ZONES_SIDEBAR_TAB_STORAGE_KEY = 'switchStudio.zonesSidebarTab';
 
@@ -1902,6 +2053,17 @@
         let basicControlRequestCounter = 0;
         let basicControlBrightnessTimer = null;
         let suppressBasicControlEvents = false;
+        let firmwareStateModel = {
+            available: null,
+            installed_version: null,
+            latest_version: null,
+            state: null,
+            progress: null,
+            remaining: null,
+            last_checked: null,
+            last_error: null,
+            bridge_status: null
+        };
         
         // Interaction Lock for Jitter Prevention
         let isInteracting = false;
@@ -2018,6 +2180,156 @@
             }
             dataTableBody.innerHTML = '<tr><td colspan="5" class="no-data">No targets detected</td></tr>';
         }
+
+        function getDefaultFirmwareState() {
+            return {
+                available: null,
+                installed_version: null,
+                latest_version: null,
+                state: null,
+                progress: null,
+                remaining: null,
+                last_checked: null,
+                last_error: null,
+                bridge_status: null
+            };
+        }
+
+        function normalizeFirmwareStatePayload(payload) {
+            if (!payload || typeof payload !== 'object') return null;
+
+            const next = {};
+            if (Object.prototype.hasOwnProperty.call(payload, 'available')) next.available = payload.available;
+            if (Object.prototype.hasOwnProperty.call(payload, 'update_available')) next.available = payload.update_available;
+            if (Object.prototype.hasOwnProperty.call(payload, 'installed_version')) next.installed_version = payload.installed_version;
+            if (Object.prototype.hasOwnProperty.call(payload, 'latest_version')) next.latest_version = payload.latest_version;
+            if (Object.prototype.hasOwnProperty.call(payload, 'state')) next.state = payload.state;
+            if (Object.prototype.hasOwnProperty.call(payload, 'progress')) next.progress = payload.progress;
+            if (Object.prototype.hasOwnProperty.call(payload, 'remaining')) next.remaining = payload.remaining;
+            if (Object.prototype.hasOwnProperty.call(payload, 'last_checked')) next.last_checked = payload.last_checked;
+            if (Object.prototype.hasOwnProperty.call(payload, 'last_error')) next.last_error = payload.last_error;
+            if (Object.prototype.hasOwnProperty.call(payload, 'bridge_status')) next.bridge_status = payload.bridge_status;
+
+            if (payload.update && typeof payload.update === 'object') {
+                const update = payload.update;
+                if (Object.prototype.hasOwnProperty.call(update, 'installed_version')) next.installed_version = update.installed_version;
+                if (Object.prototype.hasOwnProperty.call(update, 'latest_version')) next.latest_version = update.latest_version;
+                if (Object.prototype.hasOwnProperty.call(update, 'state')) next.state = update.state;
+                if (Object.prototype.hasOwnProperty.call(update, 'progress')) next.progress = update.progress;
+                if (Object.prototype.hasOwnProperty.call(update, 'remaining')) next.remaining = update.remaining;
+            }
+
+            return next;
+        }
+
+        function applyFirmwareStateUpdate(payload, options) {
+            const normalized = normalizeFirmwareStatePayload(payload);
+            const opts = options || {};
+            if (opts.reset === true) {
+                firmwareStateModel = getDefaultFirmwareState();
+            }
+            if (normalized) {
+                firmwareStateModel = {
+                    ...firmwareStateModel,
+                    ...normalized
+                };
+            }
+            renderFirmwarePanel();
+        }
+
+        function resetFirmwareStateForDeviceChange() {
+            firmwareStateModel = getDefaultFirmwareState();
+            renderFirmwarePanel();
+        }
+
+        function formatFirmwareTimestamp(value) {
+            const numeric = Number(value);
+            if (!Number.isFinite(numeric) || numeric <= 0) return '--';
+            return new Date(numeric * 1000).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit' });
+        }
+
+        function getFirmwareAvailabilityLabel() {
+            if (firmwareStateModel.available === true) return 'Update available';
+            if (firmwareStateModel.available === false) return 'Up to date';
+            if (String(firmwareStateModel.state || '').toLowerCase() === 'checking') return 'Checking...';
+            return 'Unknown';
+        }
+
+        function getFirmwareStateLabel() {
+            const rawState = String(firmwareStateModel.state || '').trim();
+            if (!rawState) return 'Idle';
+            return rawState
+                .replace(/_/g, ' ')
+                .replace(/\b\w/g, (ch) => ch.toUpperCase());
+        }
+
+        function renderFirmwarePanel() {
+            const hasSelection = !!(deviceSelect && deviceSelect.value);
+            const stateValue = String(firmwareStateModel.state || '').toLowerCase();
+            const inProgress = stateValue === 'checking' || stateValue === 'requested' || stateValue === 'updating';
+            const progressValue = Number(firmwareStateModel.progress);
+            const showProgress = Number.isFinite(progressValue) && progressValue >= 0;
+
+            if (firmwareInstalledVersion) firmwareInstalledVersion.innerText = firmwareStateModel.installed_version || '--';
+            if (firmwareLatestVersion) firmwareLatestVersion.innerText = firmwareStateModel.latest_version || '--';
+            if (firmwareAvailability) firmwareAvailability.innerText = getFirmwareAvailabilityLabel();
+            if (firmwareStateValue) firmwareStateValue.innerText = getFirmwareStateLabel();
+
+            if (firmwareProgressShell) firmwareProgressShell.hidden = !showProgress;
+            if (firmwareProgressFill) firmwareProgressFill.style.width = showProgress ? `${Math.max(0, Math.min(100, progressValue))}%` : '0%';
+            if (firmwareProgressText) firmwareProgressText.innerText = showProgress ? `${Math.round(progressValue)}%` : '--';
+            if (firmwareRemainingText) {
+                const remaining = Number(firmwareStateModel.remaining);
+                firmwareRemainingText.innerText = Number.isFinite(remaining) && remaining > 0 ? `${remaining}s remaining` : '';
+            }
+
+            if (firmwareStatusMessage) {
+                firmwareStatusMessage.classList.remove('status-error', 'status-ready');
+                let message = 'Select a device, then check for updates.';
+                if (hasSelection) {
+                    if (firmwareStateModel.last_error) {
+                        message = firmwareStateModel.last_error;
+                        firmwareStatusMessage.classList.add('status-error');
+                    } else if (stateValue === 'checking') {
+                        message = 'Checking Zigbee2MQTT OTA availability for this device...';
+                    } else if (stateValue === 'requested' || stateValue === 'updating') {
+                        message = 'Firmware update in progress. Keep the switch powered until completion.';
+                    } else if (firmwareStateModel.available === true) {
+                        message = firmwareStateModel.latest_version
+                            ? `Update available: ${firmwareStateModel.latest_version}.`
+                            : 'An update is available for this device.';
+                        firmwareStatusMessage.classList.add('status-ready');
+                    } else if (firmwareStateModel.available === false) {
+                        const checkedAt = formatFirmwareTimestamp(firmwareStateModel.last_checked);
+                        message = checkedAt !== '--'
+                            ? `Device is up to date. Last checked at ${checkedAt}.`
+                            : 'Device is up to date.';
+                    } else {
+                        message = 'Click Check for Updates to query Zigbee2MQTT.';
+                    }
+                }
+                firmwareStatusMessage.innerText = message;
+            }
+
+            if (btnFirmwareCheck) btnFirmwareCheck.disabled = !hasSelection || inProgress;
+            if (btnFirmwareInstall) btnFirmwareInstall.disabled = !hasSelection || firmwareStateModel.available !== true || inProgress;
+        }
+
+        function handleFirmwareCheckClick() {
+            if (!deviceSelect || !deviceSelect.value) return;
+            socket.emit('check_firmware_update', { request_id: `firmware-check-${Date.now()}` });
+        }
+
+        function handleFirmwareInstallClick() {
+            if (!deviceSelect || !deviceSelect.value) return;
+            const confirmed = confirm('Start firmware update for the selected device? Keep the switch powered until the update completes.');
+            if (!confirmed) return;
+            socket.emit('start_firmware_update', { request_id: `firmware-update-${Date.now()}` });
+        }
+
+        if (btnFirmwareCheck) btnFirmwareCheck.addEventListener('click', handleFirmwareCheckClick);
+        if (btnFirmwareInstall) btnFirmwareInstall.addEventListener('click', handleFirmwareInstallClick);
+        renderFirmwarePanel();
 
         function applyLayoutMode(activeTab) {
             if (!appContainer) return;
@@ -4319,6 +4631,45 @@
                 }
             }
 
+            if (result.action === 'check_firmware_update') {
+                if (result.status === 'error') {
+                    applyFirmwareStateUpdate({
+                        state: 'error',
+                        last_error: result.message || 'Firmware check failed',
+                        bridge_status: 'error'
+                    });
+                } else if (result.status === 'sent') {
+                    applyFirmwareStateUpdate({
+                        state: 'checking',
+                        last_error: null,
+                        bridge_status: 'pending'
+                    });
+                    if (window.SwitchStudioState) {
+                        window.SwitchStudioState.showToast('syncing', 'Checking for firmware updates...', 1500);
+                    }
+                }
+            }
+
+            if (result.action === 'start_firmware_update') {
+                if (result.status === 'error') {
+                    applyFirmwareStateUpdate({
+                        state: 'error',
+                        last_error: result.message || 'Firmware update request failed',
+                        bridge_status: 'error'
+                    });
+                } else if (result.status === 'sent') {
+                    applyFirmwareStateUpdate({
+                        state: 'requested',
+                        last_error: null,
+                        bridge_status: 'pending',
+                        progress: 0
+                    });
+                    if (window.SwitchStudioState) {
+                        window.SwitchStudioState.showToast('syncing', 'Firmware update requested', 1500);
+                    }
+                }
+            }
+
             if (window.SwitchStudioState && typeof window.SwitchStudioState.handleCommandResult === 'function') {
                 window.SwitchStudioState.handleCommandResult(result);
             } else {
@@ -4348,6 +4699,7 @@
         deviceSelect.addEventListener('change', function() {
             updateDeviceSelectState();
             resetBasicControlsForDeviceChange();
+            resetFirmwareStateForDeviceChange();
             socket.emit('change_device', this.value);
             
             // FIRE A FORCE SYNC TO PREVENT STALE DATA ON LOAD
@@ -4403,6 +4755,15 @@
             if (snapshotConfig && typeof snapshotConfig === 'object') {
                 syncBasicControlsFromConfig(snapshotConfig);
             }
+            if (msg.payload.ota_status && typeof msg.payload.ota_status === 'object') {
+                applyFirmwareStateUpdate(msg.payload.ota_status, { reset: true });
+            }
+        });
+
+        socket.on('firmware_status', function(msg) {
+            if (!msg || !msg.topic || !msg.payload) return;
+            if (msg.topic !== deviceSelect.value) return;
+            applyFirmwareStateUpdate(msg.payload);
         });
 
         // Helper: Convert Z2M area object to internal format and handle zeroed-out zones
@@ -4447,6 +4808,7 @@
             if (msg.topic !== deviceSelect.value) return;
 
             syncBasicControlsFromConfig(config);
+            applyFirmwareStateUpdate(config);
 
             updateTimestamp(); 
 

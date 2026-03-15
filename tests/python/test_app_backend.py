@@ -220,6 +220,56 @@ class AppBackendTests(unittest.TestCase):
         self.assertEqual(results[-1]["status"], "error")
         self.assertEqual(results[-1]["message"], "No device selected")
 
+    def test_check_firmware_update_publishes_bridge_request(self):
+        published = []
+
+        def fake_publish(topic, payload, origin, sid=None):
+            published.append({"topic": topic, "payload": payload, "origin": origin, "sid": sid})
+            return True, 0
+
+        client = self._client()
+        client.get_received()
+
+        with patch.object(app_module, "publish_json", side_effect=fake_publish):
+            client.emit("change_device", "zigbee2mqtt/device_a")
+            client.get_received()
+            client.emit("check_firmware_update", {"request_id": "ota-check-1"})
+
+        self.assertEqual(len(published), 1)
+        self.assertEqual(published[0]["topic"], "zigbee2mqtt/bridge/request/device/ota_update/check")
+        self.assertEqual(published[0]["payload"], {"id": "device_a"})
+        self.assertEqual(published[0]["origin"], "check_firmware_update")
+
+        results = [event["args"][0] for event in client.get_received() if event["name"] == "command_result"]
+        matching = [result for result in results if result.get("action") == "check_firmware_update"]
+        self.assertTrue(matching)
+        self.assertEqual(matching[-1]["status"], "sent")
+
+    def test_start_firmware_update_publishes_bridge_request(self):
+        published = []
+
+        def fake_publish(topic, payload, origin, sid=None):
+            published.append({"topic": topic, "payload": payload, "origin": origin, "sid": sid})
+            return True, 0
+
+        client = self._client()
+        client.get_received()
+
+        with patch.object(app_module, "publish_json", side_effect=fake_publish):
+            client.emit("change_device", "zigbee2mqtt/device_a")
+            client.get_received()
+            client.emit("start_firmware_update", {"request_id": "ota-update-1"})
+
+        self.assertEqual(len(published), 1)
+        self.assertEqual(published[0]["topic"], "zigbee2mqtt/bridge/request/device/ota_update/update")
+        self.assertEqual(published[0]["payload"], {"id": "device_a"})
+        self.assertEqual(published[0]["origin"], "start_firmware_update")
+
+        results = [event["args"][0] for event in client.get_received() if event["name"] == "command_result"]
+        matching = [result for result in results if result.get("action") == "start_firmware_update"]
+        self.assertTrue(matching)
+        self.assertEqual(matching[-1]["status"], "sent")
+
     def test_auto_off_disconnect_only_when_last_session_on_topic(self):
         published = []
 
@@ -297,6 +347,68 @@ class AppBackendTests(unittest.TestCase):
         with app_module.device_list_lock:
             zone = dict(app_module.device_list["Bedroom Light Control"]["zone_config"])
         self.assertEqual(zone, {"x_min": 20, "x_max": 100, "y_min": 10, "y_max": 220})
+
+    def test_on_message_updates_ota_status_from_device_payload(self):
+        topic = "zigbee2mqtt/Bedroom Light Control"
+        with app_module.device_list_lock:
+            app_module.device_list["Bedroom Light Control"] = _make_device("Bedroom Light Control", topic)
+
+        client = self._client()
+        client.get_received()
+
+        payload = {
+            "update_available": True,
+            "update": {
+                "installed_version": "1.00",
+                "latest_version": "1.01",
+                "state": "available",
+                "progress": 0,
+            }
+        }
+        msg = SimpleNamespace(topic=topic, payload=json.dumps(payload).encode("utf-8"))
+        app_module.on_message(None, None, msg)
+
+        firmware_events = [event["args"][0] for event in client.get_received() if event["name"] == "firmware_status"]
+        self.assertTrue(firmware_events)
+        latest = firmware_events[-1]["payload"]
+        self.assertEqual(latest["available"], True)
+        self.assertEqual(latest["installed_version"], "1.00")
+        self.assertEqual(latest["latest_version"], "1.01")
+        self.assertEqual(latest["state"], "available")
+
+    def test_on_message_handles_ota_bridge_response(self):
+        topic = "zigbee2mqtt/Bedroom Light Control"
+        with app_module.device_list_lock:
+            app_module.device_list["Bedroom Light Control"] = _make_device("Bedroom Light Control", topic)
+
+        client = self._client()
+        client.get_received()
+
+        payload = {
+            "status": "ok",
+            "data": {
+                "id": "Bedroom Light Control",
+                "updateAvailable": False,
+                "update": {
+                    "installed_version": "1.01",
+                    "latest_version": "1.01",
+                    "state": "checked",
+                }
+            }
+        }
+        msg = SimpleNamespace(
+            topic="zigbee2mqtt/bridge/response/device/ota_update/check",
+            payload=json.dumps(payload).encode("utf-8")
+        )
+        app_module.on_message(None, None, msg)
+
+        firmware_events = [event["args"][0] for event in client.get_received() if event["name"] == "firmware_status"]
+        self.assertTrue(firmware_events)
+        latest = firmware_events[-1]["payload"]
+        self.assertEqual(latest["available"], False)
+        self.assertEqual(latest["installed_version"], "1.01")
+        self.assertEqual(latest["latest_version"], "1.01")
+        self.assertEqual(latest["state"], "checked")
 
     def test_on_message_parses_detection_zone_raw_packet(self):
         topic = "zigbee2mqtt/Bedroom Light Control"
