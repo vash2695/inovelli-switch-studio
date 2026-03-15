@@ -1902,7 +1902,7 @@
                                     <div class="firmware-stat-meta" id="firmwareInstalledVersionMeta">Build --</div>
                                 </div>
                                 <div class="firmware-stat-card">
-                                    <div class="firmware-stat-label">Current Inovelli Version</div>
+                                    <div class="firmware-stat-label">Latest Inovelli Versions</div>
                                     <div class="firmware-stat-value" id="firmwareLatestVersion">--</div>
                                     <div class="firmware-stat-meta" id="firmwareLatestVersionMeta">Checking Inovelli help center...</div>
                                 </div>
@@ -2399,10 +2399,10 @@
             const production = officialVersions.Production || officialVersions.production || null;
             const beta = officialVersions.Beta || officialVersions.beta || null;
             if (production && installedDetail.display_version === production) {
-                return `It matches Inovelli's current production version ${production}.`;
+                return `This matches Inovelli's latest production release (${production}).`;
             }
             if (beta && installedDetail.display_version === beta) {
-                return `It matches Inovelli's current beta version ${beta}.`;
+                return `This matches Inovelli's latest beta release (${beta}).`;
             }
             return '';
         }
@@ -2488,28 +2488,28 @@
                         message = 'Firmware update in progress. Keep the switch powered until completion.';
                     } else if (firmwareStateModel.downgrade === true) {
                         if (installedVersionLabel !== '--' && latestVersionLabel !== '--') {
-                            message = `Zigbee2MQTT catalog firmware ${latestVersionLabel}${getFirmwareFileSuffix(latestDetail)} is older than the installed ${installedVersionLabel}. ${installedOfficialMatchSummary ? `${installedOfficialMatchSummary} ` : ''}Installing it would downgrade the device.`;
+                            message = `Installed firmware: ${installedVersionLabel}. ${installedOfficialMatchSummary ? `${installedOfficialMatchSummary} ` : ''}Zigbee2MQTT's OTA catalog currently lists ${latestVersionLabel}${getFirmwareFileSuffix(latestDetail)}, which is older. Installing it would downgrade the switch.`;
                         } else {
                             message = 'Zigbee2MQTT reports an older catalog image for this device.';
                         }
                     } else if (versionComparison === 1) {
                         if (installedVersionLabel !== '--' && latestVersionLabel !== '--') {
-                            message = `Installed firmware ${installedVersionLabel} is newer than Zigbee2MQTT's catalog firmware ${latestVersionLabel}${getFirmwareFileSuffix(latestDetail)}. ${installedOfficialMatchSummary}`;
+                            message = `Installed firmware: ${installedVersionLabel}. ${installedOfficialMatchSummary ? `${installedOfficialMatchSummary} ` : ''}Zigbee2MQTT's OTA catalog currently lists ${latestVersionLabel}${getFirmwareFileSuffix(latestDetail)}, which is older.`;
                         } else {
                             message = 'Installed firmware appears newer than the catalog version currently reported by Zigbee2MQTT.';
                         }
                     } else if (firmwareStateModel.available === true) {
                         message = firmwareStateModel.latest_version
-                            ? `Update available: ${latestVersionLabel}${getFirmwareFileSuffix(latestDetail)}${installedVersionLabel !== '--' ? ` (installed ${installedVersionLabel})` : ''}.`
+                            ? `Zigbee2MQTT OTA update available: ${latestVersionLabel}${getFirmwareFileSuffix(latestDetail)}${installedVersionLabel !== '--' ? `. Installed firmware: ${installedVersionLabel}.` : '.'}`
                             : 'An update is available for this device.';
                         firmwareStatusMessage.classList.add('status-ready');
                     } else if (firmwareStateModel.available === false) {
                         const checkedAt = formatFirmwareTimestamp(firmwareStateModel.last_checked);
                         const currentLabel = installedVersionLabel !== '--' ? installedVersionLabel : formattedInstalledVersion;
                         message = checkedAt !== '--'
-                            ? `${currentLabel !== '--' ? `Device is up to date on ${currentLabel}. ` : 'Device is up to date. '}${installedOfficialMatchSummary ? `${installedOfficialMatchSummary} ` : ''}Last checked at ${checkedAt}.`
+                            ? `${currentLabel !== '--' ? `Installed firmware: ${currentLabel}. ` : 'Device is up to date. '}${installedOfficialMatchSummary ? `${installedOfficialMatchSummary} ` : ''}Last checked at ${checkedAt}.`
                             : currentLabel !== '--'
-                                ? `Device is up to date on ${currentLabel}. ${installedOfficialMatchSummary}`.trim()
+                                ? `Installed firmware: ${currentLabel}. ${installedOfficialMatchSummary}`.trim()
                                 : 'Device is up to date.';
                     } else {
                         message = 'Click Check for Updates to query Zigbee2MQTT.';
