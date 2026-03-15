@@ -4681,17 +4681,50 @@
             Plotly.react('chart', document.getElementById('chart').data, layout, chartConfig);
         }
 
+        function getMovedShapeIndex(eventData) {
+            if (!eventData || typeof eventData !== 'object') return null;
+            const shapeKey = Object.keys(eventData).find((key) => /^shapes\[\d+\]\./.test(key));
+            if (!shapeKey) return null;
+            const match = shapeKey.match(/^shapes\[(\d+)\]\./);
+            return match ? parseInt(match[1], 10) : null;
+        }
+
+        function getActiveEditableShapeInfo() {
+            const chart = document.getElementById('chart');
+            const shapes = chart && chart.layout && Array.isArray(chart.layout.shapes)
+                ? chart.layout.shapes
+                : [];
+            const index = shapes.findIndex((shape) => shape && shape.editable === true);
+            if (index < 0) return null;
+            return { index, shape: shapes[index] };
+        }
+
+        function resetZoneEditShapes() {
+            layout.shapes = getChartShapes();
+            layout.annotations = getChartAnnotations();
+            Plotly.react('chart', document.getElementById('chart').data, layout, chartConfig);
+        }
+
         // Capture Plotly Drag Events
         document.getElementById('chart').on('plotly_relayout', function(eventData) {
             if (!isEditingZone) return;
 
             // Check if the event is a shape modification
             if (Object.keys(eventData).some(k => k.includes('shapes['))) {
-                
-                // Find the shape that is actively being edited (has dotted line)
-                const shapes = document.getElementById('chart').layout.shapes;
-                const activeShape = shapes.find(s => s.editable === true);
+                const movedShapeIndex = getMovedShapeIndex(eventData);
+                const activeShapeInfo = getActiveEditableShapeInfo();
 
+                if (!activeShapeInfo) {
+                    resetZoneEditShapes();
+                    return;
+                }
+
+                if (movedShapeIndex !== null && movedShapeIndex !== activeShapeInfo.index) {
+                    resetZoneEditShapes();
+                    return;
+                }
+
+                const activeShape = activeShapeInfo.shape;
                 if (activeShape) {
                     // Update only X/Y from drag, preserve Z
                     const rawDraft = {
