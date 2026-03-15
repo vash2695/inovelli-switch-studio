@@ -251,3 +251,21 @@ test('state sync updates registered input bindings and custom sync handlers', ()
     assert.equal(mirrored.value, 25);
     assert.deepEqual(observedValues, [25, 10, 25]);
 });
+
+test('hidden derived changes do not inflate the visible pending count', () => {
+    const document = new MockDocument();
+    const primary = createElement(document, 'input', 'primaryField', { type: 'range' });
+
+    const state = initState(document);
+    state.syncConfig({
+        dimmingSpeedUpRemote: 0,
+        dimmingSpeedUpLocal: 0,
+        dimmingSpeedDownRemote: 127,
+    });
+
+    state.queueChange('dimmingSpeedUpRemote', 25, primary);
+    state.queueChange('dimmingSpeedUpLocal', 25, null);
+    state.queueChange('dimmingSpeedDownRemote', 0, null, { hiddenFromCount: true });
+
+    assert.equal(state.getPendingCount(), 2);
+});

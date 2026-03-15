@@ -187,8 +187,8 @@
     }
 
     function updateDirtyUi() {
-        const count = pendingChanges.size;
-        const isDirty = count > 0;
+        const count = Array.from(pendingChanges.values()).filter((entry) => !entry.hiddenFromCount).length;
+        const isDirty = pendingChanges.size > 0;
 
         if (dirtyBarEl) {
             dirtyBarEl.classList.toggle('dirty-active', isDirty);
@@ -235,16 +235,20 @@
         packetInfoEl.style.color = colorMap[mode] || '#00bcd4';
     }
 
-    function queueChange(param, value, inputElement) {
+    function queueChange(param, value, inputElement, options) {
         if (!param) return;
 
+        const opts = options || {};
         if (inputElement) registerInputBinding(param, inputElement);
         const baseline = latestConfig[param];
 
         if (baseline !== undefined && valuesEqual(baseline, value)) {
             pendingChanges.delete(param);
         } else {
-            pendingChanges.set(param, value);
+            pendingChanges.set(param, {
+                value: value,
+                hiddenFromCount: !!opts.hiddenFromCount,
+            });
         }
 
         syncParamUi(param, value);
@@ -256,7 +260,10 @@
 
         const entries = Array.from(pendingChanges.entries());
         const batchId = Date.now();
-        entries.forEach(([param, value], index) => {
+        entries.forEach(([param, entry], index) => {
+            const value = entry && typeof entry === 'object' && Object.prototype.hasOwnProperty.call(entry, 'value')
+                ? entry.value
+                : entry;
             socket.emit('update_parameter', {
                 param: param,
                 value: value,
@@ -343,6 +350,6 @@
         registerSyncHandler,
         getLatestValue: (param) => latestConfig[param],
         isPending: (param) => pendingChanges.has(param),
-        getPendingCount: () => pendingChanges.size
+        getPendingCount: () => Array.from(pendingChanges.values()).filter((entry) => !entry.hiddenFromCount).length
     };
 })();

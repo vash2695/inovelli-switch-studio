@@ -297,13 +297,16 @@
         return payload;
     }
 
-    function applyTimingPayload(payload) {
+    function applyTimingPayload(payload, visibleParams) {
         const entries = Object.entries(payload || {});
+        const visibleSet = visibleParams instanceof Set ? visibleParams : new Set(Array.isArray(visibleParams) ? visibleParams : []);
         entries.forEach(([param, value]) => {
             setRawValue(param, value);
         });
         entries.forEach(([param, value]) => {
-            stageChange(param, value);
+            stageChange(param, value, {
+                hiddenFromCount: visibleSet.size > 0 && !visibleSet.has(param),
+            });
         });
     }
 
@@ -314,7 +317,10 @@
         const nextLinked = !!isLinked;
         linkPreferences[group.id] = nextLinked;
         if (!nextLinked) {
-            applyTimingPayload(getExplicitTimingPayload());
+            applyTimingPayload(
+                getExplicitTimingPayload(),
+                new Set([group.remoteParam, group.localParam])
+            );
             return getTimingGroupUiState(group);
         }
 
@@ -327,10 +333,13 @@
             126
         );
 
-        applyTimingPayload(getExplicitTimingPayload({
-            [group.remoteParam]: normalizedValue,
-            [group.localParam]: normalizedValue,
-        }));
+        applyTimingPayload(
+            getExplicitTimingPayload({
+                [group.remoteParam]: normalizedValue,
+                [group.localParam]: normalizedValue,
+            }),
+            new Set([group.remoteParam, group.localParam])
+        );
         return getTimingGroupUiState(group);
     }
 
@@ -454,11 +463,11 @@
                 applyTimingPayload(getExplicitTimingPayload({
                     [group.remoteParam]: selected,
                     [group.localParam]: selected,
-                }));
+                }), new Set([group.remoteParam, group.localParam]));
             } else {
                 applyTimingPayload(getExplicitTimingPayload({
                     [param]: selected,
-                }));
+                }), new Set([param]));
             }
             clearTimingInteractionDraft(group);
             syncTimingCard(group);
@@ -658,9 +667,9 @@
         });
     }
 
-    function stageChange(param, value) {
+    function stageChange(param, value, options) {
         if (!stateApi || typeof stateApi.queueChange !== 'function') return;
-        stateApi.queueChange(param, value, null);
+        stateApi.queueChange(param, value, null, options || null);
         if (typeof stateApi.setPacketStatus === 'function') {
             stateApi.setPacketStatus('info', 'Pending changes');
         }
