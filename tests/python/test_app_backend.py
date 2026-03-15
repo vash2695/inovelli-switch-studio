@@ -359,8 +359,8 @@ class AppBackendTests(unittest.TestCase):
         payload = {
             "update_available": True,
             "update": {
-                "installed_version": "1.00",
-                "latest_version": "1.01",
+                "installed_version": 16974080,
+                "latest_version": 16973834,
                 "state": "available",
                 "progress": 0,
             }
@@ -372,8 +372,12 @@ class AppBackendTests(unittest.TestCase):
         self.assertTrue(firmware_events)
         latest = firmware_events[-1]["payload"]
         self.assertEqual(latest["available"], True)
-        self.assertEqual(latest["installed_version"], "1.00")
-        self.assertEqual(latest["latest_version"], "1.01")
+        self.assertEqual(latest["installed_version"], "16974080")
+        self.assertEqual(latest["latest_version"], "16973834")
+        self.assertEqual(latest["installed_version_detail"]["display_version"], "1.00")
+        self.assertEqual(latest["installed_version_detail"]["raw_hex"], "0x01030100")
+        self.assertEqual(latest["latest_version_detail"]["display_version"], "0.10")
+        self.assertEqual(latest["latest_version_detail"]["raw_hex"], "0x0103000A")
         self.assertEqual(latest["state"], "available")
 
     def test_on_message_handles_ota_bridge_response(self):
@@ -388,10 +392,11 @@ class AppBackendTests(unittest.TestCase):
             "status": "ok",
             "data": {
                 "id": "Bedroom Light Control",
-                "updateAvailable": False,
+                "updateAvailable": True,
+                "downgrade": True,
                 "update": {
-                    "installed_version": "1.01",
-                    "latest_version": "1.01",
+                    "installed_version": 16974080,
+                    "latest_version": 16973834,
                     "state": "checked",
                 }
             }
@@ -405,9 +410,12 @@ class AppBackendTests(unittest.TestCase):
         firmware_events = [event["args"][0] for event in client.get_received() if event["name"] == "firmware_status"]
         self.assertTrue(firmware_events)
         latest = firmware_events[-1]["payload"]
-        self.assertEqual(latest["available"], False)
-        self.assertEqual(latest["installed_version"], "1.01")
-        self.assertEqual(latest["latest_version"], "1.01")
+        self.assertEqual(latest["available"], True)
+        self.assertEqual(latest["downgrade"], True)
+        self.assertEqual(latest["installed_version"], "16974080")
+        self.assertEqual(latest["latest_version"], "16973834")
+        self.assertEqual(latest["installed_version_detail"]["display_version"], "1.00")
+        self.assertEqual(latest["latest_version_detail"]["display_version"], "0.10")
         self.assertEqual(latest["state"], "checked")
 
     def test_on_message_parses_detection_zone_raw_packet(self):

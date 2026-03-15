@@ -1061,6 +1061,12 @@
             font-weight: 600;
             overflow-wrap: anywhere;
         }
+        .firmware-stat-meta {
+            margin-top: 5px;
+            color: #7f8aa0;
+            font-size: 0.72rem;
+            overflow-wrap: anywhere;
+        }
         .firmware-progress-shell {
             display: flex;
             flex-direction: column;
@@ -1893,10 +1899,12 @@
                                 <div class="firmware-stat-card">
                                     <div class="firmware-stat-label">Installed Version</div>
                                     <div class="firmware-stat-value" id="firmwareInstalledVersion">--</div>
+                                    <div class="firmware-stat-meta" id="firmwareInstalledVersionMeta">Build --</div>
                                 </div>
                                 <div class="firmware-stat-card">
                                     <div class="firmware-stat-label">Latest Version</div>
                                     <div class="firmware-stat-value" id="firmwareLatestVersion">--</div>
+                                    <div class="firmware-stat-meta" id="firmwareLatestVersionMeta">Build --</div>
                                 </div>
                                 <div class="firmware-stat-card">
                                     <div class="firmware-stat-label">Availability</div>
@@ -2027,7 +2035,9 @@
         const connectionChip = document.getElementById('connectionChip');
         const connectionText = document.getElementById('connectionText');
         const firmwareInstalledVersion = document.getElementById('firmwareInstalledVersion');
+        const firmwareInstalledVersionMeta = document.getElementById('firmwareInstalledVersionMeta');
         const firmwareLatestVersion = document.getElementById('firmwareLatestVersion');
+        const firmwareLatestVersionMeta = document.getElementById('firmwareLatestVersionMeta');
         const firmwareAvailability = document.getElementById('firmwareAvailability');
         const firmwareStateValue = document.getElementById('firmwareState');
         const firmwareStatusMessage = document.getElementById('firmwareStatusMessage');
@@ -2055,8 +2065,11 @@
         let suppressBasicControlEvents = false;
         let firmwareStateModel = {
             available: null,
+            downgrade: null,
             installed_version: null,
+            installed_version_detail: null,
             latest_version: null,
+            latest_version_detail: null,
             state: null,
             progress: null,
             remaining: null,
@@ -2184,8 +2197,11 @@
         function getDefaultFirmwareState() {
             return {
                 available: null,
+                downgrade: null,
                 installed_version: null,
+                installed_version_detail: null,
                 latest_version: null,
+                latest_version_detail: null,
                 state: null,
                 progress: null,
                 remaining: null,
@@ -2201,8 +2217,11 @@
             const next = {};
             if (Object.prototype.hasOwnProperty.call(payload, 'available')) next.available = payload.available;
             if (Object.prototype.hasOwnProperty.call(payload, 'update_available')) next.available = payload.update_available;
+            if (Object.prototype.hasOwnProperty.call(payload, 'downgrade')) next.downgrade = payload.downgrade;
             if (Object.prototype.hasOwnProperty.call(payload, 'installed_version')) next.installed_version = payload.installed_version;
+            if (Object.prototype.hasOwnProperty.call(payload, 'installed_version_detail')) next.installed_version_detail = payload.installed_version_detail;
             if (Object.prototype.hasOwnProperty.call(payload, 'latest_version')) next.latest_version = payload.latest_version;
+            if (Object.prototype.hasOwnProperty.call(payload, 'latest_version_detail')) next.latest_version_detail = payload.latest_version_detail;
             if (Object.prototype.hasOwnProperty.call(payload, 'state')) next.state = payload.state;
             if (Object.prototype.hasOwnProperty.call(payload, 'progress')) next.progress = payload.progress;
             if (Object.prototype.hasOwnProperty.call(payload, 'remaining')) next.remaining = payload.remaining;
@@ -2214,6 +2233,9 @@
                 const update = payload.update;
                 if (Object.prototype.hasOwnProperty.call(update, 'installed_version')) next.installed_version = update.installed_version;
                 if (Object.prototype.hasOwnProperty.call(update, 'latest_version')) next.latest_version = update.latest_version;
+                if (Object.prototype.hasOwnProperty.call(update, 'installed_version_detail')) next.installed_version_detail = update.installed_version_detail;
+                if (Object.prototype.hasOwnProperty.call(update, 'latest_version_detail')) next.latest_version_detail = update.latest_version_detail;
+                if (Object.prototype.hasOwnProperty.call(update, 'downgrade')) next.downgrade = update.downgrade;
                 if (Object.prototype.hasOwnProperty.call(update, 'state')) next.state = update.state;
                 if (Object.prototype.hasOwnProperty.call(update, 'progress')) next.progress = update.progress;
                 if (Object.prototype.hasOwnProperty.call(update, 'remaining')) next.remaining = update.remaining;
@@ -2248,10 +2270,107 @@
             return new Date(numeric * 1000).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit' });
         }
 
+        function parseNumericFirmwareVersion(value) {
+            if (value === null || value === undefined || value === '') return null;
+            if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value);
+            if (typeof value === 'string' && /^\d+$/.test(value.trim())) {
+                const parsed = Number.parseInt(value.trim(), 10);
+                return Number.isFinite(parsed) ? parsed : null;
+            }
+            return null;
+        }
+
+        function formatFirmwareVersion(value) {
+            if (value === null || value === undefined || value === '') return '--';
+
+            const numeric = parseNumericFirmwareVersion(value);
+            if (numeric === null) return String(value);
+
+            if (numeric >= 0 && numeric <= 0xFFFFFFFF) {
+                const parts = [
+                    (numeric >>> 24) & 0xFF,
+                    (numeric >>> 16) & 0xFF,
+                    (numeric >>> 8) & 0xFF,
+                    numeric & 0xFF
+                ];
+                while (parts.length > 2 && parts[parts.length - 1] === 0) {
+                    parts.pop();
+                }
+                return parts.join('.');
+            }
+
+            return String(value);
+        }
+
+        function formatFirmwareBuildHex(value) {
+            const numeric = parseNumericFirmwareVersion(value);
+            if (numeric === null) return '--';
+            return `0x${numeric.toString(16).toUpperCase().padStart(8, '0')}`;
+        }
+
+        function getFirmwareFriendlyVersion(detail, rawValue) {
+            if (detail && typeof detail === 'object' && detail.display_version) {
+                return detail.display_version;
+            }
+            return formatFirmwareVersion(rawValue);
+        }
+
+        function getFirmwareVersionMeta(detail, rawValue) {
+            const parts = [];
+            if (detail && typeof detail === 'object' && detail.track) {
+                parts.push(detail.track);
+            }
+            const rawHex = detail && typeof detail === 'object' && detail.raw_hex
+                ? detail.raw_hex
+                : formatFirmwareBuildHex(rawValue);
+            if (rawHex && rawHex !== '--') {
+                parts.push(rawHex);
+            }
+            return parts.length ? parts.join(' • ') : 'Build --';
+        }
+
+        function describeFirmwareVersion(detail, rawValue) {
+            const friendly = getFirmwareFriendlyVersion(detail, rawValue);
+            if (!friendly || friendly === '--') return '--';
+            const parts = [friendly];
+            if (detail && typeof detail === 'object' && detail.track) {
+                parts.push(detail.track.toLowerCase());
+            }
+            const rawHex = detail && typeof detail === 'object' && detail.raw_hex
+                ? detail.raw_hex
+                : formatFirmwareBuildHex(rawValue);
+            return rawHex && rawHex !== '--'
+                ? `${parts.join(' ')} (${rawHex})`
+                : parts.join(' ');
+        }
+
+        function getFirmwareFileSuffix(detail) {
+            if (detail && typeof detail === 'object' && detail.file_name) {
+                return ` via ${detail.file_name}`;
+            }
+            return '';
+        }
+
+        function compareFirmwareVersions(installedValue, latestValue) {
+            const installedNumeric = parseNumericFirmwareVersion(installedValue);
+            const latestNumeric = parseNumericFirmwareVersion(latestValue);
+            if (installedNumeric === null || latestNumeric === null) return null;
+            if (installedNumeric === latestNumeric) return 0;
+            return installedNumeric > latestNumeric ? 1 : -1;
+        }
+
+        function getFirmwareInstallLabel() {
+            if (firmwareStateModel.downgrade === true) return 'Install Catalog Downgrade';
+            return 'Install Available Update';
+        }
+
         function getFirmwareAvailabilityLabel() {
+            if (String(firmwareStateModel.state || '').toLowerCase() === 'checking') return 'Checking...';
+            if (firmwareStateModel.downgrade === true) return 'Downgrade available';
+            const comparison = compareFirmwareVersions(firmwareStateModel.installed_version, firmwareStateModel.latest_version);
+            if (comparison === 1) return 'Installed is newer';
             if (firmwareStateModel.available === true) return 'Update available';
             if (firmwareStateModel.available === false) return 'Up to date';
-            if (String(firmwareStateModel.state || '').toLowerCase() === 'checking') return 'Checking...';
             return 'Unknown';
         }
 
@@ -2268,12 +2387,26 @@
             const stateValue = String(firmwareStateModel.state || '').toLowerCase();
             const inProgress = stateValue === 'checking' || stateValue === 'requested' || stateValue === 'updating';
             const progressValue = Number(firmwareStateModel.progress);
-            const showProgress = Number.isFinite(progressValue) && progressValue >= 0;
+            const showProgress = inProgress || (Number.isFinite(progressValue) && progressValue > 0);
+            const versionComparison = compareFirmwareVersions(firmwareStateModel.installed_version, firmwareStateModel.latest_version);
+            const installedDetail = firmwareStateModel.installed_version_detail;
+            const latestDetail = firmwareStateModel.latest_version_detail;
+            const formattedInstalledVersion = getFirmwareFriendlyVersion(installedDetail, firmwareStateModel.installed_version);
+            const formattedLatestVersion = getFirmwareFriendlyVersion(latestDetail, firmwareStateModel.latest_version);
+            const installedVersionLabel = describeFirmwareVersion(installedDetail, firmwareStateModel.installed_version);
+            const latestVersionLabel = describeFirmwareVersion(latestDetail, firmwareStateModel.latest_version);
+            const canInstall = hasSelection && !inProgress && (
+                firmwareStateModel.downgrade === true
+                || (firmwareStateModel.available === true && versionComparison !== 1)
+            );
 
-            if (firmwareInstalledVersion) firmwareInstalledVersion.innerText = firmwareStateModel.installed_version || '--';
-            if (firmwareLatestVersion) firmwareLatestVersion.innerText = firmwareStateModel.latest_version || '--';
+            if (firmwareInstalledVersion) firmwareInstalledVersion.innerText = formattedInstalledVersion;
+            if (firmwareInstalledVersionMeta) firmwareInstalledVersionMeta.innerText = getFirmwareVersionMeta(installedDetail, firmwareStateModel.installed_version);
+            if (firmwareLatestVersion) firmwareLatestVersion.innerText = formattedLatestVersion;
+            if (firmwareLatestVersionMeta) firmwareLatestVersionMeta.innerText = getFirmwareVersionMeta(latestDetail, firmwareStateModel.latest_version);
             if (firmwareAvailability) firmwareAvailability.innerText = getFirmwareAvailabilityLabel();
             if (firmwareStateValue) firmwareStateValue.innerText = getFirmwareStateLabel();
+            if (btnFirmwareInstall) btnFirmwareInstall.innerText = getFirmwareInstallLabel();
 
             if (firmwareProgressShell) firmwareProgressShell.hidden = !showProgress;
             if (firmwareProgressFill) firmwareProgressFill.style.width = showProgress ? `${Math.max(0, Math.min(100, progressValue))}%` : '0%';
@@ -2294,16 +2427,31 @@
                         message = 'Checking Zigbee2MQTT OTA availability for this device...';
                     } else if (stateValue === 'requested' || stateValue === 'updating') {
                         message = 'Firmware update in progress. Keep the switch powered until completion.';
+                    } else if (firmwareStateModel.downgrade === true) {
+                        if (installedVersionLabel !== '--' && latestVersionLabel !== '--') {
+                            message = `Zigbee2MQTT catalog firmware ${latestVersionLabel}${getFirmwareFileSuffix(latestDetail)} is older than the installed ${installedVersionLabel}. Installing it would downgrade the device.`;
+                        } else {
+                            message = 'Zigbee2MQTT reports an older catalog image for this device.';
+                        }
+                    } else if (versionComparison === 1) {
+                        if (installedVersionLabel !== '--' && latestVersionLabel !== '--') {
+                            message = `Installed firmware ${installedVersionLabel} is newer than Zigbee2MQTT's catalog firmware ${latestVersionLabel}${getFirmwareFileSuffix(latestDetail)}.`;
+                        } else {
+                            message = 'Installed firmware appears newer than the catalog version currently reported by Zigbee2MQTT.';
+                        }
                     } else if (firmwareStateModel.available === true) {
                         message = firmwareStateModel.latest_version
-                            ? `Update available: ${firmwareStateModel.latest_version}.`
+                            ? `Update available: ${latestVersionLabel}${getFirmwareFileSuffix(latestDetail)}${installedVersionLabel !== '--' ? ` (installed ${installedVersionLabel})` : ''}.`
                             : 'An update is available for this device.';
                         firmwareStatusMessage.classList.add('status-ready');
                     } else if (firmwareStateModel.available === false) {
                         const checkedAt = formatFirmwareTimestamp(firmwareStateModel.last_checked);
+                        const currentLabel = installedVersionLabel !== '--' ? installedVersionLabel : formattedInstalledVersion;
                         message = checkedAt !== '--'
-                            ? `Device is up to date. Last checked at ${checkedAt}.`
-                            : 'Device is up to date.';
+                            ? `${currentLabel !== '--' ? `Device is up to date on ${currentLabel}. ` : 'Device is up to date. '}Last checked at ${checkedAt}.`
+                            : currentLabel !== '--'
+                                ? `Device is up to date on ${currentLabel}.`
+                                : 'Device is up to date.';
                     } else {
                         message = 'Click Check for Updates to query Zigbee2MQTT.';
                     }
@@ -2312,7 +2460,7 @@
             }
 
             if (btnFirmwareCheck) btnFirmwareCheck.disabled = !hasSelection || inProgress;
-            if (btnFirmwareInstall) btnFirmwareInstall.disabled = !hasSelection || firmwareStateModel.available !== true || inProgress;
+            if (btnFirmwareInstall) btnFirmwareInstall.disabled = !canInstall;
         }
 
         function handleFirmwareCheckClick() {
@@ -2322,7 +2470,10 @@
 
         function handleFirmwareInstallClick() {
             if (!deviceSelect || !deviceSelect.value) return;
-            const confirmed = confirm('Start firmware update for the selected device? Keep the switch powered until the update completes.');
+            const confirmMessage = firmwareStateModel.downgrade === true
+                ? 'Zigbee2MQTT reports this catalog image as older than the currently installed firmware. Continue with the downgrade?'
+                : 'Start firmware update for the selected device? Keep the switch powered until the update completes.';
+            const confirmed = confirm(confirmMessage);
             if (!confirmed) return;
             socket.emit('start_firmware_update', { request_id: `firmware-update-${Date.now()}` });
         }

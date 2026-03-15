@@ -17,8 +17,10 @@ import paho.mqtt.client as mqtt
 import logging
 try:
     from .schema_service import SchemaService
+    from .firmware_reference import resolve_vzm32sn_firmware_reference
 except ImportError:
     from schema_service import SchemaService
+    from firmware_reference import resolve_vzm32sn_firmware_reference
 
 # Suppress the Werkzeug development server warning
 log = logging.getLogger('werkzeug')
@@ -240,8 +242,11 @@ def clear_session_reporting_auto_off(sid):
 def default_ota_status():
     return {
         'available': None,
+        'downgrade': None,
         'installed_version': None,
+        'installed_version_detail': None,
         'latest_version': None,
+        'latest_version_detail': None,
         'state': None,
         'progress': None,
         'remaining': None,
@@ -257,6 +262,22 @@ def ensure_ota_status(device_data):
         ota_status = default_ota_status()
         device_data['ota_status'] = ota_status
     return ota_status
+
+
+def enrich_ota_status(ota_status):
+    if not isinstance(ota_status, dict):
+        return ota_status
+
+    enriched = copy.deepcopy(ota_status)
+    enriched['installed_version_detail'] = resolve_vzm32sn_firmware_reference(
+        enriched.get('installed_version'),
+        allow_network=not TEST_MODE
+    )
+    enriched['latest_version_detail'] = resolve_vzm32sn_firmware_reference(
+        enriched.get('latest_version'),
+        allow_network=not TEST_MODE
+    )
+    return enriched
 
 
 def get_device_id_from_topic(topic):
@@ -297,11 +318,17 @@ def emit_firmware_status(topic, room=None):
     ota_status = device_data.get('ota_status')
     if not isinstance(ota_status, dict):
         return
+    ota_payload = enrich_ota_status(ota_status)
+    with device_list_lock:
+        for item in device_list.values():
+            if item.get('topic') == topic:
+                item['ota_status'] = copy.deepcopy(ota_payload)
+                break
     socketio.emit(
         'firmware_status',
         {
             'topic': topic,
-            'payload': ota_status,
+            'payload': ota_payload,
             'ts': time.time()
         },
         room=room
@@ -333,6 +360,13 @@ def update_device_ota_status(topic, values):
     if ota_payload is None:
         return None
 
+    ota_payload = enrich_ota_status(ota_payload)
+    with device_list_lock:
+        for device_data in device_list.values():
+            if device_data.get('topic') == topic:
+                device_data['ota_status'] = copy.deepcopy(ota_payload)
+                break
+
     socketio.emit('firmware_status', {'topic': topic, 'payload': ota_payload, 'ts': time.time()})
     emit_device_delta('firmware_status', ota_payload, topic=topic)
     return ota_payload
@@ -350,6 +384,15 @@ def extract_ota_status_from_payload(payload):
             break
         if key in update_info and update_info.get(key) is not None:
             available = _as_bool(update_info.get(key), False)
+            break
+
+    downgrade = None
+    for key in ('downgrade',):
+        if key in payload and payload.get(key) is not None:
+            downgrade = _as_bool(payload.get(key), False)
+            break
+        if key in update_info and update_info.get(key) is not None:
+            downgrade = _as_bool(update_info.get(key), False)
             break
 
     installed_version = None
@@ -395,6 +438,7 @@ def extract_ota_status_from_payload(payload):
 
     if (
         available is None
+        and downgrade is None
         and installed_version is None
         and latest_version is None
         and state is None
@@ -406,6 +450,7 @@ def extract_ota_status_from_payload(payload):
 
     return {
         'available': available,
+        'downgrade': downgrade,
         'installed_version': installed_version,
         'latest_version': latest_version,
         'state': state,
@@ -458,6 +503,13 @@ def build_device_snapshot(topic):
     if not device_data:
         return None
 
+    ota_status = enrich_ota_status(device_data.get('ota_status'))
+    with device_list_lock:
+        for item in device_list.values():
+            if item.get('topic') == topic:
+                item['ota_status'] = copy.deepcopy(ota_status)
+                break
+
     payload = {
         'friendly_name': device_data.get('friendly_name'),
         'zone_config': device_data.get('zone_config'),
@@ -466,7 +518,7 @@ def build_device_snapshot(topic):
         'stay_zones': device_data.get('stay_zones', []),
         'last_config': device_data.get('last_config', {}),
         'last_seen': device_data.get('last_seen'),
-        'ota_status': device_data.get('ota_status'),
+        'ota_status': ota_status,
     }
     return {'topic': topic, 'payload': payload, 'ts': time.time()}
 
@@ -755,6 +807,7 @@ def on_message(client, userdata, msg):
             # Update Standard Global Zone (Attributes 103-106)
             needs_emit = False
             zone_payload = None
+            ota_status_update = extract_ota_status_from_payload(config_payload)
 
             with device_list_lock:
                 device_data = device_list.get(fname)
@@ -762,18 +815,6 @@ def on_message(client, userdata, msg):
                     if not isinstance(device_data.get('last_config'), dict):
                         device_data['last_config'] = {}
                     device_data['last_config'].update(config_payload)
-
-                    ota_status_update = extract_ota_status_from_payload(config_payload)
-                    if ota_status_update:
-                        ota_status = ensure_ota_status(device_data)
-                        ota_status.update(ota_status_update)
-                        if ota_status.get('last_error') is None and ota_status.get('bridge_status') == 'ok':
-                            ota_status['bridge_status'] = 'ok'
-                        socketio.emit(
-                            'firmware_status',
-                            {'topic': device_topic, 'payload': copy.deepcopy(ota_status), 'ts': time.time()}
-                        )
-                        emit_device_delta('firmware_status', copy.deepcopy(ota_status), topic=device_topic)
 
                     current_zone = dict(device_data.get('zone_config', {"x_min": -400, "x_max": 400, "y_min": 0, "y_max": 600}))
 
@@ -801,6 +842,9 @@ def on_message(client, userdata, msg):
                     if needs_emit:
                         device_data['zone_config'] = current_zone
                         zone_payload = copy.deepcopy(current_zone)
+
+            if ota_status_update:
+                update_device_ota_status(device_topic, ota_status_update)
 
             if zone_payload:
                 socketio.emit('zone_config', {'topic': device_topic, 'payload': zone_payload})
