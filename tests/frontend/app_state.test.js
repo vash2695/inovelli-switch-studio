@@ -222,3 +222,32 @@ test('dirty bar is only visible while pending changes exist', () => {
     assert.equal(dirtyBar.hidden, true);
     assert.equal(dirtyBar.classList.contains('dirty-active'), false);
 });
+
+test('state sync updates registered input bindings and custom sync handlers', () => {
+    const document = new MockDocument();
+    const primary = createElement(document, 'input', 'primaryField', { type: 'range' });
+    const mirrored = createElement(document, 'input', 'mirroredField', { type: 'range' });
+    const observedValues = [];
+
+    const state = initState(document);
+    state.registerInputBinding('dimmingSpeedUpRemote', primary);
+    state.registerInputBinding('dimmingSpeedUpRemote', mirrored);
+    state.registerSyncHandler('dimmingSpeedUpRemote', (value) => observedValues.push(value));
+
+    state.syncConfig({ dimmingSpeedUpRemote: 25 });
+    assert.equal(primary.value, 25);
+    assert.equal(mirrored.value, 25);
+    assert.deepEqual(observedValues, [25]);
+
+    primary.value = 10;
+    state.queueChange('dimmingSpeedUpRemote', 10, primary);
+    assert.equal(state.getPendingCount(), 1);
+    assert.equal(primary.value, 10);
+    assert.equal(mirrored.value, 10);
+    assert.deepEqual(observedValues, [25, 10]);
+
+    state.discardPendingChanges();
+    assert.equal(primary.value, 25);
+    assert.equal(mirrored.value, 25);
+    assert.deepEqual(observedValues, [25, 10, 25]);
+});

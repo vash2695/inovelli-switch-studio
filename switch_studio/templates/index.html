@@ -1117,6 +1117,162 @@
         .firmware-actions .cmd-btn {
             flex: 1 1 220px;
         }
+        .load-dimming-shell {
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+        }
+        .load-dimming-intro {
+            color: #98a4bb;
+            font-size: 0.88rem;
+            line-height: 1.55;
+        }
+        .load-dimming-section {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .load-dimming-section-title {
+            color: #8b95aa;
+            font-size: 0.86rem;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+        .load-dimming-card {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            padding: 16px 18px;
+            border-radius: var(--radius-md);
+            border: 1px solid rgba(94, 107, 130, 0.28);
+            background:
+                linear-gradient(180deg, rgba(54, 60, 74, 0.88), rgba(40, 45, 57, 0.94)),
+                radial-gradient(circle at top left, rgba(255, 255, 255, 0.03), transparent 52%);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+        }
+        .load-dimming-card-header,
+        .load-dimming-default-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 14px;
+        }
+        .load-dimming-card-title {
+            color: #edf2fb;
+            font-size: 1.02rem;
+            font-weight: 700;
+        }
+        .load-dimming-card-note {
+            color: #97a2b7;
+            font-size: 0.82rem;
+            line-height: 1.55;
+        }
+        .load-dimming-row,
+        .load-dimming-default-controls {
+            display: grid;
+            grid-template-columns: 64px minmax(0, 1fr) 74px;
+            align-items: center;
+            gap: 14px;
+        }
+        .load-dimming-default-row {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .load-dimming-default-row + .load-dimming-default-row {
+            padding-top: 12px;
+            border-top: 1px solid rgba(94, 107, 130, 0.22);
+        }
+        .load-dimming-row-label {
+            color: #d8deea;
+            font-size: 0.94rem;
+            font-weight: 600;
+        }
+        .load-dimming-slider {
+            width: 100%;
+            accent-color: #44d7c5;
+        }
+        .load-dimming-slider:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+        .load-dimming-row-value {
+            color: #f1f5ff;
+            font-size: 0.92rem;
+            font-weight: 700;
+            text-align: right;
+            white-space: nowrap;
+        }
+        .load-dimming-inline-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            color: #4fd9ff;
+            font-size: 0.86rem;
+            font-weight: 700;
+        }
+        .load-dimming-inline-toggle-compact {
+            color: #f7c35f;
+        }
+        .load-dimming-inline-toggle input {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+        }
+        .load-dimming-switch-track {
+            position: relative;
+            display: inline-flex;
+            width: 44px;
+            height: 24px;
+            border-radius: 999px;
+            background: rgba(120, 131, 150, 0.34);
+            border: 1px solid rgba(120, 131, 150, 0.28);
+            transition: background var(--anim-med), border-color var(--anim-med);
+        }
+        .load-dimming-switch-track::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #f5f8ff;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.26);
+            transition: transform var(--anim-med);
+        }
+        .load-dimming-inline-toggle input:checked + .load-dimming-switch-track {
+            background: rgba(63, 198, 255, 0.28);
+            border-color: rgba(79, 217, 255, 0.44);
+        }
+        .load-dimming-inline-toggle-compact input:checked + .load-dimming-switch-track {
+            background: rgba(247, 195, 95, 0.36);
+            border-color: rgba(247, 195, 95, 0.52);
+        }
+        .load-dimming-inline-toggle input:checked + .load-dimming-switch-track::after {
+            transform: translateX(20px);
+        }
+        .load-dimming-switch-text {
+            white-space: nowrap;
+        }
+        .load-dimming-static-pill {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 132px;
+            padding: 8px 12px;
+            border-radius: 12px;
+            border: 1px solid rgba(94, 107, 130, 0.26);
+            background: rgba(255, 255, 255, 0.04);
+            color: #eef2fb;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+        .load-dimming-divider {
+            height: 1px;
+            background: linear-gradient(90deg, rgba(94, 107, 130, 0), rgba(94, 107, 130, 0.32), rgba(94, 107, 130, 0));
+        }
 
         .schema-fields-shell {
             display: flex;
@@ -1562,6 +1718,23 @@
             .firmware-actions .cmd-btn {
                 width: 100%;
             }
+            .load-dimming-row,
+            .load-dimming-default-controls {
+                grid-template-columns: 1fr;
+                gap: 10px;
+            }
+            .load-dimming-card-header,
+            .load-dimming-default-top {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            .load-dimming-row-value {
+                text-align: left;
+            }
+            .load-dimming-static-pill {
+                width: 100%;
+                justify-content: flex-start;
+            }
 
             .zones-sidebar-tab {
                 min-width: 102px;
@@ -1994,6 +2167,7 @@
 
     <script src="{{ ingress_path }}/static/js/app_tabs.js"></script>
     <script src="{{ ingress_path }}/static/js/app_state.js"></script>
+    <script src="{{ ingress_path }}/static/js/app_load_dimming.js"></script>
     <script src="{{ ingress_path }}/static/js/app_zones.js"></script>
     <script>
         const INGRESS_PATH = "{{ ingress_path }}";
@@ -2890,6 +3064,14 @@
             });
         }
 
+        if (window.SwitchStudioLoadDimming && typeof window.SwitchStudioLoadDimming.init === 'function') {
+            window.SwitchStudioLoadDimming.init({
+                containerEl: schemaLoadFields,
+                stateApi: window.SwitchStudioState || null,
+                isDeviceSelected: () => !!(deviceSelect && deviceSelect.value)
+            });
+        }
+
         function getStoredTargetReportingAutoOff() {
             try {
                 return localStorage.getItem(TARGET_REPORT_AUTO_OFF_STORAGE_KEY) === '1';
@@ -3565,6 +3747,20 @@
         const presenceConfigOnlyFieldKeys = new Set([
             'mmWaveRoomSizePreset'
         ]);
+        const rawLoadAdvancedFieldKeys = new Set([
+            'dimmingSpeedUpRemote',
+            'dimmingSpeedUpLocal',
+            'rampRateOffToOnRemote',
+            'rampRateOffToOnLocal',
+            'dimmingSpeedDownRemote',
+            'dimmingSpeedDownLocal',
+            'rampRateOnToOffRemote',
+            'rampRateOnToOffLocal',
+            'defaultLevelLocal',
+            'defaultLevelRemote',
+            'loadLevelIndicatorTimeout',
+            'dimmingMode'
+        ]);
 
         const advancedFieldKeys = new Set([
             // Presence set-and-forget tuning.
@@ -3587,11 +3783,29 @@
             'maximumLevel',
             'stateAfterPowerRestored',
             'autoTimerOff',
+            'dimmingSpeedUpRemote',
+            'dimmingSpeedUpLocal',
+            'rampRateOffToOnRemote',
+            'rampRateOffToOnLocal',
+            'dimmingSpeedDownRemote',
+            'dimmingSpeedDownLocal',
+            'rampRateOnToOffRemote',
+            'rampRateOnToOffLocal',
+            'defaultLevelLocal',
+            'defaultLevelRemote',
+            'loadLevelIndicatorTimeout',
+            'dimmingMode',
             'quickStartTime',
             'quickStartLevel',
             'localProtection',
             'otaImageType'
         ]);
+
+        function getAdvancedSectionName(field) {
+            if (!field || !field.name) return 'Set-and-Forget';
+            if (rawLoadAdvancedFieldKeys.has(field.name)) return 'Load & Dimming (Raw Values)';
+            return field.section || 'Set-and-Forget';
+        }
 
         function isFieldHiddenByDedicatedControl(field) {
             return !!(field && field.name && hiddenFieldKeys.has(field.name));
@@ -3702,6 +3916,25 @@
             return readOnlyVal;
         }
 
+        function resolveSchemaControlInput(control, inputId) {
+            if (!control) return null;
+            if (control.id === inputId) return control;
+            if (typeof control.querySelector === 'function') {
+                const found = control.querySelector(`[id="${inputId}"]`);
+                if (found) return found;
+            }
+            const queue = Array.isArray(control.children) ? Array.from(control.children) : [];
+            while (queue.length > 0) {
+                const current = queue.shift();
+                if (!current) continue;
+                if (current.id === inputId) return current;
+                if (Array.isArray(current.children) && current.children.length > 0) {
+                    queue.push(...current.children);
+                }
+            }
+            return null;
+        }
+
         function createSchemaFieldRow(field) {
             const row = document.createElement('div');
             row.className = 'input-row schema-field-row';
@@ -3712,7 +3945,12 @@
             row.appendChild(label);
 
             if (field.can_write) {
-                row.appendChild(createSchemaFieldInput(field));
+                const control = createSchemaFieldInput(field);
+                row.appendChild(control);
+                const controlInput = resolveSchemaControlInput(control, field.name);
+                if (window.SwitchStudioState && typeof window.SwitchStudioState.registerInputBinding === 'function' && controlInput) {
+                    window.SwitchStudioState.registerInputBinding(field.name, controlInput);
+                }
             } else {
                 row.appendChild(createReadOnlyValueElement(field));
             }
@@ -3957,7 +4195,7 @@
                 }
 
                 if (isSetAndForgetField(field, 'fields')) {
-                    buckets.advanced.push({ ...field, section: field.section || 'Set-and-Forget' });
+                    buckets.advanced.push({ ...field, section: getAdvancedSectionName(field) });
                     return;
                 }
 
@@ -3984,7 +4222,11 @@
             const presenceConfigFields = presenceFields.filter(field => presenceConfigOnlyFieldKeys.has(field.name));
             renderSchemaFieldCollection(schemaPresenceControlsFields, presenceControlsFields, 'No presence controls found.');
             renderSchemaFieldCollection(schemaPresenceConfigFields, presenceConfigFields, 'No presence configuration fields found.');
-            renderSchemaFieldCollection(schemaLoadFields, loadFields, 'No load or dimming controls found.');
+            if (window.SwitchStudioLoadDimming && typeof window.SwitchStudioLoadDimming.setSchemaModel === 'function') {
+                window.SwitchStudioLoadDimming.setSchemaModel(schemaModel);
+            } else {
+                renderSchemaFieldCollection(schemaLoadFields, loadFields, 'No load or dimming controls found.');
+            }
             renderSchemaFieldCollection(schemaLedFields, ledFields, 'No LED fields found in schema.');
             renderSchemaFieldCollection(schemaButtonFields, buttonFields, 'No button or scene fields found.');
             renderSchemaFieldCollection(schemaPowerFields, powerFields, 'No power/device fields found.');
@@ -4920,6 +5162,9 @@
                 window.SwitchStudioState.setPacketStatus('info', 'Awaiting data...');
             } else {
                 packetInfo.innerText = "Awaiting data...";
+            }
+            if (window.SwitchStudioLoadDimming && typeof window.SwitchStudioLoadDimming.resetForDeviceChange === 'function') {
+                window.SwitchStudioLoadDimming.resetForDeviceChange();
             }
             timestampSpan.innerText = "--:--:--";
             packetAgeSpan.innerText = "";

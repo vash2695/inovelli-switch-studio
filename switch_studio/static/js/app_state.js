@@ -2,6 +2,7 @@
     const pendingChanges = new Map();
     const latestConfig = {};
     const inputElements = new Map();
+    const syncHandlers = new Map();
 
     let socket = null;
     let packetInfoEl = null;
@@ -83,6 +84,74 @@
             return;
         }
         valueElement.innerText = rawValue === '--' ? '--' : `${rawValue}%`;
+    }
+
+    function ensureParamElementSet(param) {
+        if (!inputElements.has(param)) {
+            inputElements.set(param, new Set());
+        }
+        return inputElements.get(param);
+    }
+
+    function ensureParamHandlerSet(param) {
+        if (!syncHandlers.has(param)) {
+            syncHandlers.set(param, new Set());
+        }
+        return syncHandlers.get(param);
+    }
+
+    function registerInputBinding(param, element) {
+        if (!param || !element) return () => {};
+        const bucket = ensureParamElementSet(param);
+        bucket.add(element);
+        return () => {
+            const current = inputElements.get(param);
+            if (!current) return;
+            current.delete(element);
+            if (current.size === 0) inputElements.delete(param);
+        };
+    }
+
+    function registerSyncHandler(param, handler) {
+        if (!param || typeof handler !== 'function') return () => {};
+        const bucket = ensureParamHandlerSet(param);
+        bucket.add(handler);
+        return () => {
+            const current = syncHandlers.get(param);
+            if (!current) return;
+            current.delete(handler);
+            if (current.size === 0) syncHandlers.delete(param);
+        };
+    }
+
+    function syncParamUi(param, value) {
+        const seen = new Set();
+        const registeredInputs = inputElements.get(param);
+        if (registeredInputs && registeredInputs.size > 0) {
+            registeredInputs.forEach((element) => {
+                if (!element) return;
+                setInputValue(element, value);
+                seen.add(element);
+            });
+        }
+
+        if (typeof document !== 'undefined' && document) {
+            const fallbackElement = document.getElementById(param);
+            if (fallbackElement && !seen.has(fallbackElement)) {
+                setInputValue(fallbackElement, value);
+            }
+        }
+
+        const handlers = syncHandlers.get(param);
+        if (handlers && handlers.size > 0) {
+            handlers.forEach((handler) => {
+                try {
+                    handler(value);
+                } catch (err) {
+                    // Ignore UI sync handler failures so device updates continue.
+                }
+            });
+        }
     }
 
     function setInputValue(element, value) {
@@ -169,7 +238,7 @@
     function queueChange(param, value, inputElement) {
         if (!param) return;
 
-        inputElements.set(param, inputElement);
+        if (inputElement) registerInputBinding(param, inputElement);
         const baseline = latestConfig[param];
 
         if (baseline !== undefined && valuesEqual(baseline, value)) {
@@ -178,6 +247,7 @@
             pendingChanges.set(param, value);
         }
 
+        syncParamUi(param, value);
         updateDirtyUi();
     }
 
@@ -205,8 +275,7 @@
         if (pendingChanges.size === 0) return;
 
         pendingChanges.forEach((_, param) => {
-            const input = inputElements.get(param) || document.getElementById(param);
-            setInputValue(input, latestConfig[param]);
+            syncParamUi(param, latestConfig[param]);
         });
 
         pendingChanges.clear();
@@ -221,14 +290,12 @@
         Object.entries(configPayload).forEach(([key, value]) => {
             latestConfig[key] = value;
             if (pendingChanges.has(key)) return;
-            const element = document.getElementById(key);
-            if (element) setInputValue(element, value);
+            syncParamUi(key, value);
         });
     }
 
     function resetForDeviceChange() {
         pendingChanges.clear();
-        inputElements.clear();
         updateDirtyUi();
     }
 
@@ -272,6 +339,9 @@
         showToast,
         setPacketStatus,
         handleCommandResult,
+        registerInputBinding,
+        registerSyncHandler,
+        getLatestValue: (param) => latestConfig[param],
         isPending: (param) => pendingChanges.has(param),
         getPendingCount: () => pendingChanges.size
     };
