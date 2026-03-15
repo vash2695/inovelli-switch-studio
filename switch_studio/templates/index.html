@@ -2012,8 +2012,9 @@
             targetHistory = {};
             const chartDiv = document.getElementById('chart');
             if (chartDiv && chartDiv.data && window.Plotly) {
-                Plotly.restyle('chart', { x: [[]], y: [[]], text: [[]] }, [0]);
-                Plotly.restyle('chart', { x: [[]], y: [[]] }, [1]);
+                const [targetTraceIndex, historyTraceIndex] = getTargetTraceIndices(chartDiv);
+                Plotly.restyle('chart', { x: [[]], y: [[]], text: [[]] }, [targetTraceIndex]);
+                Plotly.restyle('chart', { x: [[]], y: [[]] }, [historyTraceIndex]);
             }
             dataTableBody.innerHTML = '<tr><td colspan="5" class="no-data">No targets detected</td></tr>';
         }
@@ -3638,11 +3639,15 @@
             // Only update Plotly if the chart exists
             const chartDiv = document.getElementById('chart');
             if (chartDiv && chartDiv.layout) {
-                // Update both shapes and annotations (labels)
-                Plotly.relayout('chart', {
-                    shapes: getChartShapes(),
-                    annotations: getChartAnnotations()
-                });
+                if (isEditingZone) {
+                    renderChartForCurrentMode();
+                } else {
+                    // Update both shapes and annotations (labels)
+                    Plotly.relayout('chart', {
+                        shapes: getChartShapes(),
+                        annotations: getChartAnnotations()
+                    });
+                }
             }
         }
         
@@ -3659,10 +3664,16 @@
             
             const chartDiv = document.getElementById('chart');
             if (chartDiv && chartDiv.layout) {
-                Plotly.relayout('chart', {
-                    'xaxis.range': [chartXMin, chartXMax],
-                    'yaxis.range': [chartYMin, chartYMax]
-                });
+                if (isEditingZone) {
+                    layout.xaxis.range = [chartXMin, chartXMax];
+                    layout.yaxis.range = [chartYMin, chartYMax];
+                    renderChartForCurrentMode();
+                } else {
+                    Plotly.relayout('chart', {
+                        'xaxis.range': [chartXMin, chartXMax],
+                        'yaxis.range': [chartYMin, chartYMax]
+                    });
+                }
             }
         }
 
@@ -3708,6 +3719,213 @@
             points.push([left.x, left.y], [0, 0]);
 
             return `M ${points.map(([x, y]) => `${x} ${y}`).join(' L ')} Z`;
+        }
+
+        function buildFovSectorPoints(halfAngleDegrees) {
+            const right = getFovBoundaryPoint(halfAngleDegrees, 1);
+            const left = getFovBoundaryPoint(halfAngleDegrees, -1);
+            const topY = Math.max(0, chartYMax);
+            const rightTouchesTop = Math.abs(right.y - topY) < 0.5;
+            const leftTouchesTop = Math.abs(left.y - topY) < 0.5;
+            const points = [[0, 0], [right.x, right.y]];
+
+            if (!rightTouchesTop) points.push([Math.max(0, chartXMax), topY]);
+            if (!leftTouchesTop) points.push([Math.min(0, chartXMin), topY]);
+            points.push([left.x, left.y], [0, 0]);
+
+            return points;
+        }
+
+        function createScatterLineTrace(points, lineColor, width, dash, fillColor) {
+            const trace = {
+                x: points.map(([x]) => x),
+                y: points.map(([, y]) => y),
+                mode: 'lines',
+                line: { color: lineColor, width: width, dash: dash || 'solid' },
+                hoverinfo: 'skip',
+                showlegend: false,
+                type: 'scatter'
+            };
+            if (fillColor) {
+                trace.fill = 'toself';
+                trace.fillcolor = fillColor;
+            }
+            return trace;
+        }
+
+        function createCircleTrace(radius, lineColor, width, dash, fillColor) {
+            const steps = 72;
+            const points = [];
+            for (let i = 0; i <= steps; i++) {
+                const angle = (Math.PI * 2 * i) / steps;
+                points.push([
+                    Math.cos(angle) * radius,
+                    Math.sin(angle) * radius
+                ]);
+            }
+            return createScatterLineTrace(points, lineColor, width, dash, fillColor);
+        }
+
+        function createZoneTrace(config, lineColor, fillColor) {
+            if (!config) return null;
+            return createScatterLineTrace([
+                [config.x_min, config.y_min],
+                [config.x_max, config.y_min],
+                [config.x_max, config.y_max],
+                [config.x_min, config.y_max],
+                [config.x_min, config.y_min]
+            ], lineColor, 2, 'solid', fillColor);
+        }
+
+        function getEditModePassiveTraces() {
+            if (!isEditingZone) return [];
+
+            const traces = [];
+            if (showGrid) {
+                traces.push(createScatterLineTrace(
+                    buildFovSectorPoints(75),
+                    'rgba(0, 188, 212, 0.0)',
+                    0,
+                    'solid',
+                    'rgba(13, 212, 192, 0.06)'
+                ));
+                traces.push(createScatterLineTrace(
+                    buildFovSectorPoints(60),
+                    'rgba(0, 188, 212, 0.0)',
+                    0,
+                    'solid',
+                    'rgba(13, 212, 192, 0.09)'
+                ));
+
+                const fovOuterRight = getFovBoundaryPoint(75, 1);
+                const fovOuterLeft = getFovBoundaryPoint(75, -1);
+                const fovBoundaryRight = getFovBoundaryPoint(60, 1);
+                const fovBoundaryLeft = getFovBoundaryPoint(60, -1);
+
+                traces.push(createScatterLineTrace([[0, 0], [fovBoundaryRight.x, fovBoundaryRight.y]], 'rgba(13, 212, 192, 0.32)', 1.5));
+                traces.push(createScatterLineTrace([[0, 0], [fovBoundaryLeft.x, fovBoundaryLeft.y]], 'rgba(13, 212, 192, 0.32)', 1.5));
+                traces.push(createScatterLineTrace([[0, 0], [fovOuterRight.x, fovOuterRight.y]], 'rgba(13, 212, 192, 0.14)', 1.1, 'dot'));
+                traces.push(createScatterLineTrace([[0, 0], [fovOuterLeft.x, fovOuterLeft.y]], 'rgba(13, 212, 192, 0.14)', 1.1, 'dot'));
+
+                [100, 200, 300, 400, 500, 600].forEach((dist) => {
+                    traces.push(createCircleTrace(
+                        dist,
+                        'rgba(176, 198, 216, 0.08)',
+                        dist % 200 === 0 ? 1.05 : 0.8,
+                        'dot'
+                    ));
+                });
+
+                traces.push(createScatterLineTrace([[chartXMin, 0], [chartXMax, 0]], 'rgba(13, 212, 192, 0.3)', 1.2));
+                traces.push(createCircleTrace(18, 'rgba(255, 111, 111, 0.56)', 1.2, 'solid', 'rgba(255, 111, 111, 0.24)'));
+                traces.push(createCircleTrace(8, 'rgba(255, 255, 255, 0.85)', 1.2, 'solid', 'rgba(255, 111, 111, 0.92)'));
+            }
+
+            if (showDetection) {
+                Object.entries(deviceZones.mmwave_detection_areas).forEach(([areaId, config]) => {
+                    let isVisible = true;
+                    if (areaId === 'area1' && !showDetection1) isVisible = false;
+                    if (areaId === 'area2' && !showDetection2) isVisible = false;
+                    if (areaId === 'area3' && !showDetection3) isVisible = false;
+                    if (areaId === 'area4' && !showDetection4) isVisible = false;
+                    if (!isVisible || !config) return;
+
+                    const targetKey = `mmwave_detection_areas:${areaId}`;
+                    if (targetKey === editingTarget) return;
+                    const isArea1 = areaId === 'area1';
+                    const color = isArea1 ? 'rgba(0, 188, 212, 0.6)' : 'rgba(76, 175, 80, 0.6)';
+                    const fill = isArea1 ? 'rgba(0, 188, 212, 0.1)' : 'rgba(76, 175, 80, 0.1)';
+                    const trace = createZoneTrace(config, color, fill);
+                    if (trace) traces.push(trace);
+                });
+            }
+
+            if (showStay) {
+                Object.entries(deviceZones.mmwave_stay_areas).forEach(([areaId, config]) => {
+                    if (!config) return;
+                    const targetKey = `mmwave_stay_areas:${areaId}`;
+                    if (targetKey === editingTarget) return;
+                    const trace = createZoneTrace(config, 'rgba(255, 152, 0, 0.6)', 'rgba(255, 152, 0, 0.1)');
+                    if (trace) traces.push(trace);
+                });
+            }
+
+            if (showInterference) {
+                Object.entries(deviceZones.mmwave_interference_areas).forEach(([areaId, config]) => {
+                    if (!config) return;
+                    const targetKey = `mmwave_interference_areas:${areaId}`;
+                    if (targetKey === editingTarget) return;
+                    const trace = createZoneTrace(config, 'rgba(255, 82, 82, 0.6)', 'rgba(255, 82, 82, 0.2)');
+                    if (trace) traces.push(trace);
+                });
+            }
+
+            return traces;
+        }
+
+        function buildDefaultTargetTrace() {
+            return {
+                x: [],
+                y: [],
+                mode: 'markers+text',
+                text: [],
+                textposition: 'top center',
+                marker: {
+                    size: 11,
+                    color: '#1bd2dc',
+                    line: { color: '#dcfaff', width: 1.2 }
+                },
+                textfont: { color: '#bde8ef', size: 10, family: 'DM Sans, sans-serif' },
+                type: 'scatter'
+            };
+        }
+
+        function buildDefaultHistoryTrace() {
+            return {
+                x: [],
+                y: [],
+                mode: 'lines',
+                line: { color: '#2e93bc', width: 1.6 },
+                opacity: 0.2,
+                type: 'scatter'
+            };
+        }
+
+        function getTargetTraceIndices(chartDiv) {
+            const traceCount = chartDiv && Array.isArray(chartDiv.data) ? chartDiv.data.length : 0;
+            if (traceCount >= 2) return [traceCount - 2, traceCount - 1];
+            return [0, 1];
+        }
+
+        function cloneTrace(trace, fallbackFactory) {
+            if (trace) return JSON.parse(JSON.stringify(trace));
+            return typeof fallbackFactory === 'function' ? fallbackFactory() : null;
+        }
+
+        function getCurrentTargetHistoryTraces() {
+            const chartDiv = document.getElementById('chart');
+            if (!chartDiv || !Array.isArray(chartDiv.data) || chartDiv.data.length === 0) {
+                return [buildDefaultTargetTrace(), buildDefaultHistoryTrace()];
+            }
+            const [targetIndex, historyIndex] = getTargetTraceIndices(chartDiv);
+            return [
+                cloneTrace(chartDiv.data[targetIndex], buildDefaultTargetTrace),
+                cloneTrace(chartDiv.data[historyIndex], buildDefaultHistoryTrace)
+            ];
+        }
+
+        function buildChartDataForCurrentMode() {
+            const [targetTrace, historyTrace] = getCurrentTargetHistoryTraces();
+            if (isEditingZone) {
+                return [...getEditModePassiveTraces(), targetTrace, historyTrace];
+            }
+            return [targetTrace, historyTrace];
+        }
+
+        function renderChartForCurrentMode() {
+            layout.shapes = getChartShapes();
+            layout.annotations = getChartAnnotations();
+            Plotly.react('chart', buildChartDataForCurrentMode(), layout, chartConfig);
         }
 
         function buildVerticalBandShapes() {
@@ -3811,8 +4029,8 @@
         }
 
         function getChartShapes() {
-            // In edit mode, keep Plotly shapes limited to zones so static radar chrome
-            // cannot enter the drag surface alongside the active editable rectangle.
+            // In edit mode, keep Plotly shapes limited to the active zone so static radar
+            // chrome and passive zones can be rendered as non-draggable traces instead.
             let shapes = isEditingZone ? [] : getRadarRings();
             let activeDraftShape = null;
 
@@ -4400,28 +4618,8 @@
         };
 
         Plotly.newPlot('chart', [
-            {
-                x: [],
-                y: [],
-                mode: 'markers+text',
-                text: [],
-                textposition: 'top center',
-                marker: {
-                    size: 11,
-                    color: '#1bd2dc',
-                    line: { color: '#dcfaff', width: 1.2 }
-                },
-                textfont: { color: '#bde8ef', size: 10, family: 'DM Sans, sans-serif' },
-                type: 'scatter'
-            },
-            {
-                x: [],
-                y: [],
-                mode: 'lines',
-                line: { color: '#2e93bc', width: 1.6 },
-                opacity: 0.2,
-                type: 'scatter'
-            }
+            buildDefaultTargetTrace(),
+            buildDefaultHistoryTrace()
         ], layout, chartConfig);
 
         if (window.SwitchStudioZones && typeof window.SwitchStudioZones.init === 'function') {
@@ -4594,12 +4792,13 @@
                 // IMPORTANT: If user is interacting (dragging), we SKIP updates entirely to prevent glitching
                 if (isInteracting) return; 
 
+                const [targetTraceIndex, historyTraceIndex] = getTargetTraceIndices(document.getElementById('chart'));
                 Plotly.restyle('chart', {
                     x: [data.targets.map(t => t.x), historyX],
                     y: [data.targets.map(t => t.y), historyY],
                     text: [data.targets.map(t => `ID: ${t.id} [Z:${t.z}cm]`), null],
                     'marker.size': [sizes, null]
-                }, [0, 1]); // Update Trace 0 and 1
+                }, [targetTraceIndex, historyTraceIndex]);
             } else {
                 // Normal update
                 Plotly.react('chart', [
@@ -4678,9 +4877,7 @@
 
             // Enable drag in Plotly
             chartConfig.edits.shapePosition = true;
-            layout.shapes = getChartShapes();
-            layout.annotations = getChartAnnotations(); // Refresh annotations
-            Plotly.react('chart', document.getElementById('chart').data, layout, chartConfig);
+            renderChartForCurrentMode();
         }
 
         function getMovedShapeIndex(eventData) {
@@ -4702,9 +4899,7 @@
         }
 
         function resetZoneEditShapes() {
-            layout.shapes = getChartShapes();
-            layout.annotations = getChartAnnotations();
-            Plotly.react('chart', document.getElementById('chart').data, layout, chartConfig);
+            renderChartForCurrentMode();
         }
 
         // Capture Plotly Drag Events
@@ -4770,8 +4965,7 @@
             updateDraftCoordsText();
 
             // Force Plotly update with new shapes based on manual input
-            layout.shapes = getChartShapes();
-            Plotly.react('chart', document.getElementById('chart').data, layout, chartConfig);
+            renderChartForCurrentMode();
         }
         
         function updateDraftCoordsText() {
@@ -4883,9 +5077,7 @@
             // Reset chart editability
             chartConfig.edits.shapePosition = false;
             
-            layout.shapes = getChartShapes();
-            layout.annotations = getChartAnnotations(); // Reset annotations
-            Plotly.react('chart', document.getElementById('chart').data, layout, chartConfig);
+            renderChartForCurrentMode();
         }
     </script>
 </body>
