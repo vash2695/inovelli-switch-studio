@@ -3811,7 +3811,9 @@
         }
 
         function getChartShapes() {
-            let shapes = getRadarRings(); 
+            // In edit mode, keep Plotly shapes limited to zones so static radar chrome
+            // cannot enter the drag surface alongside the active editable rectangle.
+            let shapes = isEditingZone ? [] : getRadarRings();
             let activeDraftShape = null;
 
             // Helper to decide opacity
