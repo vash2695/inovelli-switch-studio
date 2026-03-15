@@ -76,3 +76,34 @@ test('load dimming helpers parse and compose level indicator timeout values', ()
     assert.equal(api.composeIndicatorValue(false, 4), 'Stay Off');
     assert.equal(api.composeIndicatorValue(true, 4), '4 Seconds');
 });
+
+test('linking a timing group immediately locks both values together', () => {
+    const api = loadLoadDimmingModule();
+    api.setRawValuesForTest({
+        dimmingSpeedUpRemote: 25,
+        dimmingSpeedUpLocal: 40,
+    });
+
+    const state = api.setTimingGroupLinked('dimUp', true, 40);
+
+    assert.equal(state.remoteValue, 40);
+    assert.equal(state.localValue, 40);
+    assert.equal(state.linked, true);
+    assert.equal(api.getEffectiveTimingValue('dimmingSpeedUpRemote'), 40);
+    assert.equal(api.getEffectiveTimingValue('dimmingSpeedUpLocal'), 40);
+});
+
+test('linked state falls back to unlinked when underlying values diverge', () => {
+    const api = loadLoadDimmingModule();
+    api.setRawValuesForTest({
+        dimmingSpeedUpRemote: 25,
+        dimmingSpeedUpLocal: 40,
+    });
+    api.setLinkPreferenceForTest('dimUp', true);
+
+    const state = api.getTimingGroupUiState('dimUp');
+
+    assert.equal(state.remoteValue, 25);
+    assert.equal(state.localValue, 40);
+    assert.equal(state.linked, false);
+});

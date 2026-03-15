@@ -195,11 +195,63 @@
         return remoteValue === localValue;
     }
 
+    function hasPendingTimingChanges(group) {
+        if (!stateApi || typeof stateApi.isPending !== 'function') return false;
+        return !!(stateApi.isPending(group.remoteParam) || stateApi.isPending(group.localParam));
+    }
+
     function getLinkedState(group) {
+        const derived = deriveLinkedState(group);
         if (Object.prototype.hasOwnProperty.call(linkPreferences, group.id)) {
+            if (linkPreferences[group.id] && !hasPendingTimingChanges(group) && !derived) {
+                delete linkPreferences[group.id];
+                return false;
+            }
             return !!linkPreferences[group.id];
         }
-        return deriveLinkedState(group);
+        return derived;
+    }
+
+    function getTimingGroup(groupOrId) {
+        if (!groupOrId) return null;
+        if (typeof groupOrId === 'object' && groupOrId.id) return groupOrId;
+        return TIMING_GROUPS.find((group) => group.id === groupOrId) || null;
+    }
+
+    function getTimingGroupUiState(groupOrId) {
+        const group = getTimingGroup(groupOrId);
+        if (!group) return null;
+        return {
+            remoteValue: getEffectiveTimingValue(group.remoteParam),
+            localValue: getEffectiveTimingValue(group.localParam),
+            linked: getLinkedState(group),
+        };
+    }
+
+    function setTimingGroupLinked(groupOrId, isLinked, preferredValue) {
+        const group = getTimingGroup(groupOrId);
+        if (!group) return null;
+
+        const nextLinked = !!isLinked;
+        linkPreferences[group.id] = nextLinked;
+        if (!nextLinked) {
+            return getTimingGroupUiState(group);
+        }
+
+        const normalizedValue = clamp(
+            toInt(
+                preferredValue,
+                getTimingGroupUiState(group)?.remoteValue ?? getEffectiveTimingValue(group.remoteParam)
+            ),
+            0,
+            126
+        );
+
+        setRawValue(group.remoteParam, normalizedValue);
+        setRawValue(group.localParam, normalizedValue);
+        stageChange(group.remoteParam, normalizedValue);
+        stageChange(group.localParam, normalizedValue);
+        return getTimingGroupUiState(group);
     }
 
     function rawDefaultLevelToPercent(value) {
@@ -305,6 +357,7 @@
         const value = createElement('div', 'load-dimming-row-value', '--');
 
         slider.addEventListener('input', () => {
+            controlRefs.timing[group.id].lastEditedRole = roleKey;
             value.textContent = formatTimingValue(slider.value);
             if (getLinkedState(group)) {
                 const peerRef = roleKey === 'remote' ? controlRefs.timing[group.id].local : controlRefs.timing[group.id].remote;
@@ -314,6 +367,7 @@
         });
 
         slider.addEventListener('change', () => {
+            controlRefs.timing[group.id].lastEditedRole = roleKey;
             const selected = clamp(toInt(slider.value, 0), 0, 126);
             if (getLinkedState(group)) {
                 setRawValue(group.remoteParam, selected);
@@ -340,13 +394,11 @@
         const linkToggle = createToggle('load-dimming-inline-toggle', 'Linked');
 
         linkToggle.input.addEventListener('change', () => {
-            linkPreferences[group.id] = !!linkToggle.input.checked;
-            if (linkToggle.input.checked) {
-                const sourceValue = clamp(toInt(controlRefs.timing[group.id].remote.slider.value, 0), 0, 126);
-                controlRefs.timing[group.id].local.slider.value = String(sourceValue);
-                controlRefs.timing[group.id].remote.value.textContent = formatTimingValue(sourceValue);
-                controlRefs.timing[group.id].local.value.textContent = formatTimingValue(sourceValue);
-            }
+            const refs = controlRefs.timing[group.id];
+            const sourceRole = refs.lastEditedRole === 'local' ? 'local' : 'remote';
+            const sourceValue = refs[sourceRole] ? refs[sourceRole].slider.value : refs.remote.slider.value;
+            setTimingGroupLinked(group, linkToggle.input.checked, sourceValue);
+            syncTimingCard(group);
         });
 
         header.appendChild(title);
@@ -363,6 +415,7 @@
             linkToggle: linkToggle.input,
             remote,
             local,
+            lastEditedRole: 'remote',
         };
 
         return card;
@@ -533,13 +586,12 @@
     function syncTimingCard(group) {
         const refs = controlRefs && controlRefs.timing ? controlRefs.timing[group.id] : null;
         if (!refs) return;
-        const remoteValue = getEffectiveTimingValue(group.remoteParam);
-        const localValue = getEffectiveTimingValue(group.localParam);
-        refs.linkToggle.checked = getLinkedState(group);
-        refs.remote.slider.value = String(remoteValue);
-        refs.remote.value.textContent = formatTimingValue(remoteValue);
-        refs.local.slider.value = String(localValue);
-        refs.local.value.textContent = formatTimingValue(localValue);
+        const state = getTimingGroupUiState(group);
+        refs.linkToggle.checked = !!(state && state.linked);
+        refs.remote.slider.value = String(state ? state.remoteValue : 0);
+        refs.remote.value.textContent = formatTimingValue(state ? state.remoteValue : 0);
+        refs.local.slider.value = String(state ? state.localValue : 0);
+        refs.local.value.textContent = formatTimingValue(state ? state.localValue : 0);
     }
 
     function syncDefaultLevelRow(param) {
@@ -697,6 +749,11 @@
             rawDefaultLevelToPercent,
             percentToRawDefaultLevel,
             deriveLinkedState,
+            getTimingGroupUiState,
+            setTimingGroupLinked,
+            setLinkPreferenceForTest: (groupId, linked) => {
+                linkPreferences[groupId] = !!linked;
+            },
         },
     };
 })();
