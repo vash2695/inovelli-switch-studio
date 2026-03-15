@@ -1897,22 +1897,24 @@
                         <div class="firmware-shell">
                             <div class="firmware-summary-grid">
                                 <div class="firmware-stat-card">
-                                    <div class="firmware-stat-label">Installed Version</div>
+                                    <div class="firmware-stat-label">Installed Inovelli Version</div>
                                     <div class="firmware-stat-value" id="firmwareInstalledVersion">--</div>
                                     <div class="firmware-stat-meta" id="firmwareInstalledVersionMeta">Build --</div>
                                 </div>
                                 <div class="firmware-stat-card">
-                                    <div class="firmware-stat-label">Latest Version</div>
+                                    <div class="firmware-stat-label">Current Inovelli Version</div>
                                     <div class="firmware-stat-value" id="firmwareLatestVersion">--</div>
-                                    <div class="firmware-stat-meta" id="firmwareLatestVersionMeta">Build --</div>
+                                    <div class="firmware-stat-meta" id="firmwareLatestVersionMeta">Checking Inovelli help center...</div>
                                 </div>
                                 <div class="firmware-stat-card">
-                                    <div class="firmware-stat-label">Availability</div>
-                                    <div class="firmware-stat-value" id="firmwareAvailability">Unknown</div>
+                                    <div class="firmware-stat-label">OTA Catalog Version</div>
+                                    <div class="firmware-stat-value" id="firmwareAvailability">--</div>
+                                    <div class="firmware-stat-meta" id="firmwareCatalogVersionMeta">Build --</div>
                                 </div>
                                 <div class="firmware-stat-card">
                                     <div class="firmware-stat-label">Update Status</div>
                                     <div class="firmware-stat-value" id="firmwareState">Idle</div>
+                                    <div class="firmware-stat-meta" id="firmwareStateMeta">Waiting for check</div>
                                 </div>
                             </div>
 
@@ -2039,7 +2041,9 @@
         const firmwareLatestVersion = document.getElementById('firmwareLatestVersion');
         const firmwareLatestVersionMeta = document.getElementById('firmwareLatestVersionMeta');
         const firmwareAvailability = document.getElementById('firmwareAvailability');
+        const firmwareCatalogVersionMeta = document.getElementById('firmwareCatalogVersionMeta');
         const firmwareStateValue = document.getElementById('firmwareState');
+        const firmwareStateMeta = document.getElementById('firmwareStateMeta');
         const firmwareStatusMessage = document.getElementById('firmwareStatusMessage');
         const firmwareProgressShell = document.getElementById('firmwareProgressShell');
         const firmwareProgressFill = document.getElementById('firmwareProgressFill');
@@ -2070,6 +2074,7 @@
             installed_version_detail: null,
             latest_version: null,
             latest_version_detail: null,
+            official_versions: null,
             state: null,
             progress: null,
             remaining: null,
@@ -2202,6 +2207,7 @@
                 installed_version_detail: null,
                 latest_version: null,
                 latest_version_detail: null,
+                official_versions: null,
                 state: null,
                 progress: null,
                 remaining: null,
@@ -2222,6 +2228,7 @@
             if (Object.prototype.hasOwnProperty.call(payload, 'installed_version_detail')) next.installed_version_detail = payload.installed_version_detail;
             if (Object.prototype.hasOwnProperty.call(payload, 'latest_version')) next.latest_version = payload.latest_version;
             if (Object.prototype.hasOwnProperty.call(payload, 'latest_version_detail')) next.latest_version_detail = payload.latest_version_detail;
+            if (Object.prototype.hasOwnProperty.call(payload, 'official_versions')) next.official_versions = payload.official_versions;
             if (Object.prototype.hasOwnProperty.call(payload, 'state')) next.state = payload.state;
             if (Object.prototype.hasOwnProperty.call(payload, 'progress')) next.progress = payload.progress;
             if (Object.prototype.hasOwnProperty.call(payload, 'remaining')) next.remaining = payload.remaining;
@@ -2351,6 +2358,55 @@
             return '';
         }
 
+        function getOfficialVersionMap() {
+            return firmwareStateModel.official_versions && typeof firmwareStateModel.official_versions === 'object'
+                ? firmwareStateModel.official_versions
+                : {};
+        }
+
+        function getOfficialVersionCardContent() {
+            const officialVersions = getOfficialVersionMap();
+            const production = officialVersions.Production || officialVersions.production || null;
+            const beta = officialVersions.Beta || officialVersions.beta || null;
+
+            if (production && beta) {
+                return {
+                    primary: `Production ${production}`,
+                    meta: `Beta ${beta}`,
+                };
+            }
+            if (production) {
+                return {
+                    primary: `Production ${production}`,
+                    meta: 'Source: Inovelli help center',
+                };
+            }
+            if (beta) {
+                return {
+                    primary: `Beta ${beta}`,
+                    meta: 'Source: Inovelli help center',
+                };
+            }
+            return {
+                primary: '--',
+                meta: 'Checking Inovelli help center...',
+            };
+        }
+
+        function getInstalledOfficialMatchSummary(installedDetail) {
+            if (!installedDetail || typeof installedDetail !== 'object' || !installedDetail.display_version) return '';
+            const officialVersions = getOfficialVersionMap();
+            const production = officialVersions.Production || officialVersions.production || null;
+            const beta = officialVersions.Beta || officialVersions.beta || null;
+            if (production && installedDetail.display_version === production) {
+                return `It matches Inovelli's current production version ${production}.`;
+            }
+            if (beta && installedDetail.display_version === beta) {
+                return `It matches Inovelli's current beta version ${beta}.`;
+            }
+            return '';
+        }
+
         function compareFirmwareVersions(installedValue, latestValue) {
             const installedNumeric = parseNumericFirmwareVersion(installedValue);
             const latestNumeric = parseNumericFirmwareVersion(latestValue);
@@ -2391,10 +2447,11 @@
             const versionComparison = compareFirmwareVersions(firmwareStateModel.installed_version, firmwareStateModel.latest_version);
             const installedDetail = firmwareStateModel.installed_version_detail;
             const latestDetail = firmwareStateModel.latest_version_detail;
+            const officialCard = getOfficialVersionCardContent();
             const formattedInstalledVersion = getFirmwareFriendlyVersion(installedDetail, firmwareStateModel.installed_version);
-            const formattedLatestVersion = getFirmwareFriendlyVersion(latestDetail, firmwareStateModel.latest_version);
             const installedVersionLabel = describeFirmwareVersion(installedDetail, firmwareStateModel.installed_version);
             const latestVersionLabel = describeFirmwareVersion(latestDetail, firmwareStateModel.latest_version);
+            const installedOfficialMatchSummary = getInstalledOfficialMatchSummary(installedDetail);
             const canInstall = hasSelection && !inProgress && (
                 firmwareStateModel.downgrade === true
                 || (firmwareStateModel.available === true && versionComparison !== 1)
@@ -2402,10 +2459,12 @@
 
             if (firmwareInstalledVersion) firmwareInstalledVersion.innerText = formattedInstalledVersion;
             if (firmwareInstalledVersionMeta) firmwareInstalledVersionMeta.innerText = getFirmwareVersionMeta(installedDetail, firmwareStateModel.installed_version);
-            if (firmwareLatestVersion) firmwareLatestVersion.innerText = formattedLatestVersion;
-            if (firmwareLatestVersionMeta) firmwareLatestVersionMeta.innerText = getFirmwareVersionMeta(latestDetail, firmwareStateModel.latest_version);
-            if (firmwareAvailability) firmwareAvailability.innerText = getFirmwareAvailabilityLabel();
-            if (firmwareStateValue) firmwareStateValue.innerText = getFirmwareStateLabel();
+            if (firmwareLatestVersion) firmwareLatestVersion.innerText = officialCard.primary;
+            if (firmwareLatestVersionMeta) firmwareLatestVersionMeta.innerText = officialCard.meta;
+            if (firmwareAvailability) firmwareAvailability.innerText = getFirmwareFriendlyVersion(latestDetail, firmwareStateModel.latest_version);
+            if (firmwareCatalogVersionMeta) firmwareCatalogVersionMeta.innerText = getFirmwareVersionMeta(latestDetail, firmwareStateModel.latest_version);
+            if (firmwareStateValue) firmwareStateValue.innerText = getFirmwareAvailabilityLabel();
+            if (firmwareStateMeta) firmwareStateMeta.innerText = getFirmwareStateLabel();
             if (btnFirmwareInstall) btnFirmwareInstall.innerText = getFirmwareInstallLabel();
 
             if (firmwareProgressShell) firmwareProgressShell.hidden = !showProgress;
@@ -2429,13 +2488,13 @@
                         message = 'Firmware update in progress. Keep the switch powered until completion.';
                     } else if (firmwareStateModel.downgrade === true) {
                         if (installedVersionLabel !== '--' && latestVersionLabel !== '--') {
-                            message = `Zigbee2MQTT catalog firmware ${latestVersionLabel}${getFirmwareFileSuffix(latestDetail)} is older than the installed ${installedVersionLabel}. Installing it would downgrade the device.`;
+                            message = `Zigbee2MQTT catalog firmware ${latestVersionLabel}${getFirmwareFileSuffix(latestDetail)} is older than the installed ${installedVersionLabel}. ${installedOfficialMatchSummary ? `${installedOfficialMatchSummary} ` : ''}Installing it would downgrade the device.`;
                         } else {
                             message = 'Zigbee2MQTT reports an older catalog image for this device.';
                         }
                     } else if (versionComparison === 1) {
                         if (installedVersionLabel !== '--' && latestVersionLabel !== '--') {
-                            message = `Installed firmware ${installedVersionLabel} is newer than Zigbee2MQTT's catalog firmware ${latestVersionLabel}${getFirmwareFileSuffix(latestDetail)}.`;
+                            message = `Installed firmware ${installedVersionLabel} is newer than Zigbee2MQTT's catalog firmware ${latestVersionLabel}${getFirmwareFileSuffix(latestDetail)}. ${installedOfficialMatchSummary}`;
                         } else {
                             message = 'Installed firmware appears newer than the catalog version currently reported by Zigbee2MQTT.';
                         }
@@ -2448,9 +2507,9 @@
                         const checkedAt = formatFirmwareTimestamp(firmwareStateModel.last_checked);
                         const currentLabel = installedVersionLabel !== '--' ? installedVersionLabel : formattedInstalledVersion;
                         message = checkedAt !== '--'
-                            ? `${currentLabel !== '--' ? `Device is up to date on ${currentLabel}. ` : 'Device is up to date. '}Last checked at ${checkedAt}.`
+                            ? `${currentLabel !== '--' ? `Device is up to date on ${currentLabel}. ` : 'Device is up to date. '}${installedOfficialMatchSummary ? `${installedOfficialMatchSummary} ` : ''}Last checked at ${checkedAt}.`
                             : currentLabel !== '--'
-                                ? `Device is up to date on ${currentLabel}.`
+                                ? `Device is up to date on ${currentLabel}. ${installedOfficialMatchSummary}`.trim()
                                 : 'Device is up to date.';
                     } else {
                         message = 'Click Check for Updates to query Zigbee2MQTT.';

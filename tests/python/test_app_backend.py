@@ -378,6 +378,7 @@ class AppBackendTests(unittest.TestCase):
         self.assertEqual(latest["installed_version_detail"]["raw_hex"], "0x01030100")
         self.assertEqual(latest["latest_version_detail"]["display_version"], "0.10")
         self.assertEqual(latest["latest_version_detail"]["raw_hex"], "0x0103000A")
+        self.assertEqual(latest["official_versions"], {})
         self.assertEqual(latest["state"], "available")
 
     def test_on_message_handles_ota_bridge_response(self):
@@ -416,6 +417,7 @@ class AppBackendTests(unittest.TestCase):
         self.assertEqual(latest["latest_version"], "16973834")
         self.assertEqual(latest["installed_version_detail"]["display_version"], "1.00")
         self.assertEqual(latest["latest_version_detail"]["display_version"], "0.10")
+        self.assertEqual(latest["official_versions"], {})
         self.assertEqual(latest["state"], "checked")
 
     def test_on_message_parses_detection_zone_raw_packet(self):

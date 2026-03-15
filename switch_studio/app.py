@@ -17,10 +17,10 @@ import paho.mqtt.client as mqtt
 import logging
 try:
     from .schema_service import SchemaService
-    from .firmware_reference import resolve_vzm32sn_firmware_reference
+    from .firmware_reference import get_vzm32sn_reference_data, resolve_vzm32sn_firmware_reference
 except ImportError:
     from schema_service import SchemaService
-    from firmware_reference import resolve_vzm32sn_firmware_reference
+    from firmware_reference import get_vzm32sn_reference_data, resolve_vzm32sn_firmware_reference
 
 # Suppress the Werkzeug development server warning
 log = logging.getLogger('werkzeug')
@@ -247,6 +247,7 @@ def default_ota_status():
         'installed_version_detail': None,
         'latest_version': None,
         'latest_version_detail': None,
+        'official_versions': None,
         'state': None,
         'progress': None,
         'remaining': None,
@@ -269,14 +270,19 @@ def enrich_ota_status(ota_status):
         return ota_status
 
     enriched = copy.deepcopy(ota_status)
+    reference_data = get_vzm32sn_reference_data(allow_network=not TEST_MODE)
     enriched['installed_version_detail'] = resolve_vzm32sn_firmware_reference(
         enriched.get('installed_version'),
-        allow_network=not TEST_MODE
+        allow_network=not TEST_MODE,
+        reference_data=reference_data
     )
     enriched['latest_version_detail'] = resolve_vzm32sn_firmware_reference(
         enriched.get('latest_version'),
-        allow_network=not TEST_MODE
+        allow_network=not TEST_MODE,
+        reference_data=reference_data
     )
+    current_versions = reference_data.get('current_versions') if isinstance(reference_data, dict) else {}
+    enriched['official_versions'] = copy.deepcopy(current_versions) if isinstance(current_versions, dict) else {}
     return enriched
 
 
