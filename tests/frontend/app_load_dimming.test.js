@@ -93,6 +93,34 @@ test('linking a timing group immediately locks both values together', () => {
     assert.equal(api.getEffectiveTimingValue('dimmingSpeedUpLocal'), 40);
 });
 
+test('explicit timing payload preserves other timing groups when one group changes', () => {
+    const api = loadLoadDimmingModule();
+    api.setRawValuesForTest({
+        dimmingSpeedUpRemote: 25,
+        dimmingSpeedUpLocal: 127,
+        rampRateOffToOnRemote: 127,
+        rampRateOffToOnLocal: 127,
+        dimmingSpeedDownRemote: 127,
+        dimmingSpeedDownLocal: 127,
+        rampRateOnToOffRemote: 127,
+        rampRateOnToOffLocal: 127,
+    });
+
+    const payload = api.getExplicitTimingPayload({
+        dimmingSpeedUpRemote: 40,
+        dimmingSpeedUpLocal: 40,
+    });
+
+    assert.equal(payload.dimmingSpeedUpRemote, 40);
+    assert.equal(payload.dimmingSpeedUpLocal, 40);
+    assert.equal(payload.dimmingSpeedDownRemote, 25);
+    assert.equal(payload.dimmingSpeedDownLocal, 25);
+    assert.equal(payload.rampRateOffToOnRemote, 25);
+    assert.equal(payload.rampRateOffToOnLocal, 25);
+    assert.equal(payload.rampRateOnToOffRemote, 25);
+    assert.equal(payload.rampRateOnToOffLocal, 25);
+});
+
 test('linked state falls back to unlinked when underlying values diverge', () => {
     const api = loadLoadDimmingModule();
     api.setRawValuesForTest({

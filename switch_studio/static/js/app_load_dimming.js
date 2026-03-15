@@ -201,15 +201,15 @@
     }
 
     function getLinkedState(group) {
-        const derived = deriveLinkedState(group);
         if (Object.prototype.hasOwnProperty.call(linkPreferences, group.id)) {
-            if (linkPreferences[group.id] && !hasPendingTimingChanges(group) && !derived) {
+            if (linkPreferences[group.id] && !hasPendingTimingChanges(group) && !deriveLinkedState(group)) {
                 delete linkPreferences[group.id];
                 return false;
             }
             return !!linkPreferences[group.id];
         }
-        return derived;
+        linkPreferences[group.id] = deriveLinkedState(group);
+        return !!linkPreferences[group.id];
     }
 
     function getTimingGroup(groupOrId) {
@@ -228,6 +228,41 @@
         };
     }
 
+    function getExplicitTimingPayload(overrides) {
+        const payload = {};
+        const nextValues = overrides || {};
+        TIMING_GROUPS.forEach((group) => {
+            payload[group.remoteParam] = clamp(
+                toInt(
+                    Object.prototype.hasOwnProperty.call(nextValues, group.remoteParam)
+                        ? nextValues[group.remoteParam]
+                        : getEffectiveTimingValue(group.remoteParam),
+                    0
+                ),
+                0,
+                126
+            );
+            payload[group.localParam] = clamp(
+                toInt(
+                    Object.prototype.hasOwnProperty.call(nextValues, group.localParam)
+                        ? nextValues[group.localParam]
+                        : getEffectiveTimingValue(group.localParam),
+                    0
+                ),
+                0,
+                126
+            );
+        });
+        return payload;
+    }
+
+    function applyTimingPayload(payload) {
+        Object.entries(payload || {}).forEach(([param, value]) => {
+            setRawValue(param, value);
+            stageChange(param, value);
+        });
+    }
+
     function setTimingGroupLinked(groupOrId, isLinked, preferredValue) {
         const group = getTimingGroup(groupOrId);
         if (!group) return null;
@@ -235,6 +270,7 @@
         const nextLinked = !!isLinked;
         linkPreferences[group.id] = nextLinked;
         if (!nextLinked) {
+            applyTimingPayload(getExplicitTimingPayload());
             return getTimingGroupUiState(group);
         }
 
@@ -247,10 +283,10 @@
             126
         );
 
-        setRawValue(group.remoteParam, normalizedValue);
-        setRawValue(group.localParam, normalizedValue);
-        stageChange(group.remoteParam, normalizedValue);
-        stageChange(group.localParam, normalizedValue);
+        applyTimingPayload(getExplicitTimingPayload({
+            [group.remoteParam]: normalizedValue,
+            [group.localParam]: normalizedValue,
+        }));
         return getTimingGroupUiState(group);
     }
 
@@ -370,13 +406,14 @@
             controlRefs.timing[group.id].lastEditedRole = roleKey;
             const selected = clamp(toInt(slider.value, 0), 0, 126);
             if (getLinkedState(group)) {
-                setRawValue(group.remoteParam, selected);
-                setRawValue(group.localParam, selected);
-                stageChange(group.remoteParam, selected);
-                stageChange(group.localParam, selected);
+                applyTimingPayload(getExplicitTimingPayload({
+                    [group.remoteParam]: selected,
+                    [group.localParam]: selected,
+                }));
             } else {
-                setRawValue(param, selected);
-                stageChange(param, selected);
+                applyTimingPayload(getExplicitTimingPayload({
+                    [param]: selected,
+                }));
             }
             syncTimingCard(group);
         });
@@ -751,6 +788,7 @@
             deriveLinkedState,
             getTimingGroupUiState,
             setTimingGroupLinked,
+            getExplicitTimingPayload,
             setLinkPreferenceForTest: (groupId, linked) => {
                 linkPreferences[groupId] = !!linked;
             },
