@@ -1,5 +1,5 @@
-ARG BUILD_FROM
-FROM $BUILD_FROM
+ARG BUILD_FROM=ghcr.io/home-assistant/base:3.22
+FROM ${BUILD_FROM}
 
 # Force Python to print logs immediately
 ENV PYTHONUNBUFFERED=1
