@@ -17,8 +17,10 @@ import paho.mqtt.client as mqtt
 import logging
 try:
     from .schema_service import SchemaService
+    from .firmware_reference import get_vzm32sn_reference_data, resolve_vzm32sn_firmware_reference
 except ImportError:
     from schema_service import SchemaService
+    from firmware_reference import get_vzm32sn_reference_data, resolve_vzm32sn_firmware_reference
 
 # Suppress the Werkzeug development server warning
 log = logging.getLogger('werkzeug')
@@ -91,6 +93,37 @@ def _as_bool(value, default=False):
         if lowered in {"0", "false", "no", "off"}:
             return False
     return bool(default)
+
+
+def _normalize_basic_state(value):
+    if isinstance(value, bool):
+        return 'ON' if value else 'OFF', None
+
+    if isinstance(value, (int, float)):
+        return ('ON' if int(value) != 0 else 'OFF'), None
+
+    if isinstance(value, str):
+        normalized = value.strip().upper()
+        if normalized in {'ON', 'OFF', 'TOGGLE'}:
+            return normalized, None
+        if normalized in {'TRUE', 'YES', '1'}:
+            return 'ON', None
+        if normalized in {'FALSE', 'NO', '0'}:
+            return 'OFF', None
+
+    return None, "State must be ON, OFF, TOGGLE, or a boolean"
+
+
+def _normalize_basic_brightness(value):
+    parsed = _as_int_or_none(value)
+    if parsed is None:
+        return None, "Brightness must be a numeric value from 0 to 254"
+
+    if parsed < 0:
+        parsed = 0
+    if parsed > 254:
+        parsed = 254
+    return parsed, None
 
 try:
     with open(CONFIG_PATH) as f:
@@ -206,6 +239,233 @@ def clear_session_reporting_auto_off(sid):
         session_reporting_auto_off.pop(sid, None)
 
 
+def default_ota_status():
+    return {
+        'available': None,
+        'downgrade': None,
+        'installed_version': None,
+        'installed_version_detail': None,
+        'latest_version': None,
+        'latest_version_detail': None,
+        'official_versions': None,
+        'state': None,
+        'progress': None,
+        'remaining': None,
+        'last_checked': None,
+        'last_error': None,
+        'bridge_status': None,
+    }
+
+
+def ensure_ota_status(device_data):
+    ota_status = device_data.get('ota_status')
+    if not isinstance(ota_status, dict):
+        ota_status = default_ota_status()
+        device_data['ota_status'] = ota_status
+    return ota_status
+
+
+def enrich_ota_status(ota_status):
+    if not isinstance(ota_status, dict):
+        return ota_status
+
+    enriched = copy.deepcopy(ota_status)
+    reference_data = get_vzm32sn_reference_data(allow_network=not TEST_MODE)
+    enriched['installed_version_detail'] = resolve_vzm32sn_firmware_reference(
+        enriched.get('installed_version'),
+        allow_network=not TEST_MODE,
+        reference_data=reference_data
+    )
+    enriched['latest_version_detail'] = resolve_vzm32sn_firmware_reference(
+        enriched.get('latest_version'),
+        allow_network=not TEST_MODE,
+        reference_data=reference_data
+    )
+    current_versions = reference_data.get('current_versions') if isinstance(reference_data, dict) else {}
+    enriched['official_versions'] = copy.deepcopy(current_versions) if isinstance(current_versions, dict) else {}
+    return enriched
+
+
+def get_device_id_from_topic(topic):
+    if not topic:
+        return None
+    prefix = f"{MQTT_BASE_TOPIC}/"
+    if topic.startswith(prefix):
+        suffix = topic[len(prefix):]
+        return suffix.split('/')[0] if suffix else None
+    return topic.split('/')[-1]
+
+
+def get_device_topic_from_identifier(identifier):
+    if not identifier:
+        return None
+    normalized = str(identifier).strip()
+    if not normalized:
+        return None
+
+    with device_list_lock:
+        for data in device_list.values():
+            topic = data.get('topic')
+            if not topic:
+                continue
+            if topic == normalized:
+                return topic
+            if data.get('friendly_name') == normalized:
+                return topic
+            if get_device_id_from_topic(topic) == normalized:
+                return topic
+    return None
+
+
+def emit_firmware_status(topic, room=None):
+    device_data = get_device_by_topic(topic)
+    if not device_data:
+        return
+    ota_status = device_data.get('ota_status')
+    if not isinstance(ota_status, dict):
+        return
+    ota_payload = enrich_ota_status(ota_status)
+    with device_list_lock:
+        for item in device_list.values():
+            if item.get('topic') == topic:
+                item['ota_status'] = copy.deepcopy(ota_payload)
+                break
+    socketio.emit(
+        'firmware_status',
+        {
+            'topic': topic,
+            'payload': ota_payload,
+            'ts': time.time()
+        },
+        room=room
+    )
+
+
+def update_device_ota_status(topic, values):
+    if not topic or not isinstance(values, dict):
+        return None
+
+    ota_payload = None
+    with device_list_lock:
+        for device_data in device_list.values():
+            if device_data.get('topic') != topic:
+                continue
+
+            ota_status = ensure_ota_status(device_data)
+            ota_status.update(values)
+
+            if ota_status.get('state'):
+                normalized_state = str(ota_status.get('state')).strip().lower()
+                if normalized_state in {'idle', 'available', 'up_to_date', 'completed', 'success', 'done', 'checked'}:
+                    ota_status['progress'] = None if ota_status.get('progress') in {None, '', 0} else ota_status.get('progress')
+                if normalized_state in {'idle', 'completed', 'success', 'done', 'up_to_date'}:
+                    ota_status['remaining'] = None
+            ota_payload = copy.deepcopy(ota_status)
+            break
+
+    if ota_payload is None:
+        return None
+
+    ota_payload = enrich_ota_status(ota_payload)
+    with device_list_lock:
+        for device_data in device_list.values():
+            if device_data.get('topic') == topic:
+                device_data['ota_status'] = copy.deepcopy(ota_payload)
+                break
+
+    socketio.emit('firmware_status', {'topic': topic, 'payload': ota_payload, 'ts': time.time()})
+    emit_device_delta('firmware_status', ota_payload, topic=topic)
+    return ota_payload
+
+
+def extract_ota_status_from_payload(payload):
+    if not isinstance(payload, dict):
+        return None
+
+    update_info = payload.get('update') if isinstance(payload.get('update'), dict) else {}
+    available = None
+    for key in ('update_available', 'updateAvailable', 'available'):
+        if key in payload and payload.get(key) is not None:
+            available = _as_bool(payload.get(key), False)
+            break
+        if key in update_info and update_info.get(key) is not None:
+            available = _as_bool(update_info.get(key), False)
+            break
+
+    downgrade = None
+    for key in ('downgrade',):
+        if key in payload and payload.get(key) is not None:
+            downgrade = _as_bool(payload.get(key), False)
+            break
+        if key in update_info and update_info.get(key) is not None:
+            downgrade = _as_bool(update_info.get(key), False)
+            break
+
+    installed_version = None
+    for key in ('installed_version', 'installedVersion', 'current_version', 'currentVersion'):
+        if key in update_info and update_info.get(key) is not None:
+            installed_version = str(update_info.get(key))
+            break
+        if key in payload and payload.get(key) is not None:
+            installed_version = str(payload.get(key))
+            break
+
+    latest_version = None
+    for key in ('latest_version', 'latestVersion', 'available_version', 'availableVersion'):
+        if key in update_info and update_info.get(key) is not None:
+            latest_version = str(update_info.get(key))
+            break
+        if key in payload and payload.get(key) is not None:
+            latest_version = str(payload.get(key))
+            break
+
+    state = None
+    for key in ('state', 'status'):
+        if key in update_info and update_info.get(key) is not None:
+            state = str(update_info.get(key))
+            break
+        if key in payload and payload.get(key) is not None:
+            state = str(payload.get(key))
+            break
+
+    progress = _as_int_or_none(update_info.get('progress')) if isinstance(update_info, dict) else None
+    if progress is None:
+        progress = _as_int_or_none(payload.get('progress'))
+
+    remaining = _as_int_or_none(update_info.get('remaining')) if isinstance(update_info, dict) else None
+    if remaining is None:
+        remaining = _as_int_or_none(payload.get('remaining'))
+
+    last_error = None
+    for key in ('error', 'message'):
+        if key in payload and payload.get(key):
+            last_error = str(payload.get(key))
+            break
+
+    if (
+        available is None
+        and downgrade is None
+        and installed_version is None
+        and latest_version is None
+        and state is None
+        and progress is None
+        and remaining is None
+        and last_error is None
+    ):
+        return None
+
+    return {
+        'available': available,
+        'downgrade': downgrade,
+        'installed_version': installed_version,
+        'latest_version': latest_version,
+        'state': state,
+        'progress': progress,
+        'remaining': remaining,
+        'last_error': last_error,
+    }
+
+
 def resolve_target_reporting_value(enabled):
     schema = schema_service.get_schema() or {}
     field = None
@@ -249,6 +509,13 @@ def build_device_snapshot(topic):
     if not device_data:
         return None
 
+    ota_status = enrich_ota_status(device_data.get('ota_status'))
+    with device_list_lock:
+        for item in device_list.values():
+            if item.get('topic') == topic:
+                item['ota_status'] = copy.deepcopy(ota_status)
+                break
+
     payload = {
         'friendly_name': device_data.get('friendly_name'),
         'zone_config': device_data.get('zone_config'),
@@ -256,7 +523,8 @@ def build_device_snapshot(topic):
         'detection_zones': device_data.get('detection_zones', []),
         'stay_zones': device_data.get('stay_zones', []),
         'last_config': device_data.get('last_config', {}),
-        'last_seen': device_data.get('last_seen')
+        'last_seen': device_data.get('last_seen'),
+        'ota_status': ota_status,
     }
     return {'topic': topic, 'payload': payload, 'ts': time.time()}
 
@@ -303,12 +571,17 @@ def build_force_sync_payload():
             continue
         payload[name] = ""
 
+    # The Zigbee2MQTT definition can expose light controls through nested features.
+    # Keep these keys explicitly requested so quick controls stay in sync.
+    payload.setdefault("state", "")
+    payload.setdefault("brightness", "")
+
     if payload:
         return payload
 
     # Conservative fallback if schema is unavailable.
     return {
-        "state": "", "occupancy": "", "illuminance": "",
+        "state": "", "brightness": "", "occupancy": "", "illuminance": "",
         "mmWaveDepthMax": "", "mmWaveDepthMin": "", "mmWaveWidthMax": "", "mmWaveWidthMin": "",
         "mmWaveHeightMax": "", "mmWaveHeightMin": "", "mmWaveDetectSensitivity": "",
         "mmWaveDetectTrigger": "", "mmWaveHoldTime": "", "mmWaveStayLife": "",
@@ -349,6 +622,36 @@ def on_message(client, userdata, msg):
         if not isinstance(payload, dict):
             return
 
+        bridge_check_topic = f"{MQTT_BASE_TOPIC}/bridge/response/device/ota_update/check"
+        bridge_update_topic = f"{MQTT_BASE_TOPIC}/bridge/response/device/ota_update/update"
+        if topic in {bridge_check_topic, bridge_update_topic}:
+            bridge_data = payload.get('data') if isinstance(payload.get('data'), dict) else payload
+            target_identifier = None
+            if isinstance(bridge_data, dict):
+                target_identifier = bridge_data.get('id') or bridge_data.get('device') or bridge_data.get('friendly_name')
+            if not target_identifier:
+                target_identifier = payload.get('id') or payload.get('device')
+
+            target_topic = get_device_topic_from_identifier(target_identifier)
+            if target_topic:
+                status_payload = extract_ota_status_from_payload(bridge_data if isinstance(bridge_data, dict) else payload) or {}
+                bridge_status = str(payload.get('status') or '').strip().lower() or None
+                if bridge_status:
+                    status_payload['bridge_status'] = bridge_status
+                if topic == bridge_check_topic:
+                    status_payload['last_checked'] = time.time()
+                    if status_payload.get('state') is None and bridge_status == 'ok':
+                        status_payload['state'] = 'checked'
+                elif topic == bridge_update_topic and status_payload.get('state') is None and bridge_status == 'ok':
+                    status_payload['state'] = 'requested'
+
+                if bridge_status and bridge_status != 'ok':
+                    status_payload['last_error'] = str(payload.get('error') or payload.get('message') or 'OTA request failed')
+                    status_payload['state'] = 'error'
+
+                update_device_ota_status(target_topic, status_payload)
+            return
+
         # --- DEVICE DISCOVERY ---
         if topic.startswith(MQTT_BASE_TOPIC):
             payload_keys = [k for k in payload.keys() if isinstance(k, str)]
@@ -373,6 +676,7 @@ def on_message(client, userdata, msg):
                                     'stay_zones': [],
                                     'zone_config': {"x_min": -400, "x_max": 400, "y_min": 0, "y_max": 600},
                                     'last_config': {},
+                                    'ota_status': default_ota_status(),
                                     'last_update': 0,
                                     'last_seen': time.time()
                                 }
@@ -509,6 +813,7 @@ def on_message(client, userdata, msg):
             # Update Standard Global Zone (Attributes 103-106)
             needs_emit = False
             zone_payload = None
+            ota_status_update = extract_ota_status_from_payload(config_payload)
 
             with device_list_lock:
                 device_data = device_list.get(fname)
@@ -543,6 +848,9 @@ def on_message(client, userdata, msg):
                     if needs_emit:
                         device_data['zone_config'] = current_zone
                         zone_payload = copy.deepcopy(current_zone)
+
+            if ota_status_update:
+                update_device_ota_status(device_topic, ota_status_update)
 
             if zone_payload:
                 socketio.emit('zone_config', {'topic': device_topic, 'payload': zone_payload})
@@ -702,6 +1010,180 @@ def handle_set_target_reporting(data):
         topic=current_topic,
         request_id=request_id,
         payload={'enabled': enabled, 'value': target_value},
+        rc=rc,
+        message=None if ok else 'MQTT publish failed'
+    )
+
+
+@socketio.on('set_basic_control')
+def handle_set_basic_control(data):
+    request_id = data.get('request_id') if isinstance(data, dict) else None
+    current_topic = get_session_topic(request.sid)
+    if not current_topic:
+        emit_command_result(
+            request.sid,
+            action='set_basic_control',
+            status='error',
+            request_id=request_id,
+            message='No device selected'
+        )
+        return
+
+    if not isinstance(data, dict):
+        emit_command_result(
+            request.sid,
+            action='set_basic_control',
+            status='error',
+            topic=current_topic,
+            request_id=request_id,
+            message='Invalid payload'
+        )
+        return
+
+    control_payload = {}
+    errors = []
+
+    if 'state' in data:
+        normalized_state, state_error = _normalize_basic_state(data.get('state'))
+        if state_error:
+            errors.append(state_error)
+        else:
+            control_payload['state'] = normalized_state
+
+    if 'brightness' in data:
+        normalized_brightness, brightness_error = _normalize_basic_brightness(data.get('brightness'))
+        if brightness_error:
+            errors.append(brightness_error)
+        else:
+            control_payload['brightness'] = normalized_brightness
+
+    if errors:
+        emit_command_result(
+            request.sid,
+            action='set_basic_control',
+            status='error',
+            topic=current_topic,
+            request_id=request_id,
+            payload={k: v for k, v in data.items() if k in {'state', 'brightness'}},
+            message='; '.join(errors)
+        )
+        return
+
+    if not control_payload:
+        emit_command_result(
+            request.sid,
+            action='set_basic_control',
+            status='error',
+            topic=current_topic,
+            request_id=request_id,
+            message='Missing state or brightness'
+        )
+        return
+
+    ok, rc = publish_json(
+        f"{current_topic}/set",
+        control_payload,
+        origin='set_basic_control',
+        sid=request.sid
+    )
+    emit_command_result(
+        request.sid,
+        action='set_basic_control',
+        status='sent' if ok else 'error',
+        topic=current_topic,
+        request_id=request_id,
+        payload=control_payload,
+        rc=rc,
+        message=None if ok else 'MQTT publish failed'
+    )
+
+
+@socketio.on('check_firmware_update')
+def handle_check_firmware_update(data=None):
+    request_id = data.get('request_id') if isinstance(data, dict) else None
+    current_topic = get_session_topic(request.sid)
+    if not current_topic:
+        emit_command_result(
+            request.sid,
+            action='check_firmware_update',
+            status='error',
+            request_id=request_id,
+            message='No device selected'
+        )
+        return
+
+    device_id = get_device_id_from_topic(current_topic)
+    request_payload = {'id': device_id}
+    ok, rc = publish_json(
+        f"{MQTT_BASE_TOPIC}/bridge/request/device/ota_update/check",
+        request_payload,
+        origin='check_firmware_update',
+        sid=request.sid
+    )
+
+    if ok:
+        update_device_ota_status(current_topic, {
+            'state': 'checking',
+            'last_checked': time.time(),
+            'last_error': None,
+            'bridge_status': 'pending'
+        })
+
+    emit_command_result(
+        request.sid,
+        action='check_firmware_update',
+        status='sent' if ok else 'error',
+        topic=current_topic,
+        request_id=request_id,
+        payload=request_payload,
+        rc=rc,
+        message=None if ok else 'MQTT publish failed'
+    )
+
+
+@socketio.on('start_firmware_update')
+def handle_start_firmware_update(data=None):
+    request_id = data.get('request_id') if isinstance(data, dict) else None
+    current_topic = get_session_topic(request.sid)
+    if not current_topic:
+        emit_command_result(
+            request.sid,
+            action='start_firmware_update',
+            status='error',
+            request_id=request_id,
+            message='No device selected'
+        )
+        return
+
+    device_id = get_device_id_from_topic(current_topic)
+    request_payload = {'id': device_id}
+    if isinstance(data, dict):
+        custom_url = str(data.get('url') or '').strip()
+        if custom_url:
+            request_payload['url'] = custom_url
+
+    ok, rc = publish_json(
+        f"{MQTT_BASE_TOPIC}/bridge/request/device/ota_update/update",
+        request_payload,
+        origin='start_firmware_update',
+        sid=request.sid
+    )
+
+    if ok:
+        update_device_ota_status(current_topic, {
+            'state': 'requested',
+            'last_error': None,
+            'bridge_status': 'pending',
+            'progress': 0
+        })
+
+    emit_command_result(
+        request.sid,
+        action='start_firmware_update',
+        status='sent' if ok else 'error',
+        topic=current_topic,
+        request_id=request_id,
+        payload=request_payload,
         rc=rc,
         message=None if ok else 'MQTT publish failed'
     )

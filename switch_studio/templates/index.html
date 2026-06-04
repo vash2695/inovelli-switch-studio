@@ -172,6 +172,112 @@
             gap: 8px;
             flex-wrap: nowrap;
         }
+        .header-quick-controls {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            min-height: 34px;
+            min-width: 0;
+            flex: 1 1 360px;
+            max-width: 520px;
+            padding: 4px 8px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-subtle);
+            background: rgba(18, 23, 35, 0.82);
+        }
+        .header-quick-controls[hidden] {
+            display: none !important;
+        }
+        .quick-control-group {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
+        }
+        .quick-power-group {
+            flex: 0 0 auto;
+        }
+        .quick-brightness-group {
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+        .quick-label {
+            color: var(--text-secondary);
+            font-size: 0.68rem;
+            font-weight: 600;
+            letter-spacing: 0.03em;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+        .quick-power-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .quick-power-toggle input[type="checkbox"] {
+            appearance: none;
+            width: 36px;
+            height: 20px;
+            border-radius: 999px;
+            border: 1px solid var(--border-strong);
+            background: #2b2f3b;
+            position: relative;
+            cursor: pointer;
+            transition: background var(--anim-fast), border-color var(--anim-fast), box-shadow var(--anim-fast);
+            margin: 0;
+        }
+        .quick-power-toggle input[type="checkbox"]::before {
+            content: '';
+            position: absolute;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #d9dde7;
+            top: 2px;
+            left: 2px;
+            transition: transform var(--anim-fast), background var(--anim-fast);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.38);
+        }
+        .quick-power-toggle input[type="checkbox"]:checked {
+            background: linear-gradient(135deg, rgba(13, 212, 192, 0.92), rgba(9, 183, 170, 0.9));
+            border-color: rgba(13, 212, 192, 0.9);
+            box-shadow: 0 0 0 2px rgba(13, 212, 192, 0.18);
+        }
+        .quick-power-toggle input[type="checkbox"]:checked::before {
+            transform: translateX(16px);
+            background: #0d1e25;
+        }
+        .quick-brightness-slider {
+            flex: 1 1 auto;
+            min-width: 110px;
+            accent-color: var(--accent);
+        }
+        .quick-brightness-input {
+            width: 58px;
+            min-width: 58px;
+            background: var(--bg-elev-3);
+            color: var(--text-primary);
+            border: 1px solid var(--border-strong);
+            border-radius: var(--radius-sm);
+            padding: 4px 6px;
+            font-size: 0.72rem;
+            font-weight: 600;
+            text-align: right;
+        }
+        .quick-brightness-unit {
+            color: var(--text-secondary);
+            font-size: 0.72rem;
+            min-width: 14px;
+            text-align: left;
+        }
+        .header-quick-controls.quick-disabled {
+            opacity: 0.64;
+        }
+        .header-quick-controls.quick-disabled .quick-power-toggle input[type="checkbox"],
+        .header-quick-controls.quick-disabled .quick-brightness-slider,
+        .header-quick-controls.quick-disabled .quick-brightness-input {
+            cursor: not-allowed;
+        }
         .status-chip {
             display: inline-flex;
             align-items: center;
@@ -925,6 +1031,249 @@
         .command-log-entry.log-error { color: var(--danger); }
         .command-log-entry.log-info { color: #bbb; }
 
+        .firmware-shell {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .firmware-summary-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+        }
+        .firmware-stat-card {
+            background: #161d2a;
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
+            padding: 10px 12px;
+            min-width: 0;
+        }
+        .firmware-stat-label {
+            color: #7f8aa0;
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            margin-bottom: 6px;
+        }
+        .firmware-stat-value {
+            color: var(--text-primary);
+            font-size: 0.92rem;
+            font-weight: 600;
+            overflow-wrap: anywhere;
+        }
+        .firmware-stat-meta {
+            margin-top: 5px;
+            color: #7f8aa0;
+            font-size: 0.72rem;
+            overflow-wrap: anywhere;
+        }
+        .firmware-progress-shell {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .firmware-progress-bar {
+            width: 100%;
+            height: 10px;
+            border-radius: 999px;
+            background: #161d2a;
+            border: 1px solid var(--border-subtle);
+            overflow: hidden;
+        }
+        .firmware-progress-fill {
+            width: 0%;
+            height: 100%;
+            background: linear-gradient(90deg, rgba(13, 212, 192, 0.85), rgba(52, 211, 153, 0.95));
+            transition: width var(--anim-med);
+        }
+        .firmware-progress-meta {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            color: #8d97ad;
+            font-size: 0.74rem;
+        }
+        .firmware-status-note {
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
+            background: rgba(22, 29, 42, 0.88);
+            color: #a8b3c8;
+            padding: 10px 12px;
+            line-height: 1.45;
+        }
+        .firmware-status-note.status-error {
+            border-color: rgba(255, 111, 111, 0.42);
+            color: #ffd1d1;
+        }
+        .firmware-status-note.status-ready {
+            border-color: rgba(13, 212, 192, 0.34);
+            color: #c9fbf2;
+        }
+        .firmware-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .firmware-actions .cmd-btn {
+            flex: 1 1 220px;
+        }
+        .load-dimming-shell {
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+        }
+        .load-dimming-intro {
+            color: #98a4bb;
+            font-size: 0.88rem;
+            line-height: 1.55;
+        }
+        .load-dimming-section {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .load-dimming-section-title {
+            color: #8b95aa;
+            font-size: 0.86rem;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+        .load-dimming-card {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            padding: 16px 18px;
+            border-radius: var(--radius-md);
+            border: 1px solid rgba(94, 107, 130, 0.28);
+            background:
+                linear-gradient(180deg, rgba(54, 60, 74, 0.88), rgba(40, 45, 57, 0.94)),
+                radial-gradient(circle at top left, rgba(255, 255, 255, 0.03), transparent 52%);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+        }
+        .load-dimming-card-header,
+        .load-dimming-default-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 14px;
+        }
+        .load-dimming-card-title {
+            color: #edf2fb;
+            font-size: 1.02rem;
+            font-weight: 700;
+        }
+        .load-dimming-card-note {
+            color: #97a2b7;
+            font-size: 0.82rem;
+            line-height: 1.55;
+        }
+        .load-dimming-row,
+        .load-dimming-default-controls {
+            display: grid;
+            grid-template-columns: 64px minmax(0, 1fr) 74px;
+            align-items: center;
+            gap: 14px;
+        }
+        .load-dimming-default-row {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .load-dimming-default-row + .load-dimming-default-row {
+            padding-top: 12px;
+            border-top: 1px solid rgba(94, 107, 130, 0.22);
+        }
+        .load-dimming-row-label {
+            color: #d8deea;
+            font-size: 0.94rem;
+            font-weight: 600;
+        }
+        .load-dimming-slider {
+            width: 100%;
+            accent-color: #44d7c5;
+        }
+        .load-dimming-slider:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+        .load-dimming-row-value {
+            color: #f1f5ff;
+            font-size: 0.92rem;
+            font-weight: 700;
+            text-align: right;
+            white-space: nowrap;
+        }
+        .load-dimming-inline-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            color: #4fd9ff;
+            font-size: 0.86rem;
+            font-weight: 700;
+        }
+        .load-dimming-inline-toggle-compact {
+            color: #f7c35f;
+        }
+        .load-dimming-inline-toggle input {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+        }
+        .load-dimming-switch-track {
+            position: relative;
+            display: inline-flex;
+            width: 44px;
+            height: 24px;
+            border-radius: 999px;
+            background: rgba(120, 131, 150, 0.34);
+            border: 1px solid rgba(120, 131, 150, 0.28);
+            transition: background var(--anim-med), border-color var(--anim-med);
+        }
+        .load-dimming-switch-track::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #f5f8ff;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.26);
+            transition: transform var(--anim-med);
+        }
+        .load-dimming-inline-toggle input:checked + .load-dimming-switch-track {
+            background: rgba(63, 198, 255, 0.28);
+            border-color: rgba(79, 217, 255, 0.44);
+        }
+        .load-dimming-inline-toggle-compact input:checked + .load-dimming-switch-track {
+            background: rgba(247, 195, 95, 0.36);
+            border-color: rgba(247, 195, 95, 0.52);
+        }
+        .load-dimming-inline-toggle input:checked + .load-dimming-switch-track::after {
+            transform: translateX(20px);
+        }
+        .load-dimming-switch-text {
+            white-space: nowrap;
+        }
+        .load-dimming-static-pill {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 132px;
+            padding: 8px 12px;
+            border-radius: 12px;
+            border: 1px solid rgba(94, 107, 130, 0.26);
+            background: rgba(255, 255, 255, 0.04);
+            color: #eef2fb;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+        .load-dimming-divider {
+            height: 1px;
+            background: linear-gradient(90deg, rgba(94, 107, 130, 0), rgba(94, 107, 130, 0.32), rgba(94, 107, 130, 0));
+        }
+
         .schema-fields-shell {
             display: flex;
             flex-direction: column;
@@ -1048,12 +1397,23 @@
                 width: 100%;
                 display: grid;
                 grid-template-columns: minmax(0, 1fr) auto;
+                grid-template-areas:
+                    "device actions"
+                    "quick quick";
                 align-items: center;
                 gap: 8px;
             }
             .header-device-wrap {
+                grid-area: device;
                 min-width: 0;
                 width: 100%;
+            }
+            .header-quick-controls {
+                grid-area: quick;
+                width: 100%;
+                max-width: none;
+                padding: 6px 8px;
+                gap: 7px;
             }
             select#deviceSelect {
                 max-width: unset;
@@ -1061,6 +1421,7 @@
                 margin-right: 0;
             }
             .header-right {
+                grid-area: actions;
                 margin-left: 0;
                 width: auto;
                 justify-content: flex-end;
@@ -1075,6 +1436,13 @@
                 padding: 6px 10px;
                 font-size: 0.72rem;
                 white-space: nowrap;
+            }
+            .quick-label {
+                font-size: 0.64rem;
+            }
+            .quick-brightness-input {
+                width: 54px;
+                min-width: 54px;
             }
 
             .tab-bar {
@@ -1256,6 +1624,28 @@
             .header-controls {
                 gap: 6px;
             }
+            .header-quick-controls {
+                display: grid;
+                grid-template-columns: 1fr;
+                gap: 6px;
+                padding: 7px 8px;
+            }
+            .quick-control-group {
+                width: 100%;
+            }
+            .quick-power-group {
+                justify-content: center;
+            }
+            .quick-power-toggle {
+                justify-content: center;
+                margin: 0 auto;
+            }
+            .quick-brightness-group {
+                display: grid;
+                grid-template-columns: auto minmax(0, 1fr) auto auto;
+                align-items: center;
+                gap: 7px;
+            }
             select#deviceSelect {
                 font-size: 11px;
                 padding: 6px 8px;
@@ -1319,6 +1709,32 @@
                 width: 100%;
                 min-width: 0;
             }
+            .firmware-summary-grid {
+                grid-template-columns: 1fr;
+            }
+            .firmware-actions {
+                flex-direction: column;
+            }
+            .firmware-actions .cmd-btn {
+                width: 100%;
+            }
+            .load-dimming-row,
+            .load-dimming-default-controls {
+                grid-template-columns: 1fr;
+                gap: 10px;
+            }
+            .load-dimming-card-header,
+            .load-dimming-default-top {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            .load-dimming-row-value {
+                text-align: left;
+            }
+            .load-dimming-static-pill {
+                width: 100%;
+                justify-content: flex-start;
+            }
 
             .zones-sidebar-tab {
                 min-width: 102px;
@@ -1341,6 +1757,21 @@
         <div class="header-controls">
             <div class="header-device-wrap">
                 <select id="deviceSelect"><option value="" disabled selected>Loading devices...</option></select>
+            </div>
+            <div class="header-quick-controls" id="headerQuickControls" hidden>
+                <div class="quick-control-group quick-power-group" id="quickPowerGroup">
+                    <span class="quick-label">Power</span>
+                    <label class="quick-power-toggle" for="headerPowerToggle">
+                        <input type="checkbox" id="headerPowerToggle" aria-label="Toggle device power">
+                        <span id="headerPowerState" class="zones-report-state zones-report-off">OFF</span>
+                    </label>
+                </div>
+                <div class="quick-control-group quick-brightness-group" id="quickBrightnessGroup">
+                    <span class="quick-label">Brightness</span>
+                    <input class="quick-brightness-slider" type="range" id="headerBrightnessSlider" min="0" max="100" step="1" value="0" aria-label="Brightness slider (percent)">
+                    <input class="quick-brightness-input" type="number" id="headerBrightnessInput" min="0" max="100" step="1" value="0" aria-label="Brightness percent">
+                    <span class="quick-brightness-unit">%</span>
+                </div>
             </div>
             <div class="header-right">
                 <span class="status-chip" id="connectionChip"><span class="status-dot" id="connectionDot"></span><span id="connectionText">Connecting...</span></span>
@@ -1473,7 +1904,7 @@
                             <div class="zone-input-group"><label>Z Max (Height)</label><input type="number" id="editZMax" onchange="manualZoneUpdate()"></div>
                         </div>
                         <div style="display:flex; gap: 5px;">
-                            <button class="cmd-btn btn-danger" style="flex:1;" onclick="cancelZoneEdit()">Stop Editing</button>
+                            <button class="cmd-btn btn-danger" style="flex:1;" onclick="cancelZoneEdit()">Cancel Editing</button>
                             <button class="cmd-btn" style="background: #00bcd4; color: #1a1a1a; flex:1;" onclick="applyZoneEdit()">Apply Changes</button>
                         </div>
                     </div>
@@ -1632,6 +2063,60 @@
             </div>
 
             <div class="config-tab-shell" data-tab-panels="power">
+                <section class="panel-section" data-tab-section="power-firmware">
+                    <div class="panel-section-title">Firmware Updates</div>
+                    <div class="config-content">
+                        <div class="panel-lede">Check for Zigbee2MQTT OTA updates and install them online without leaving Switch Studio.</div>
+                        <div class="firmware-shell">
+                            <div class="firmware-summary-grid">
+                                <div class="firmware-stat-card">
+                                    <div class="firmware-stat-label">Installed Inovelli Version</div>
+                                    <div class="firmware-stat-value" id="firmwareInstalledVersion">--</div>
+                                    <div class="firmware-stat-meta" id="firmwareInstalledVersionMeta">Build --</div>
+                                </div>
+                                <div class="firmware-stat-card">
+                                    <div class="firmware-stat-label">Latest Inovelli Versions</div>
+                                    <div class="firmware-stat-value" id="firmwareLatestVersion">--</div>
+                                    <div class="firmware-stat-meta" id="firmwareLatestVersionMeta">Checking Inovelli help center...</div>
+                                </div>
+                                <div class="firmware-stat-card">
+                                    <div class="firmware-stat-label">OTA Catalog Version</div>
+                                    <div class="firmware-stat-value" id="firmwareAvailability">--</div>
+                                    <div class="firmware-stat-meta" id="firmwareCatalogVersionMeta">Build --</div>
+                                </div>
+                                <div class="firmware-stat-card">
+                                    <div class="firmware-stat-label">Update Status</div>
+                                    <div class="firmware-stat-value" id="firmwareState">Idle</div>
+                                    <div class="firmware-stat-meta" id="firmwareStateMeta">Waiting for check</div>
+                                </div>
+                            </div>
+
+                            <div class="firmware-progress-shell" id="firmwareProgressShell" hidden>
+                                <div class="firmware-progress-bar">
+                                    <div class="firmware-progress-fill" id="firmwareProgressFill"></div>
+                                </div>
+                                <div class="firmware-progress-meta">
+                                    <span id="firmwareProgressText">0%</span>
+                                    <span id="firmwareRemainingText"></span>
+                                </div>
+                            </div>
+
+                            <div class="firmware-status-note" id="firmwareStatusMessage">
+                                Select a device, then check for updates.
+                            </div>
+
+                            <div class="firmware-actions">
+                                <button class="cmd-btn" id="btnFirmwareCheck" type="button">Check for Updates</button>
+                                <button class="cmd-btn" id="btnFirmwareInstall" type="button" disabled>Install Available Update</button>
+                            </div>
+
+                            <div class="schema-description">
+                                Updates are requested through Zigbee2MQTT. Keep the switch powered and nearby until the process completes.
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
                 <section class="panel-section" data-tab-section="power-main">
                     <div class="panel-section-title">Power & Device</div>
                     <div class="config-content">
@@ -1682,6 +2167,7 @@
 
     <script src="{{ ingress_path }}/static/js/app_tabs.js"></script>
     <script src="{{ ingress_path }}/static/js/app_state.js"></script>
+    <script src="{{ ingress_path }}/static/js/app_load_dimming.js"></script>
     <script src="{{ ingress_path }}/static/js/app_zones.js"></script>
     <script>
         const INGRESS_PATH = "{{ ingress_path }}";
@@ -1700,6 +2186,8 @@
         const nonMmwaveWarning = document.getElementById('nonMmwaveWarning');
         const configSidebar = document.getElementById('configSidebar');
         const btnForceSync = document.getElementById('btnForceSync');
+        const btnFirmwareCheck = document.getElementById('btnFirmwareCheck');
+        const btnFirmwareInstall = document.getElementById('btnFirmwareInstall');
         const dirtyBar = document.getElementById('dirtyBar');
         const dirtyText = document.getElementById('dirtyText');
         const btnApplyChanges = document.getElementById('btnApplyChanges');
@@ -1710,11 +2198,31 @@
         const targetReportAutoOffToggle = document.getElementById('targetReportAutoOffToggle');
         const stripIlluminanceVal = document.getElementById('stripIlluminanceVal');
         const stripTargetReportState = document.getElementById('stripTargetReportState');
+        const headerQuickControls = document.getElementById('headerQuickControls');
+        const quickPowerGroup = document.getElementById('quickPowerGroup');
+        const quickBrightnessGroup = document.getElementById('quickBrightnessGroup');
+        const headerPowerToggle = document.getElementById('headerPowerToggle');
+        const headerPowerState = document.getElementById('headerPowerState');
+        const headerBrightnessSlider = document.getElementById('headerBrightnessSlider');
+        const headerBrightnessInput = document.getElementById('headerBrightnessInput');
         const zonesSidebarTabs = document.getElementById('zonesSidebarTabs');
         const zonesSidebarTabButtons = Array.from(document.querySelectorAll('[data-zones-pane-target]'));
         const zonesSidebarPanes = Array.from(document.querySelectorAll('[data-zones-pane]'));
         const connectionChip = document.getElementById('connectionChip');
         const connectionText = document.getElementById('connectionText');
+        const firmwareInstalledVersion = document.getElementById('firmwareInstalledVersion');
+        const firmwareInstalledVersionMeta = document.getElementById('firmwareInstalledVersionMeta');
+        const firmwareLatestVersion = document.getElementById('firmwareLatestVersion');
+        const firmwareLatestVersionMeta = document.getElementById('firmwareLatestVersionMeta');
+        const firmwareAvailability = document.getElementById('firmwareAvailability');
+        const firmwareCatalogVersionMeta = document.getElementById('firmwareCatalogVersionMeta');
+        const firmwareStateValue = document.getElementById('firmwareState');
+        const firmwareStateMeta = document.getElementById('firmwareStateMeta');
+        const firmwareStatusMessage = document.getElementById('firmwareStatusMessage');
+        const firmwareProgressShell = document.getElementById('firmwareProgressShell');
+        const firmwareProgressFill = document.getElementById('firmwareProgressFill');
+        const firmwareProgressText = document.getElementById('firmwareProgressText');
+        const firmwareRemainingText = document.getElementById('firmwareRemainingText');
         const TARGET_REPORT_AUTO_OFF_STORAGE_KEY = 'switchStudio.targetReportAutoOff';
         const ZONES_SIDEBAR_TAB_STORAGE_KEY = 'switchStudio.zonesSidebarTab';
 
@@ -1727,6 +2235,27 @@
         let targetHistory = {}; 
         const HISTORY_LENGTH = 15; 
         let activeZonesSidebarPane = 'controls';
+        const basicControlSupport = { state: false, brightness: false };
+        const basicControlLastKnown = { state: null, brightness: null };
+        const basicControlPending = new Map();
+        let basicControlRequestCounter = 0;
+        let basicControlBrightnessTimer = null;
+        let suppressBasicControlEvents = false;
+        let firmwareStateModel = {
+            available: null,
+            downgrade: null,
+            installed_version: null,
+            installed_version_detail: null,
+            latest_version: null,
+            latest_version_detail: null,
+            official_versions: null,
+            state: null,
+            progress: null,
+            remaining: null,
+            last_checked: null,
+            last_error: null,
+            bridge_status: null
+        };
         
         // Interaction Lock for Jitter Prevention
         let isInteracting = false;
@@ -1837,11 +2366,354 @@
             targetHistory = {};
             const chartDiv = document.getElementById('chart');
             if (chartDiv && chartDiv.data && window.Plotly) {
-                Plotly.restyle('chart', { x: [[]], y: [[]], text: [[]] }, [0]);
-                Plotly.restyle('chart', { x: [[]], y: [[]] }, [1]);
+                const [targetTraceIndex, historyTraceIndex] = getTargetTraceIndices(chartDiv);
+                Plotly.restyle('chart', { x: [[]], y: [[]], text: [[]] }, [targetTraceIndex]);
+                Plotly.restyle('chart', { x: [[]], y: [[]] }, [historyTraceIndex]);
             }
             dataTableBody.innerHTML = '<tr><td colspan="5" class="no-data">No targets detected</td></tr>';
         }
+
+        function getDefaultFirmwareState() {
+            return {
+                available: null,
+                downgrade: null,
+                installed_version: null,
+                installed_version_detail: null,
+                latest_version: null,
+                latest_version_detail: null,
+                official_versions: null,
+                state: null,
+                progress: null,
+                remaining: null,
+                last_checked: null,
+                last_error: null,
+                bridge_status: null
+            };
+        }
+
+        function normalizeFirmwareStatePayload(payload) {
+            if (!payload || typeof payload !== 'object') return null;
+
+            const next = {};
+            if (Object.prototype.hasOwnProperty.call(payload, 'available')) next.available = payload.available;
+            if (Object.prototype.hasOwnProperty.call(payload, 'update_available')) next.available = payload.update_available;
+            if (Object.prototype.hasOwnProperty.call(payload, 'downgrade')) next.downgrade = payload.downgrade;
+            if (Object.prototype.hasOwnProperty.call(payload, 'installed_version')) next.installed_version = payload.installed_version;
+            if (Object.prototype.hasOwnProperty.call(payload, 'installed_version_detail')) next.installed_version_detail = payload.installed_version_detail;
+            if (Object.prototype.hasOwnProperty.call(payload, 'latest_version')) next.latest_version = payload.latest_version;
+            if (Object.prototype.hasOwnProperty.call(payload, 'latest_version_detail')) next.latest_version_detail = payload.latest_version_detail;
+            if (Object.prototype.hasOwnProperty.call(payload, 'official_versions')) next.official_versions = payload.official_versions;
+            if (Object.prototype.hasOwnProperty.call(payload, 'state')) next.state = payload.state;
+            if (Object.prototype.hasOwnProperty.call(payload, 'progress')) next.progress = payload.progress;
+            if (Object.prototype.hasOwnProperty.call(payload, 'remaining')) next.remaining = payload.remaining;
+            if (Object.prototype.hasOwnProperty.call(payload, 'last_checked')) next.last_checked = payload.last_checked;
+            if (Object.prototype.hasOwnProperty.call(payload, 'last_error')) next.last_error = payload.last_error;
+            if (Object.prototype.hasOwnProperty.call(payload, 'bridge_status')) next.bridge_status = payload.bridge_status;
+
+            if (payload.update && typeof payload.update === 'object') {
+                const update = payload.update;
+                if (Object.prototype.hasOwnProperty.call(update, 'installed_version')) next.installed_version = update.installed_version;
+                if (Object.prototype.hasOwnProperty.call(update, 'latest_version')) next.latest_version = update.latest_version;
+                if (Object.prototype.hasOwnProperty.call(update, 'installed_version_detail')) next.installed_version_detail = update.installed_version_detail;
+                if (Object.prototype.hasOwnProperty.call(update, 'latest_version_detail')) next.latest_version_detail = update.latest_version_detail;
+                if (Object.prototype.hasOwnProperty.call(update, 'downgrade')) next.downgrade = update.downgrade;
+                if (Object.prototype.hasOwnProperty.call(update, 'state')) next.state = update.state;
+                if (Object.prototype.hasOwnProperty.call(update, 'progress')) next.progress = update.progress;
+                if (Object.prototype.hasOwnProperty.call(update, 'remaining')) next.remaining = update.remaining;
+            }
+
+            return next;
+        }
+
+        function applyFirmwareStateUpdate(payload, options) {
+            const normalized = normalizeFirmwareStatePayload(payload);
+            const opts = options || {};
+            if (opts.reset === true) {
+                firmwareStateModel = getDefaultFirmwareState();
+            }
+            if (normalized) {
+                firmwareStateModel = {
+                    ...firmwareStateModel,
+                    ...normalized
+                };
+            }
+            renderFirmwarePanel();
+        }
+
+        function resetFirmwareStateForDeviceChange() {
+            firmwareStateModel = getDefaultFirmwareState();
+            renderFirmwarePanel();
+        }
+
+        function formatFirmwareTimestamp(value) {
+            const numeric = Number(value);
+            if (!Number.isFinite(numeric) || numeric <= 0) return '--';
+            return new Date(numeric * 1000).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit' });
+        }
+
+        function parseNumericFirmwareVersion(value) {
+            if (value === null || value === undefined || value === '') return null;
+            if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value);
+            if (typeof value === 'string' && /^\d+$/.test(value.trim())) {
+                const parsed = Number.parseInt(value.trim(), 10);
+                return Number.isFinite(parsed) ? parsed : null;
+            }
+            return null;
+        }
+
+        function formatFirmwareVersion(value) {
+            if (value === null || value === undefined || value === '') return '--';
+
+            const numeric = parseNumericFirmwareVersion(value);
+            if (numeric === null) return String(value);
+
+            if (numeric >= 0 && numeric <= 0xFFFFFFFF) {
+                const parts = [
+                    (numeric >>> 24) & 0xFF,
+                    (numeric >>> 16) & 0xFF,
+                    (numeric >>> 8) & 0xFF,
+                    numeric & 0xFF
+                ];
+                while (parts.length > 2 && parts[parts.length - 1] === 0) {
+                    parts.pop();
+                }
+                return parts.join('.');
+            }
+
+            return String(value);
+        }
+
+        function formatFirmwareBuildHex(value) {
+            const numeric = parseNumericFirmwareVersion(value);
+            if (numeric === null) return '--';
+            return `0x${numeric.toString(16).toUpperCase().padStart(8, '0')}`;
+        }
+
+        function getFirmwareFriendlyVersion(detail, rawValue) {
+            if (detail && typeof detail === 'object' && detail.display_version) {
+                return detail.display_version;
+            }
+            return formatFirmwareVersion(rawValue);
+        }
+
+        function getFirmwareVersionMeta(detail, rawValue) {
+            const parts = [];
+            if (detail && typeof detail === 'object' && detail.track) {
+                parts.push(detail.track);
+            }
+            const rawHex = detail && typeof detail === 'object' && detail.raw_hex
+                ? detail.raw_hex
+                : formatFirmwareBuildHex(rawValue);
+            if (rawHex && rawHex !== '--') {
+                parts.push(rawHex);
+            }
+            return parts.length ? parts.join(' • ') : 'Build --';
+        }
+
+        function describeFirmwareVersion(detail, rawValue) {
+            const friendly = getFirmwareFriendlyVersion(detail, rawValue);
+            if (!friendly || friendly === '--') return '--';
+            const parts = [friendly];
+            if (detail && typeof detail === 'object' && detail.track) {
+                parts.push(detail.track.toLowerCase());
+            }
+            const rawHex = detail && typeof detail === 'object' && detail.raw_hex
+                ? detail.raw_hex
+                : formatFirmwareBuildHex(rawValue);
+            return rawHex && rawHex !== '--'
+                ? `${parts.join(' ')} (${rawHex})`
+                : parts.join(' ');
+        }
+
+        function getFirmwareFileSuffix(detail) {
+            if (detail && typeof detail === 'object' && detail.file_name) {
+                return ` via ${detail.file_name}`;
+            }
+            return '';
+        }
+
+        function getOfficialVersionMap() {
+            return firmwareStateModel.official_versions && typeof firmwareStateModel.official_versions === 'object'
+                ? firmwareStateModel.official_versions
+                : {};
+        }
+
+        function getOfficialVersionCardContent() {
+            const officialVersions = getOfficialVersionMap();
+            const production = officialVersions.Production || officialVersions.production || null;
+            const beta = officialVersions.Beta || officialVersions.beta || null;
+
+            if (production && beta) {
+                return {
+                    primary: `Production ${production}`,
+                    meta: `Beta ${beta}`,
+                };
+            }
+            if (production) {
+                return {
+                    primary: `Production ${production}`,
+                    meta: 'Source: Inovelli help center',
+                };
+            }
+            if (beta) {
+                return {
+                    primary: `Beta ${beta}`,
+                    meta: 'Source: Inovelli help center',
+                };
+            }
+            return {
+                primary: '--',
+                meta: 'Checking Inovelli help center...',
+            };
+        }
+
+        function getInstalledOfficialMatchSummary(installedDetail) {
+            if (!installedDetail || typeof installedDetail !== 'object' || !installedDetail.display_version) return '';
+            const officialVersions = getOfficialVersionMap();
+            const production = officialVersions.Production || officialVersions.production || null;
+            const beta = officialVersions.Beta || officialVersions.beta || null;
+            if (production && installedDetail.display_version === production) {
+                return `This matches Inovelli's latest production release (${production}).`;
+            }
+            if (beta && installedDetail.display_version === beta) {
+                return `This matches Inovelli's latest beta release (${beta}).`;
+            }
+            return '';
+        }
+
+        function compareFirmwareVersions(installedValue, latestValue) {
+            const installedNumeric = parseNumericFirmwareVersion(installedValue);
+            const latestNumeric = parseNumericFirmwareVersion(latestValue);
+            if (installedNumeric === null || latestNumeric === null) return null;
+            if (installedNumeric === latestNumeric) return 0;
+            return installedNumeric > latestNumeric ? 1 : -1;
+        }
+
+        function getFirmwareInstallLabel() {
+            if (firmwareStateModel.downgrade === true) return 'Install Catalog Downgrade';
+            return 'Install Available Update';
+        }
+
+        function getFirmwareAvailabilityLabel() {
+            if (String(firmwareStateModel.state || '').toLowerCase() === 'checking') return 'Checking...';
+            if (firmwareStateModel.downgrade === true) return 'Downgrade available';
+            const comparison = compareFirmwareVersions(firmwareStateModel.installed_version, firmwareStateModel.latest_version);
+            if (comparison === 1) return 'Installed is newer';
+            if (firmwareStateModel.available === true) return 'Update available';
+            if (firmwareStateModel.available === false) return 'Up to date';
+            return 'Unknown';
+        }
+
+        function getFirmwareStateLabel() {
+            const rawState = String(firmwareStateModel.state || '').trim();
+            if (!rawState) return 'Idle';
+            return rawState
+                .replace(/_/g, ' ')
+                .replace(/\b\w/g, (ch) => ch.toUpperCase());
+        }
+
+        function renderFirmwarePanel() {
+            const hasSelection = !!(deviceSelect && deviceSelect.value);
+            const stateValue = String(firmwareStateModel.state || '').toLowerCase();
+            const inProgress = stateValue === 'checking' || stateValue === 'requested' || stateValue === 'updating';
+            const progressValue = Number(firmwareStateModel.progress);
+            const showProgress = inProgress || (Number.isFinite(progressValue) && progressValue > 0);
+            const versionComparison = compareFirmwareVersions(firmwareStateModel.installed_version, firmwareStateModel.latest_version);
+            const installedDetail = firmwareStateModel.installed_version_detail;
+            const latestDetail = firmwareStateModel.latest_version_detail;
+            const officialCard = getOfficialVersionCardContent();
+            const formattedInstalledVersion = getFirmwareFriendlyVersion(installedDetail, firmwareStateModel.installed_version);
+            const installedVersionLabel = describeFirmwareVersion(installedDetail, firmwareStateModel.installed_version);
+            const latestVersionLabel = describeFirmwareVersion(latestDetail, firmwareStateModel.latest_version);
+            const installedOfficialMatchSummary = getInstalledOfficialMatchSummary(installedDetail);
+            const canInstall = hasSelection && !inProgress && (
+                firmwareStateModel.downgrade === true
+                || (firmwareStateModel.available === true && versionComparison !== 1)
+            );
+
+            if (firmwareInstalledVersion) firmwareInstalledVersion.innerText = formattedInstalledVersion;
+            if (firmwareInstalledVersionMeta) firmwareInstalledVersionMeta.innerText = getFirmwareVersionMeta(installedDetail, firmwareStateModel.installed_version);
+            if (firmwareLatestVersion) firmwareLatestVersion.innerText = officialCard.primary;
+            if (firmwareLatestVersionMeta) firmwareLatestVersionMeta.innerText = officialCard.meta;
+            if (firmwareAvailability) firmwareAvailability.innerText = getFirmwareFriendlyVersion(latestDetail, firmwareStateModel.latest_version);
+            if (firmwareCatalogVersionMeta) firmwareCatalogVersionMeta.innerText = getFirmwareVersionMeta(latestDetail, firmwareStateModel.latest_version);
+            if (firmwareStateValue) firmwareStateValue.innerText = getFirmwareAvailabilityLabel();
+            if (firmwareStateMeta) firmwareStateMeta.innerText = getFirmwareStateLabel();
+            if (btnFirmwareInstall) btnFirmwareInstall.innerText = getFirmwareInstallLabel();
+
+            if (firmwareProgressShell) firmwareProgressShell.hidden = !showProgress;
+            if (firmwareProgressFill) firmwareProgressFill.style.width = showProgress ? `${Math.max(0, Math.min(100, progressValue))}%` : '0%';
+            if (firmwareProgressText) firmwareProgressText.innerText = showProgress ? `${Math.round(progressValue)}%` : '--';
+            if (firmwareRemainingText) {
+                const remaining = Number(firmwareStateModel.remaining);
+                firmwareRemainingText.innerText = Number.isFinite(remaining) && remaining > 0 ? `${remaining}s remaining` : '';
+            }
+
+            if (firmwareStatusMessage) {
+                firmwareStatusMessage.classList.remove('status-error', 'status-ready');
+                let message = 'Select a device, then check for updates.';
+                if (hasSelection) {
+                    if (firmwareStateModel.last_error) {
+                        message = firmwareStateModel.last_error;
+                        firmwareStatusMessage.classList.add('status-error');
+                    } else if (stateValue === 'checking') {
+                        message = 'Checking Zigbee2MQTT OTA availability for this device...';
+                    } else if (stateValue === 'requested' || stateValue === 'updating') {
+                        message = 'Firmware update in progress. Keep the switch powered until completion.';
+                    } else if (firmwareStateModel.downgrade === true) {
+                        if (installedVersionLabel !== '--' && latestVersionLabel !== '--') {
+                            message = `Installed firmware: ${installedVersionLabel}. ${installedOfficialMatchSummary ? `${installedOfficialMatchSummary} ` : ''}Zigbee2MQTT's OTA catalog currently lists ${latestVersionLabel}${getFirmwareFileSuffix(latestDetail)}, which is older. Installing it would downgrade the switch.`;
+                        } else {
+                            message = 'Zigbee2MQTT reports an older catalog image for this device.';
+                        }
+                    } else if (versionComparison === 1) {
+                        if (installedVersionLabel !== '--' && latestVersionLabel !== '--') {
+                            message = `Installed firmware: ${installedVersionLabel}. ${installedOfficialMatchSummary ? `${installedOfficialMatchSummary} ` : ''}Zigbee2MQTT's OTA catalog currently lists ${latestVersionLabel}${getFirmwareFileSuffix(latestDetail)}, which is older.`;
+                        } else {
+                            message = 'Installed firmware appears newer than the catalog version currently reported by Zigbee2MQTT.';
+                        }
+                    } else if (firmwareStateModel.available === true) {
+                        message = firmwareStateModel.latest_version
+                            ? `Zigbee2MQTT OTA update available: ${latestVersionLabel}${getFirmwareFileSuffix(latestDetail)}${installedVersionLabel !== '--' ? `. Installed firmware: ${installedVersionLabel}.` : '.'}`
+                            : 'An update is available for this device.';
+                        firmwareStatusMessage.classList.add('status-ready');
+                    } else if (firmwareStateModel.available === false) {
+                        const checkedAt = formatFirmwareTimestamp(firmwareStateModel.last_checked);
+                        const currentLabel = installedVersionLabel !== '--' ? installedVersionLabel : formattedInstalledVersion;
+                        message = checkedAt !== '--'
+                            ? `${currentLabel !== '--' ? `Installed firmware: ${currentLabel}. ` : 'Device is up to date. '}${installedOfficialMatchSummary ? `${installedOfficialMatchSummary} ` : ''}Last checked at ${checkedAt}.`
+                            : currentLabel !== '--'
+                                ? `Installed firmware: ${currentLabel}. ${installedOfficialMatchSummary}`.trim()
+                                : 'Device is up to date.';
+                    } else {
+                        message = 'Click Check for Updates to query Zigbee2MQTT.';
+                    }
+                }
+                firmwareStatusMessage.innerText = message;
+            }
+
+            if (btnFirmwareCheck) btnFirmwareCheck.disabled = !hasSelection || inProgress;
+            if (btnFirmwareInstall) btnFirmwareInstall.disabled = !canInstall;
+        }
+
+        function handleFirmwareCheckClick() {
+            if (!deviceSelect || !deviceSelect.value) return;
+            socket.emit('check_firmware_update', { request_id: `firmware-check-${Date.now()}` });
+        }
+
+        function handleFirmwareInstallClick() {
+            if (!deviceSelect || !deviceSelect.value) return;
+            const confirmMessage = firmwareStateModel.downgrade === true
+                ? 'Zigbee2MQTT reports this catalog image as older than the currently installed firmware. Continue with the downgrade?'
+                : 'Start firmware update for the selected device? Keep the switch powered until the update completes.';
+            const confirmed = confirm(confirmMessage);
+            if (!confirmed) return;
+            socket.emit('start_firmware_update', { request_id: `firmware-update-${Date.now()}` });
+        }
+
+        if (btnFirmwareCheck) btnFirmwareCheck.addEventListener('click', handleFirmwareCheckClick);
+        if (btnFirmwareInstall) btnFirmwareInstall.addEventListener('click', handleFirmwareInstallClick);
+        renderFirmwarePanel();
 
         function applyLayoutMode(activeTab) {
             if (!appContainer) return;
@@ -1938,11 +2810,201 @@
             connectionText.textContent = connected ? 'Connected' : 'Disconnected';
         }
 
+        function parseBasicStateValue(value) {
+            if (value === true) return true;
+            if (value === false) return false;
+            if (typeof value === 'number') return value !== 0;
+            const raw = String(value || '').trim().toUpperCase();
+            if (raw === 'ON' || raw === 'TRUE' || raw === '1') return true;
+            if (raw === 'OFF' || raw === 'FALSE' || raw === '0') return false;
+            return null;
+        }
+
+        function clampBrightnessRaw(value) {
+            const parsed = Number(value);
+            if (!Number.isFinite(parsed)) return null;
+            return Math.min(254, Math.max(0, Math.round(parsed)));
+        }
+
+        function percentToBrightnessRaw(value) {
+            const parsed = Number(value);
+            if (!Number.isFinite(parsed)) return null;
+            const clampedPercent = Math.min(100, Math.max(0, parsed));
+            return Math.min(254, Math.max(0, Math.round((clampedPercent / 100) * 254)));
+        }
+
+        function brightnessRawToPercent(value) {
+            const raw = clampBrightnessRaw(value);
+            if (raw === null) return null;
+            return Math.min(100, Math.max(0, Math.round((raw / 254) * 100)));
+        }
+
+        function setQuickPowerStateBadge(isOn) {
+            if (!headerPowerState) return;
+            const enabled = !!isOn;
+            headerPowerState.textContent = enabled ? 'ON' : 'OFF';
+            headerPowerState.classList.toggle('zones-report-on', enabled);
+            headerPowerState.classList.toggle('zones-report-off', !enabled);
+        }
+
+        function applyBasicControlUiState() {
+            suppressBasicControlEvents = true;
+            if (headerPowerToggle && basicControlLastKnown.state !== null) {
+                headerPowerToggle.checked = !!basicControlLastKnown.state;
+            }
+            if (headerBrightnessSlider && basicControlLastKnown.brightness !== null) {
+                const percent = brightnessRawToPercent(basicControlLastKnown.brightness);
+                if (percent !== null) headerBrightnessSlider.value = String(percent);
+            }
+            if (headerBrightnessInput && basicControlLastKnown.brightness !== null) {
+                const percent = brightnessRawToPercent(basicControlLastKnown.brightness);
+                if (percent !== null) headerBrightnessInput.value = String(percent);
+            }
+            setQuickPowerStateBadge(basicControlLastKnown.state === true);
+            suppressBasicControlEvents = false;
+        }
+
+        function setBasicControlInputsEnabled(enabled) {
+            const isEnabled = !!enabled;
+            if (headerPowerToggle) headerPowerToggle.disabled = !isEnabled || !basicControlSupport.state;
+            if (headerBrightnessSlider) headerBrightnessSlider.disabled = !isEnabled || !basicControlSupport.brightness;
+            if (headerBrightnessInput) headerBrightnessInput.disabled = !isEnabled || !basicControlSupport.brightness;
+            if (headerQuickControls) headerQuickControls.classList.toggle('quick-disabled', !isEnabled);
+        }
+
+        function updateBasicControlVisibility() {
+            if (!headerQuickControls) return;
+            const hasAnyControl = basicControlSupport.state || basicControlSupport.brightness;
+            headerQuickControls.hidden = !hasAnyControl;
+            if (!hasAnyControl) return;
+
+            if (quickPowerGroup) {
+                quickPowerGroup.style.display = basicControlSupport.state ? '' : 'none';
+            }
+            if (quickBrightnessGroup) {
+                quickBrightnessGroup.style.display = basicControlSupport.brightness ? '' : 'none';
+            }
+        }
+
+        function updateBasicControlSupportFromSchema(schema) {
+            if (!schema || typeof schema !== 'object') return;
+            const stack = [];
+            const fields = Array.isArray(schema.fields) ? schema.fields : [];
+            const options = Array.isArray(schema.options) ? schema.options : [];
+            stack.push(...fields, ...options);
+
+            while (stack.length > 0) {
+                const entry = stack.pop();
+                if (!entry || typeof entry !== 'object') continue;
+                const key = String(entry.name || entry.property || '').trim().toLowerCase();
+                if (key === 'state') basicControlSupport.state = true;
+                if (key === 'brightness') basicControlSupport.brightness = true;
+
+                const features = Array.isArray(entry.features) ? entry.features : [];
+                if (features.length > 0) stack.push(...features);
+            }
+
+            updateBasicControlVisibility();
+        }
+
+        function emitBasicControl(payload, statusMessage, previousSnapshot) {
+            if (!payload || typeof payload !== 'object') return;
+            if (!deviceSelect || !String(deviceSelect.value || '').trim()) return;
+
+            const requestId = `basic-control-${Date.now()}-${basicControlRequestCounter++}`;
+            basicControlPending.set(requestId, {
+                state: previousSnapshot && Object.prototype.hasOwnProperty.call(previousSnapshot, 'state')
+                    ? previousSnapshot.state
+                    : basicControlLastKnown.state,
+                brightness: previousSnapshot && Object.prototype.hasOwnProperty.call(previousSnapshot, 'brightness')
+                    ? previousSnapshot.brightness
+                    : basicControlLastKnown.brightness
+            });
+            socket.emit('set_basic_control', {
+                ...payload,
+                request_id: requestId
+            });
+
+            if (window.SwitchStudioState) {
+                window.SwitchStudioState.setPacketStatus('syncing', statusMessage || 'Updating quick control...');
+            }
+        }
+
+        function commitBrightnessPercent(percentValue) {
+            const percent = Number(percentValue);
+            if (!Number.isFinite(percent)) return;
+            const boundedPercent = Math.min(100, Math.max(0, Math.round(percent)));
+            const rawBrightness = percentToBrightnessRaw(boundedPercent);
+            if (rawBrightness === null) return;
+            const previousSnapshot = {
+                state: basicControlLastKnown.state,
+                brightness: basicControlLastKnown.brightness
+            };
+
+            const payload = { brightness: rawBrightness };
+            if (basicControlSupport.state && basicControlLastKnown.state === false) {
+                payload.state = 'ON';
+                basicControlLastKnown.state = true;
+            }
+            basicControlLastKnown.brightness = rawBrightness;
+            applyBasicControlUiState();
+            emitBasicControl(payload, 'Updating brightness...', previousSnapshot);
+        }
+
+        function queueBrightnessCommit(percentValue) {
+            if (basicControlBrightnessTimer) {
+                clearTimeout(basicControlBrightnessTimer);
+            }
+            basicControlBrightnessTimer = setTimeout(() => {
+                basicControlBrightnessTimer = null;
+                commitBrightnessPercent(percentValue);
+            }, 180);
+        }
+
+        function syncBasicControlsFromConfig(config) {
+            if (!config || typeof config !== 'object') return;
+
+            if (Object.prototype.hasOwnProperty.call(config, 'state')) {
+                basicControlSupport.state = true;
+                const parsedState = parseBasicStateValue(config.state);
+                if (parsedState !== null) {
+                    basicControlLastKnown.state = parsedState;
+                }
+            }
+            if (Object.prototype.hasOwnProperty.call(config, 'brightness')) {
+                basicControlSupport.brightness = true;
+                const parsedBrightness = clampBrightnessRaw(config.brightness);
+                if (parsedBrightness !== null) {
+                    basicControlLastKnown.brightness = parsedBrightness;
+                }
+            }
+
+            updateBasicControlVisibility();
+            applyBasicControlUiState();
+        }
+
+        function resetBasicControlsForDeviceChange() {
+            if (basicControlBrightnessTimer) {
+                clearTimeout(basicControlBrightnessTimer);
+                basicControlBrightnessTimer = null;
+            }
+            basicControlPending.clear();
+            basicControlLastKnown.state = null;
+            basicControlLastKnown.brightness = null;
+            suppressBasicControlEvents = true;
+            if (headerPowerToggle) headerPowerToggle.checked = false;
+            if (headerBrightnessSlider) headerBrightnessSlider.value = '0';
+            if (headerBrightnessInput) headerBrightnessInput.value = '0';
+            setQuickPowerStateBadge(false);
+            suppressBasicControlEvents = false;
+        }
+
         function updateDeviceSelectState() {
             if (!deviceSelect) return;
             const hasSelection = !!String(deviceSelect.value || '').trim();
             deviceSelect.classList.toggle('device-unselected', !hasSelection);
             deviceSelect.setAttribute('aria-label', hasSelection ? 'Select a Device' : 'Select a Device (required)');
+            setBasicControlInputsEnabled(hasSelection);
         }
 
         function applyLegacyLayout() {
@@ -1986,6 +3048,8 @@
             applyLayoutMode('zones');
         }
         updateDeviceSelectState();
+        updateBasicControlVisibility();
+        setQuickPowerStateBadge(false);
         initZonesSidebarTabs();
 
         if (window.SwitchStudioState && typeof window.SwitchStudioState.init === 'function') {
@@ -1997,6 +3061,14 @@
                 applyBtnEl: btnApplyChanges,
                 discardBtnEl: btnDiscardChanges,
                 toastContainerEl: toastContainer
+            });
+        }
+
+        if (window.SwitchStudioLoadDimming && typeof window.SwitchStudioLoadDimming.init === 'function') {
+            window.SwitchStudioLoadDimming.init({
+                containerEl: schemaLoadFields,
+                stateApi: window.SwitchStudioState || null,
+                isDeviceSelected: () => !!(deviceSelect && deviceSelect.value)
             });
         }
 
@@ -2067,6 +3139,62 @@
             });
         }
         setTargetReportingState(false, 'Disable');
+
+        if (headerPowerToggle) {
+            headerPowerToggle.addEventListener('change', () => {
+                if (suppressBasicControlEvents) return;
+                const nextState = !!headerPowerToggle.checked;
+                const previousSnapshot = {
+                    state: basicControlLastKnown.state,
+                    brightness: basicControlLastKnown.brightness
+                };
+                basicControlLastKnown.state = nextState;
+                setQuickPowerStateBadge(nextState);
+                emitBasicControl(
+                    { state: nextState ? 'ON' : 'OFF' },
+                    nextState ? 'Turning switch on...' : 'Turning switch off...',
+                    previousSnapshot
+                );
+            });
+        }
+
+        if (headerBrightnessSlider) {
+            headerBrightnessSlider.addEventListener('input', () => {
+                if (suppressBasicControlEvents) return;
+                if (headerBrightnessInput) headerBrightnessInput.value = headerBrightnessSlider.value;
+                queueBrightnessCommit(headerBrightnessSlider.value);
+            });
+            headerBrightnessSlider.addEventListener('change', () => {
+                if (suppressBasicControlEvents) return;
+                if (basicControlBrightnessTimer) {
+                    clearTimeout(basicControlBrightnessTimer);
+                    basicControlBrightnessTimer = null;
+                }
+                commitBrightnessPercent(headerBrightnessSlider.value);
+            });
+        }
+
+        if (headerBrightnessInput) {
+            const commitFromInput = () => {
+                if (suppressBasicControlEvents) return;
+                const parsed = Number(headerBrightnessInput.value);
+                if (!Number.isFinite(parsed)) {
+                    applyBasicControlUiState();
+                    return;
+                }
+                const bounded = Math.min(100, Math.max(0, Math.round(parsed)));
+                headerBrightnessInput.value = String(bounded);
+                if (headerBrightnessSlider) headerBrightnessSlider.value = String(bounded);
+                commitBrightnessPercent(bounded);
+            };
+            headerBrightnessInput.addEventListener('change', commitFromInput);
+            headerBrightnessInput.addEventListener('blur', commitFromInput);
+            headerBrightnessInput.addEventListener('keydown', (event) => {
+                if (event.key !== 'Enter') return;
+                event.preventDefault();
+                commitFromInput();
+            });
+        }
 
         function getInputValueForEmit(input) {
             if (!input) return '';
@@ -2619,6 +3747,20 @@
         const presenceConfigOnlyFieldKeys = new Set([
             'mmWaveRoomSizePreset'
         ]);
+        const rawLoadAdvancedFieldKeys = new Set([
+            'dimmingSpeedUpRemote',
+            'dimmingSpeedUpLocal',
+            'rampRateOffToOnRemote',
+            'rampRateOffToOnLocal',
+            'dimmingSpeedDownRemote',
+            'dimmingSpeedDownLocal',
+            'rampRateOnToOffRemote',
+            'rampRateOnToOffLocal',
+            'defaultLevelLocal',
+            'defaultLevelRemote',
+            'loadLevelIndicatorTimeout',
+            'dimmingMode'
+        ]);
 
         const advancedFieldKeys = new Set([
             // Presence set-and-forget tuning.
@@ -2641,11 +3783,29 @@
             'maximumLevel',
             'stateAfterPowerRestored',
             'autoTimerOff',
+            'dimmingSpeedUpRemote',
+            'dimmingSpeedUpLocal',
+            'rampRateOffToOnRemote',
+            'rampRateOffToOnLocal',
+            'dimmingSpeedDownRemote',
+            'dimmingSpeedDownLocal',
+            'rampRateOnToOffRemote',
+            'rampRateOnToOffLocal',
+            'defaultLevelLocal',
+            'defaultLevelRemote',
+            'loadLevelIndicatorTimeout',
+            'dimmingMode',
             'quickStartTime',
             'quickStartLevel',
             'localProtection',
             'otaImageType'
         ]);
+
+        function getAdvancedSectionName(field) {
+            if (!field || !field.name) return 'Set-and-Forget';
+            if (rawLoadAdvancedFieldKeys.has(field.name)) return 'Load & Dimming (Raw Values)';
+            return field.section || 'Set-and-Forget';
+        }
 
         function isFieldHiddenByDedicatedControl(field) {
             return !!(field && field.name && hiddenFieldKeys.has(field.name));
@@ -2756,6 +3916,25 @@
             return readOnlyVal;
         }
 
+        function resolveSchemaControlInput(control, inputId) {
+            if (!control) return null;
+            if (control.id === inputId) return control;
+            if (typeof control.querySelector === 'function') {
+                const found = control.querySelector(`[id="${inputId}"]`);
+                if (found) return found;
+            }
+            const queue = Array.isArray(control.children) ? Array.from(control.children) : [];
+            while (queue.length > 0) {
+                const current = queue.shift();
+                if (!current) continue;
+                if (current.id === inputId) return current;
+                if (Array.isArray(current.children) && current.children.length > 0) {
+                    queue.push(...current.children);
+                }
+            }
+            return null;
+        }
+
         function createSchemaFieldRow(field) {
             const row = document.createElement('div');
             row.className = 'input-row schema-field-row';
@@ -2766,7 +3945,12 @@
             row.appendChild(label);
 
             if (field.can_write) {
-                row.appendChild(createSchemaFieldInput(field));
+                const control = createSchemaFieldInput(field);
+                row.appendChild(control);
+                const controlInput = resolveSchemaControlInput(control, field.name);
+                if (window.SwitchStudioState && typeof window.SwitchStudioState.registerInputBinding === 'function' && controlInput) {
+                    window.SwitchStudioState.registerInputBinding(field.name, controlInput);
+                }
             } else {
                 row.appendChild(createReadOnlyValueElement(field));
             }
@@ -3011,7 +4195,7 @@
                 }
 
                 if (isSetAndForgetField(field, 'fields')) {
-                    buckets.advanced.push({ ...field, section: field.section || 'Set-and-Forget' });
+                    buckets.advanced.push({ ...field, section: getAdvancedSectionName(field) });
                     return;
                 }
 
@@ -3038,7 +4222,11 @@
             const presenceConfigFields = presenceFields.filter(field => presenceConfigOnlyFieldKeys.has(field.name));
             renderSchemaFieldCollection(schemaPresenceControlsFields, presenceControlsFields, 'No presence controls found.');
             renderSchemaFieldCollection(schemaPresenceConfigFields, presenceConfigFields, 'No presence configuration fields found.');
-            renderSchemaFieldCollection(schemaLoadFields, loadFields, 'No load or dimming controls found.');
+            if (window.SwitchStudioLoadDimming && typeof window.SwitchStudioLoadDimming.setSchemaModel === 'function') {
+                window.SwitchStudioLoadDimming.setSchemaModel(schemaModel);
+            } else {
+                renderSchemaFieldCollection(schemaLoadFields, loadFields, 'No load or dimming controls found.');
+            }
             renderSchemaFieldCollection(schemaLedFields, ledFields, 'No LED fields found in schema.');
             renderSchemaFieldCollection(schemaButtonFields, buttonFields, 'No button or scene fields found.');
             renderSchemaFieldCollection(schemaPowerFields, powerFields, 'No power/device fields found.');
@@ -3215,11 +4403,15 @@
             // Only update Plotly if the chart exists
             const chartDiv = document.getElementById('chart');
             if (chartDiv && chartDiv.layout) {
-                // Update both shapes and annotations (labels)
-                Plotly.relayout('chart', {
-                    shapes: getChartShapes(),
-                    annotations: getChartAnnotations()
-                });
+                if (isEditingZone) {
+                    renderChartForCurrentMode();
+                } else {
+                    // Update both shapes and annotations (labels)
+                    Plotly.relayout('chart', {
+                        shapes: getChartShapes(),
+                        annotations: getChartAnnotations()
+                    });
+                }
             }
         }
         
@@ -3236,10 +4428,16 @@
             
             const chartDiv = document.getElementById('chart');
             if (chartDiv && chartDiv.layout) {
-                Plotly.relayout('chart', {
-                    'xaxis.range': [chartXMin, chartXMax],
-                    'yaxis.range': [chartYMin, chartYMax]
-                });
+                if (isEditingZone) {
+                    layout.xaxis.range = [chartXMin, chartXMax];
+                    layout.yaxis.range = [chartYMin, chartYMax];
+                    renderChartForCurrentMode();
+                } else {
+                    Plotly.relayout('chart', {
+                        'xaxis.range': [chartXMin, chartXMax],
+                        'yaxis.range': [chartYMin, chartYMax]
+                    });
+                }
             }
         }
 
@@ -3285,6 +4483,213 @@
             points.push([left.x, left.y], [0, 0]);
 
             return `M ${points.map(([x, y]) => `${x} ${y}`).join(' L ')} Z`;
+        }
+
+        function buildFovSectorPoints(halfAngleDegrees) {
+            const right = getFovBoundaryPoint(halfAngleDegrees, 1);
+            const left = getFovBoundaryPoint(halfAngleDegrees, -1);
+            const topY = Math.max(0, chartYMax);
+            const rightTouchesTop = Math.abs(right.y - topY) < 0.5;
+            const leftTouchesTop = Math.abs(left.y - topY) < 0.5;
+            const points = [[0, 0], [right.x, right.y]];
+
+            if (!rightTouchesTop) points.push([Math.max(0, chartXMax), topY]);
+            if (!leftTouchesTop) points.push([Math.min(0, chartXMin), topY]);
+            points.push([left.x, left.y], [0, 0]);
+
+            return points;
+        }
+
+        function createScatterLineTrace(points, lineColor, width, dash, fillColor) {
+            const trace = {
+                x: points.map(([x]) => x),
+                y: points.map(([, y]) => y),
+                mode: 'lines',
+                line: { color: lineColor, width: width, dash: dash || 'solid' },
+                hoverinfo: 'skip',
+                showlegend: false,
+                type: 'scatter'
+            };
+            if (fillColor) {
+                trace.fill = 'toself';
+                trace.fillcolor = fillColor;
+            }
+            return trace;
+        }
+
+        function createCircleTrace(radius, lineColor, width, dash, fillColor) {
+            const steps = 72;
+            const points = [];
+            for (let i = 0; i <= steps; i++) {
+                const angle = (Math.PI * 2 * i) / steps;
+                points.push([
+                    Math.cos(angle) * radius,
+                    Math.sin(angle) * radius
+                ]);
+            }
+            return createScatterLineTrace(points, lineColor, width, dash, fillColor);
+        }
+
+        function createZoneTrace(config, lineColor, fillColor) {
+            if (!config) return null;
+            return createScatterLineTrace([
+                [config.x_min, config.y_min],
+                [config.x_max, config.y_min],
+                [config.x_max, config.y_max],
+                [config.x_min, config.y_max],
+                [config.x_min, config.y_min]
+            ], lineColor, 2, 'solid', fillColor);
+        }
+
+        function getEditModePassiveTraces() {
+            if (!isEditingZone) return [];
+
+            const traces = [];
+            if (showGrid) {
+                traces.push(createScatterLineTrace(
+                    buildFovSectorPoints(75),
+                    'rgba(0, 188, 212, 0.0)',
+                    0,
+                    'solid',
+                    'rgba(13, 212, 192, 0.06)'
+                ));
+                traces.push(createScatterLineTrace(
+                    buildFovSectorPoints(60),
+                    'rgba(0, 188, 212, 0.0)',
+                    0,
+                    'solid',
+                    'rgba(13, 212, 192, 0.09)'
+                ));
+
+                const fovOuterRight = getFovBoundaryPoint(75, 1);
+                const fovOuterLeft = getFovBoundaryPoint(75, -1);
+                const fovBoundaryRight = getFovBoundaryPoint(60, 1);
+                const fovBoundaryLeft = getFovBoundaryPoint(60, -1);
+
+                traces.push(createScatterLineTrace([[0, 0], [fovBoundaryRight.x, fovBoundaryRight.y]], 'rgba(13, 212, 192, 0.32)', 1.5));
+                traces.push(createScatterLineTrace([[0, 0], [fovBoundaryLeft.x, fovBoundaryLeft.y]], 'rgba(13, 212, 192, 0.32)', 1.5));
+                traces.push(createScatterLineTrace([[0, 0], [fovOuterRight.x, fovOuterRight.y]], 'rgba(13, 212, 192, 0.14)', 1.1, 'dot'));
+                traces.push(createScatterLineTrace([[0, 0], [fovOuterLeft.x, fovOuterLeft.y]], 'rgba(13, 212, 192, 0.14)', 1.1, 'dot'));
+
+                [100, 200, 300, 400, 500, 600].forEach((dist) => {
+                    traces.push(createCircleTrace(
+                        dist,
+                        'rgba(176, 198, 216, 0.08)',
+                        dist % 200 === 0 ? 1.05 : 0.8,
+                        'dot'
+                    ));
+                });
+
+                traces.push(createScatterLineTrace([[chartXMin, 0], [chartXMax, 0]], 'rgba(13, 212, 192, 0.3)', 1.2));
+                traces.push(createCircleTrace(18, 'rgba(255, 111, 111, 0.56)', 1.2, 'solid', 'rgba(255, 111, 111, 0.24)'));
+                traces.push(createCircleTrace(8, 'rgba(255, 255, 255, 0.85)', 1.2, 'solid', 'rgba(255, 111, 111, 0.92)'));
+            }
+
+            if (showDetection) {
+                Object.entries(deviceZones.mmwave_detection_areas).forEach(([areaId, config]) => {
+                    let isVisible = true;
+                    if (areaId === 'area1' && !showDetection1) isVisible = false;
+                    if (areaId === 'area2' && !showDetection2) isVisible = false;
+                    if (areaId === 'area3' && !showDetection3) isVisible = false;
+                    if (areaId === 'area4' && !showDetection4) isVisible = false;
+                    if (!isVisible || !config) return;
+
+                    const targetKey = `mmwave_detection_areas:${areaId}`;
+                    if (targetKey === editingTarget) return;
+                    const isArea1 = areaId === 'area1';
+                    const color = isArea1 ? 'rgba(0, 188, 212, 0.6)' : 'rgba(76, 175, 80, 0.6)';
+                    const fill = isArea1 ? 'rgba(0, 188, 212, 0.1)' : 'rgba(76, 175, 80, 0.1)';
+                    const trace = createZoneTrace(config, color, fill);
+                    if (trace) traces.push(trace);
+                });
+            }
+
+            if (showStay) {
+                Object.entries(deviceZones.mmwave_stay_areas).forEach(([areaId, config]) => {
+                    if (!config) return;
+                    const targetKey = `mmwave_stay_areas:${areaId}`;
+                    if (targetKey === editingTarget) return;
+                    const trace = createZoneTrace(config, 'rgba(255, 152, 0, 0.6)', 'rgba(255, 152, 0, 0.1)');
+                    if (trace) traces.push(trace);
+                });
+            }
+
+            if (showInterference) {
+                Object.entries(deviceZones.mmwave_interference_areas).forEach(([areaId, config]) => {
+                    if (!config) return;
+                    const targetKey = `mmwave_interference_areas:${areaId}`;
+                    if (targetKey === editingTarget) return;
+                    const trace = createZoneTrace(config, 'rgba(255, 82, 82, 0.6)', 'rgba(255, 82, 82, 0.2)');
+                    if (trace) traces.push(trace);
+                });
+            }
+
+            return traces;
+        }
+
+        function buildDefaultTargetTrace() {
+            return {
+                x: [],
+                y: [],
+                mode: 'markers+text',
+                text: [],
+                textposition: 'top center',
+                marker: {
+                    size: 11,
+                    color: '#1bd2dc',
+                    line: { color: '#dcfaff', width: 1.2 }
+                },
+                textfont: { color: '#bde8ef', size: 10, family: 'DM Sans, sans-serif' },
+                type: 'scatter'
+            };
+        }
+
+        function buildDefaultHistoryTrace() {
+            return {
+                x: [],
+                y: [],
+                mode: 'lines',
+                line: { color: '#2e93bc', width: 1.6 },
+                opacity: 0.2,
+                type: 'scatter'
+            };
+        }
+
+        function getTargetTraceIndices(chartDiv) {
+            const traceCount = chartDiv && Array.isArray(chartDiv.data) ? chartDiv.data.length : 0;
+            if (traceCount >= 2) return [traceCount - 2, traceCount - 1];
+            return [0, 1];
+        }
+
+        function cloneTrace(trace, fallbackFactory) {
+            if (trace) return JSON.parse(JSON.stringify(trace));
+            return typeof fallbackFactory === 'function' ? fallbackFactory() : null;
+        }
+
+        function getCurrentTargetHistoryTraces() {
+            const chartDiv = document.getElementById('chart');
+            if (!chartDiv || !Array.isArray(chartDiv.data) || chartDiv.data.length === 0) {
+                return [buildDefaultTargetTrace(), buildDefaultHistoryTrace()];
+            }
+            const [targetIndex, historyIndex] = getTargetTraceIndices(chartDiv);
+            return [
+                cloneTrace(chartDiv.data[targetIndex], buildDefaultTargetTrace),
+                cloneTrace(chartDiv.data[historyIndex], buildDefaultHistoryTrace)
+            ];
+        }
+
+        function buildChartDataForCurrentMode() {
+            const [targetTrace, historyTrace] = getCurrentTargetHistoryTraces();
+            if (isEditingZone) {
+                return [...getEditModePassiveTraces(), targetTrace, historyTrace];
+            }
+            return [targetTrace, historyTrace];
+        }
+
+        function renderChartForCurrentMode() {
+            layout.shapes = getChartShapes();
+            layout.annotations = getChartAnnotations();
+            Plotly.react('chart', buildChartDataForCurrentMode(), layout, chartConfig);
         }
 
         function buildVerticalBandShapes() {
@@ -3388,7 +4793,9 @@
         }
 
         function getChartShapes() {
-            let shapes = getRadarRings(); 
+            // In edit mode, keep Plotly shapes limited to the active zone so static radar
+            // chrome and passive zones can be rendered as non-draggable traces instead.
+            let shapes = isEditingZone ? [] : getRadarRings();
             let activeDraftShape = null;
 
             // Helper to decide opacity
@@ -3608,6 +5015,8 @@
 
         socket.on('schema_model', function(schema) {
             schemaModel = schema || null;
+            updateBasicControlSupportFromSchema(schemaModel);
+            updateDeviceSelectState();
             renderAllSchemaFields();
         });
 
@@ -3632,6 +5041,83 @@
                     setTargetReportingState(enabled, payload.value);
                     if (window.SwitchStudioState) {
                         window.SwitchStudioState.showToast('saved', enabled ? 'Target reporting enabled' : 'Target reporting disabled', 1500);
+                    }
+                }
+            }
+
+            if (result.action === 'set_basic_control') {
+                const requestId = result.request_id || null;
+                const previousState = requestId ? basicControlPending.get(requestId) : null;
+                if (requestId) basicControlPending.delete(requestId);
+
+                if (result.topic && deviceSelect && deviceSelect.value && result.topic !== deviceSelect.value) {
+                    return;
+                }
+
+                if (result.status === 'error') {
+                    if (previousState) {
+                        basicControlLastKnown.state = previousState.state;
+                        basicControlLastKnown.brightness = previousState.brightness;
+                        applyBasicControlUiState();
+                    }
+                    if (window.SwitchStudioState) {
+                        window.SwitchStudioState.setPacketStatus('error', result.message ? `Error: ${result.message}` : 'Quick control update failed');
+                        window.SwitchStudioState.showToast('error', result.message || 'Quick control update failed', 2200);
+                    } else {
+                        packetInfo.innerText = result.message ? `Error: ${result.message}` : 'Quick control update failed';
+                    }
+                } else if (result.status === 'sent') {
+                    const payload = result.payload || {};
+                    if (Object.prototype.hasOwnProperty.call(payload, 'state')) {
+                        const parsedState = parseBasicStateValue(payload.state);
+                        if (parsedState !== null) basicControlLastKnown.state = parsedState;
+                    }
+                    if (Object.prototype.hasOwnProperty.call(payload, 'brightness')) {
+                        const parsedBrightness = clampBrightnessRaw(payload.brightness);
+                        if (parsedBrightness !== null) basicControlLastKnown.brightness = parsedBrightness;
+                    }
+                    applyBasicControlUiState();
+                    if (window.SwitchStudioState) {
+                        window.SwitchStudioState.showToast('saved', 'Quick control updated', 1300);
+                    }
+                }
+            }
+
+            if (result.action === 'check_firmware_update') {
+                if (result.status === 'error') {
+                    applyFirmwareStateUpdate({
+                        state: 'error',
+                        last_error: result.message || 'Firmware check failed',
+                        bridge_status: 'error'
+                    });
+                } else if (result.status === 'sent') {
+                    applyFirmwareStateUpdate({
+                        state: 'checking',
+                        last_error: null,
+                        bridge_status: 'pending'
+                    });
+                    if (window.SwitchStudioState) {
+                        window.SwitchStudioState.showToast('syncing', 'Checking for firmware updates...', 1500);
+                    }
+                }
+            }
+
+            if (result.action === 'start_firmware_update') {
+                if (result.status === 'error') {
+                    applyFirmwareStateUpdate({
+                        state: 'error',
+                        last_error: result.message || 'Firmware update request failed',
+                        bridge_status: 'error'
+                    });
+                } else if (result.status === 'sent') {
+                    applyFirmwareStateUpdate({
+                        state: 'requested',
+                        last_error: null,
+                        bridge_status: 'pending',
+                        progress: 0
+                    });
+                    if (window.SwitchStudioState) {
+                        window.SwitchStudioState.showToast('syncing', 'Firmware update requested', 1500);
                     }
                 }
             }
@@ -3664,6 +5150,8 @@
 
         deviceSelect.addEventListener('change', function() {
             updateDeviceSelectState();
+            resetBasicControlsForDeviceChange();
+            resetFirmwareStateForDeviceChange();
             socket.emit('change_device', this.value);
             
             // FIRE A FORCE SYNC TO PREVENT STALE DATA ON LOAD
@@ -3674,6 +5162,9 @@
                 window.SwitchStudioState.setPacketStatus('info', 'Awaiting data...');
             } else {
                 packetInfo.innerText = "Awaiting data...";
+            }
+            if (window.SwitchStudioLoadDimming && typeof window.SwitchStudioLoadDimming.resetForDeviceChange === 'function') {
+                window.SwitchStudioLoadDimming.resetForDeviceChange();
             }
             timestampSpan.innerText = "--:--:--";
             packetAgeSpan.innerText = "";
@@ -3709,6 +5200,25 @@
             Plotly.update('chart', {x: [[]], y: [[]], text: [[]]}, {shapes: getChartShapes(), annotations: []}); // Clear annotations on switch
             dataTableBody.innerHTML = '<tr><td colspan="5" class="no-data">No targets detected</td></tr>';
             nonMmwaveWarning.style.display = 'none'; 
+        });
+
+        socket.on('device_snapshot', function(msg) {
+            if (!msg || !msg.topic || !msg.payload) return;
+            if (msg.topic !== deviceSelect.value) return;
+
+            const snapshotConfig = msg.payload.last_config;
+            if (snapshotConfig && typeof snapshotConfig === 'object') {
+                syncBasicControlsFromConfig(snapshotConfig);
+            }
+            if (msg.payload.ota_status && typeof msg.payload.ota_status === 'object') {
+                applyFirmwareStateUpdate(msg.payload.ota_status, { reset: true });
+            }
+        });
+
+        socket.on('firmware_status', function(msg) {
+            if (!msg || !msg.topic || !msg.payload) return;
+            if (msg.topic !== deviceSelect.value) return;
+            applyFirmwareStateUpdate(msg.payload);
         });
 
         // Helper: Convert Z2M area object to internal format and handle zeroed-out zones
@@ -3751,6 +5261,9 @@
             
             // FILTER: IGNORE DATA FROM OTHER DEVICES
             if (msg.topic !== deviceSelect.value) return;
+
+            syncBasicControlsFromConfig(config);
+            applyFirmwareStateUpdate(config);
 
             updateTimestamp(); 
 
@@ -3922,28 +5435,8 @@
         };
 
         Plotly.newPlot('chart', [
-            {
-                x: [],
-                y: [],
-                mode: 'markers+text',
-                text: [],
-                textposition: 'top center',
-                marker: {
-                    size: 11,
-                    color: '#1bd2dc',
-                    line: { color: '#dcfaff', width: 1.2 }
-                },
-                textfont: { color: '#bde8ef', size: 10, family: 'DM Sans, sans-serif' },
-                type: 'scatter'
-            },
-            {
-                x: [],
-                y: [],
-                mode: 'lines',
-                line: { color: '#2e93bc', width: 1.6 },
-                opacity: 0.2,
-                type: 'scatter'
-            }
+            buildDefaultTargetTrace(),
+            buildDefaultHistoryTrace()
         ], layout, chartConfig);
 
         if (window.SwitchStudioZones && typeof window.SwitchStudioZones.init === 'function') {
@@ -4116,12 +5609,13 @@
                 // IMPORTANT: If user is interacting (dragging), we SKIP updates entirely to prevent glitching
                 if (isInteracting) return; 
 
+                const [targetTraceIndex, historyTraceIndex] = getTargetTraceIndices(document.getElementById('chart'));
                 Plotly.restyle('chart', {
                     x: [data.targets.map(t => t.x), historyX],
                     y: [data.targets.map(t => t.y), historyY],
                     text: [data.targets.map(t => `ID: ${t.id} [Z:${t.z}cm]`), null],
                     'marker.size': [sizes, null]
-                }, [0, 1]); // Update Trace 0 and 1
+                }, [targetTraceIndex, historyTraceIndex]);
             } else {
                 // Normal update
                 Plotly.react('chart', [
@@ -4200,9 +5694,29 @@
 
             // Enable drag in Plotly
             chartConfig.edits.shapePosition = true;
-            layout.shapes = getChartShapes();
-            layout.annotations = getChartAnnotations(); // Refresh annotations
-            Plotly.react('chart', document.getElementById('chart').data, layout, chartConfig);
+            renderChartForCurrentMode();
+        }
+
+        function getMovedShapeIndex(eventData) {
+            if (!eventData || typeof eventData !== 'object') return null;
+            const shapeKey = Object.keys(eventData).find((key) => /^shapes\[\d+\]\./.test(key));
+            if (!shapeKey) return null;
+            const match = shapeKey.match(/^shapes\[(\d+)\]\./);
+            return match ? parseInt(match[1], 10) : null;
+        }
+
+        function getActiveEditableShapeInfo() {
+            const chart = document.getElementById('chart');
+            const shapes = chart && chart.layout && Array.isArray(chart.layout.shapes)
+                ? chart.layout.shapes
+                : [];
+            const index = shapes.findIndex((shape) => shape && shape.editable === true);
+            if (index < 0) return null;
+            return { index, shape: shapes[index] };
+        }
+
+        function resetZoneEditShapes() {
+            renderChartForCurrentMode();
         }
 
         // Capture Plotly Drag Events
@@ -4211,11 +5725,20 @@
 
             // Check if the event is a shape modification
             if (Object.keys(eventData).some(k => k.includes('shapes['))) {
-                
-                // Find the shape that is actively being edited (has dotted line)
-                const shapes = document.getElementById('chart').layout.shapes;
-                const activeShape = shapes.find(s => s.editable === true);
+                const movedShapeIndex = getMovedShapeIndex(eventData);
+                const activeShapeInfo = getActiveEditableShapeInfo();
 
+                if (!activeShapeInfo) {
+                    resetZoneEditShapes();
+                    return;
+                }
+
+                if (movedShapeIndex !== null && movedShapeIndex !== activeShapeInfo.index) {
+                    resetZoneEditShapes();
+                    return;
+                }
+
+                const activeShape = activeShapeInfo.shape;
                 if (activeShape) {
                     // Update only X/Y from drag, preserve Z
                     const rawDraft = {
@@ -4259,8 +5782,7 @@
             updateDraftCoordsText();
 
             // Force Plotly update with new shapes based on manual input
-            layout.shapes = getChartShapes();
-            Plotly.react('chart', document.getElementById('chart').data, layout, chartConfig);
+            renderChartForCurrentMode();
         }
         
         function updateDraftCoordsText() {
@@ -4372,9 +5894,7 @@
             // Reset chart editability
             chartConfig.edits.shapePosition = false;
             
-            layout.shapes = getChartShapes();
-            layout.annotations = getChartAnnotations(); // Reset annotations
-            Plotly.react('chart', document.getElementById('chart').data, layout, chartConfig);
+            renderChartForCurrentMode();
         }
     </script>
 </body>

@@ -306,6 +306,12 @@
         return lastCommandId;
     }
 
+    function getTargetTraceIndices() {
+        const traceCount = chartEl && Array.isArray(chartEl.data) ? chartEl.data.length : 0;
+        if (traceCount >= 2) return [traceCount - 2, traceCount - 1];
+        return [0, 1];
+    }
+
     function resetHistory() {
         targetHistory = {};
         targetsSuppressedByGate = false;
@@ -320,8 +326,9 @@
 
         if (chartEl && window.Plotly) {
             try {
-                window.Plotly.restyle(chartEl, { x: [[]], y: [[]], text: [[]] }, [0]);
-                window.Plotly.restyle(chartEl, { x: [[]], y: [[]] }, [1]);
+                const [targetTraceIndex, historyTraceIndex] = getTargetTraceIndices();
+                window.Plotly.restyle(chartEl, { x: [[]], y: [[]], text: [[]] }, [targetTraceIndex]);
+                window.Plotly.restyle(chartEl, { x: [[]], y: [[]] }, [historyTraceIndex]);
             } catch (err) {
                 // Ignore render failures during transient chart states.
             }
@@ -410,12 +417,13 @@
 
         if (isEditing) {
             if (isInteracting) return true;
+            const [targetTraceIndex, historyTraceIndex] = getTargetTraceIndices();
             window.Plotly.restyle(chartEl, {
                 x: [data.targets.map((t) => t.x), historyX],
                 y: [data.targets.map((t) => t.y), historyY],
                 text: [data.targets.map((t) => `${getFriendlyTargetLabel(t.id)}<br>${getMotionLabelFromDoppler(t.dop)}`), null],
                 'marker.size': [sizes, null]
-            }, [0, 1]);
+            }, [targetTraceIndex, historyTraceIndex]);
         } else {
             const layout = typeof getLayoutFn === 'function' ? getLayoutFn() : undefined;
             window.Plotly.react(chartEl, [
