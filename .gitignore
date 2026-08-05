@@ -1,3 +1,5 @@
 reference_resources/
+agent_mental_model.md
+.codex/
 __pycache__/
 *.pyc

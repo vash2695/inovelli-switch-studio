@@ -1,6 +1,8 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Inovelli Switch Studio</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
@@ -130,7 +132,18 @@
             z-index: 10;
             gap: 14px;
         }
-        .header-brand { display: flex; align-items: center; gap: 8px; min-width: 0; }
+        .header-brand {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
+            border: 0;
+            background: transparent;
+            color: inherit;
+            padding: 0;
+            cursor: pointer;
+            font: inherit;
+        }
         .header-logo { height: 18px; width: auto; object-fit: contain; }
         .header-wordmark { height: 15px; width: auto; object-fit: contain; display: block; opacity: 0.98; }
         .studio-title { color: var(--text-primary); margin: 0; white-space: nowrap; letter-spacing: -0.01em; font-size: 0.92rem; font-weight: 600; }
@@ -402,6 +415,14 @@
             width: min(372px, calc(100vw - 24px));
             margin-top: 0;
             z-index: 60;
+        }
+        .dirty-bar.dirty-sending {
+            border-color: var(--accent);
+            color: #bdf8f1;
+        }
+        .dirty-bar.dirty-unconfirmed {
+            border-color: var(--warning);
+            color: #ffe5a8;
         }
         .app-container.focus-config .dirty-bar.dirty-active {
             left: 50%;
@@ -1348,6 +1369,280 @@
             accent-color: var(--accent);
         }
 
+        .dashboard-view,
+        .app-container,
+        .tab-bar {
+            min-width: 0;
+        }
+        .dashboard-view[hidden],
+        .app-container[hidden],
+        .tab-bar[hidden] {
+            display: none !important;
+        }
+        .dashboard-view {
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow-y: auto;
+            padding: clamp(18px, 3vw, 34px);
+            background:
+                radial-gradient(circle at 82% 0%, rgba(13, 212, 192, 0.1), transparent 34%),
+                transparent;
+        }
+        .dashboard-inner {
+            width: min(1180px, 100%);
+            margin: 0 auto;
+        }
+        .dashboard-hero {
+            display: flex;
+            align-items: flex-end;
+            justify-content: space-between;
+            gap: 18px;
+            margin-bottom: 22px;
+        }
+        .dashboard-eyebrow {
+            margin: 0 0 5px;
+            color: var(--accent);
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+        .dashboard-title {
+            margin: 0;
+            color: #f5f7fb;
+            font-size: clamp(1.55rem, 3vw, 2.35rem);
+            line-height: 1.08;
+            letter-spacing: -0.035em;
+        }
+        .dashboard-description {
+            max-width: 620px;
+            margin: 9px 0 0;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            line-height: 1.55;
+        }
+        .dashboard-summary {
+            flex: 0 0 auto;
+            color: var(--text-secondary);
+            border: 1px solid var(--border-subtle);
+            border-radius: 999px;
+            background: rgba(24, 29, 41, 0.78);
+            padding: 7px 11px;
+            font-size: 0.76rem;
+        }
+        .device-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 14px;
+            align-items: stretch;
+        }
+        .dashboard-empty {
+            padding: 42px 18px;
+            border: 1px dashed var(--border-strong);
+            border-radius: var(--radius-lg);
+            color: var(--text-secondary);
+            text-align: center;
+            background: rgba(19, 23, 34, 0.65);
+        }
+        .device-card {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            min-width: 0;
+            padding: 17px;
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            background:
+                linear-gradient(145deg, rgba(27, 32, 45, 0.98), rgba(20, 24, 34, 0.98));
+            box-shadow: 0 14px 30px rgba(0, 0, 0, 0.23);
+            transition: border-color var(--anim-fast), transform var(--anim-fast), box-shadow var(--anim-fast);
+        }
+        .device-card:hover {
+            border-color: rgba(13, 212, 192, 0.42);
+            transform: translateY(-1px);
+            box-shadow: 0 17px 34px rgba(0, 0, 0, 0.28);
+        }
+        .device-card.is-on {
+            border-color: rgba(13, 212, 192, 0.48);
+            background:
+                radial-gradient(circle at 100% 0%, rgba(13, 212, 192, 0.11), transparent 40%),
+                linear-gradient(145deg, rgba(27, 34, 46, 0.99), rgba(20, 26, 36, 0.99));
+        }
+        .device-card.is-offline {
+            opacity: 0.68;
+        }
+        .device-card-header,
+        .device-card-footer,
+        .device-card-brightness-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
+        .device-card-identity {
+            min-width: 0;
+        }
+        .device-card-model {
+            color: var(--accent);
+            font-size: 0.66rem;
+            font-weight: 700;
+            letter-spacing: 0.07em;
+            text-transform: uppercase;
+        }
+        .device-card-name {
+            overflow: hidden;
+            margin: 3px 0 0;
+            color: #f4f6fb;
+            font-size: 1rem;
+            font-weight: 650;
+            line-height: 1.25;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .device-card-status {
+            flex: 0 0 auto;
+            border: 1px solid var(--border-strong);
+            border-radius: 999px;
+            padding: 4px 7px;
+            color: var(--text-secondary);
+            font-size: 0.65rem;
+            font-weight: 600;
+        }
+        .device-card-status.is-online {
+            border-color: rgba(52, 211, 153, 0.42);
+            color: #93f3cd;
+            background: rgba(52, 211, 153, 0.08);
+        }
+        .device-card-status.is-offline {
+            border-color: rgba(255, 111, 111, 0.35);
+            color: #ffc1c1;
+        }
+        .device-card-metrics {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 8px;
+        }
+        .device-card-metric {
+            min-width: 0;
+            padding: 9px;
+            border: 1px solid rgba(52, 57, 73, 0.78);
+            border-radius: var(--radius-md);
+            background: rgba(13, 17, 26, 0.48);
+        }
+        .device-card-metric-label,
+        .device-card-control-label {
+            display: block;
+            color: var(--text-muted);
+            font-size: 0.62rem;
+            font-weight: 700;
+            letter-spacing: 0.055em;
+            text-transform: uppercase;
+        }
+        .device-card-metric-value {
+            display: block;
+            overflow: hidden;
+            margin-top: 3px;
+            color: var(--text-primary);
+            font-size: 0.77rem;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .device-card-controls {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr);
+            gap: 16px;
+            align-items: end;
+        }
+        .device-card-power,
+        .device-card-brightness {
+            display: flex;
+            flex-direction: column;
+            gap: 7px;
+            min-width: 0;
+        }
+        .device-card-power-toggle {
+            appearance: none;
+            width: 46px;
+            height: 26px;
+            margin: 0;
+            border: 1px solid var(--border-strong);
+            border-radius: 999px;
+            background: #2b303d;
+            cursor: pointer;
+            position: relative;
+            transition: background var(--anim-fast), border-color var(--anim-fast);
+        }
+        .device-card-power-toggle::before {
+            content: '';
+            position: absolute;
+            width: 18px;
+            height: 18px;
+            top: 3px;
+            left: 3px;
+            border-radius: 50%;
+            background: #e4e8f0;
+            transition: transform var(--anim-fast);
+        }
+        .device-card-power-toggle:checked {
+            border-color: var(--accent);
+            background: var(--accent);
+        }
+        .device-card-power-toggle:checked::before {
+            transform: translateX(20px);
+            background: #08211f;
+        }
+        .device-card-power-toggle:disabled,
+        .device-card-brightness-slider:disabled {
+            cursor: not-allowed;
+            opacity: 0.48;
+        }
+        .device-card-brightness-value {
+            color: var(--text-primary);
+            font-size: 0.75rem;
+        }
+        .device-card-brightness-slider {
+            width: 100%;
+            min-height: 26px;
+            margin: 0;
+            accent-color: var(--accent);
+            cursor: pointer;
+        }
+        .device-card-footer {
+            min-height: 34px;
+            margin-top: auto;
+        }
+        .device-card-feedback {
+            color: var(--text-muted);
+            font-size: 0.66rem;
+        }
+        .device-card-feedback.sending {
+            color: #8ceee4;
+        }
+        .device-card-feedback.not-confirmed,
+        .device-card-feedback.error {
+            color: #ffd27c;
+        }
+        .device-card-feedback.confirmed {
+            color: #8debc3;
+        }
+        .device-card-open {
+            min-height: 38px;
+            border: 1px solid rgba(13, 212, 192, 0.5);
+            border-radius: var(--radius-sm);
+            background: rgba(13, 212, 192, 0.1);
+            color: #c9fffa;
+            padding: 7px 11px;
+            font: inherit;
+            font-size: 0.72rem;
+            font-weight: 650;
+            cursor: pointer;
+        }
+        .device-card-open:hover,
+        .device-card-open:focus-visible {
+            border-color: var(--accent);
+            background: rgba(13, 212, 192, 0.18);
+        }
+
         @media (prefers-reduced-motion: reduce) {
             *,
             *::before,
@@ -1745,18 +2040,59 @@
                 padding: 8px 8px 0;
             }
         }
+
+        @media (max-width: 900px) {
+            body.dashboard-active {
+                height: 100dvh;
+                overflow: hidden;
+            }
+            body.dashboard-active .header-brand {
+                display: flex;
+            }
+            body.dashboard-active .studio-title,
+            body.dashboard-active .header-wordmark {
+                display: none;
+            }
+            .dashboard-view {
+                padding: 18px 12px calc(24px + env(safe-area-inset-bottom, 0px));
+            }
+            .dashboard-hero {
+                align-items: flex-start;
+                flex-direction: column;
+                margin-bottom: 17px;
+            }
+            .dashboard-summary {
+                align-self: flex-start;
+            }
+        }
+
+        @media (max-width: 640px) {
+            .device-grid {
+                grid-template-columns: minmax(0, 1fr);
+            }
+            .device-card {
+                padding: 15px;
+            }
+            .device-card-controls {
+                grid-template-columns: 58px minmax(0, 1fr);
+                gap: 13px;
+            }
+            .device-card-open {
+                min-height: 44px;
+            }
+        }
     </style>
 </head>
 <body>
     <div class="header">
-        <div class="header-brand">
+        <button class="header-brand" id="btnDashboardHome" type="button" aria-label="Show all devices">
             <img class="header-logo" src="{{ ingress_path }}/static/logo.png" alt="Switch Studio icon">
             <img class="header-wordmark" src="{{ ingress_path }}/static/brand_name.svg" alt="Inovelli">
             <h2 class="studio-title">Switch Studio</h2>
-        </div>
+        </button>
         <div class="header-controls">
             <div class="header-device-wrap">
-                <select id="deviceSelect"><option value="" disabled selected>Loading devices...</option></select>
+                <select id="deviceSelect" aria-label="Select a device"><option value="" selected>All Devices</option></select>
             </div>
             <div class="header-quick-controls" id="headerQuickControls" hidden>
                 <div class="quick-control-group quick-power-group" id="quickPowerGroup">
@@ -1780,7 +2116,24 @@
         </div>
     </div>
 
-    <div class="tab-bar" id="tabBar" role="tablist" aria-label="Inovelli Switch Studio tabs">
+    <main class="dashboard-view" id="dashboardView">
+        <div class="dashboard-inner">
+            <div class="dashboard-hero">
+                <div>
+                    <p class="dashboard-eyebrow">Inovelli Blue Series</p>
+                    <h1 class="dashboard-title">Your switches, at a glance</h1>
+                    <p class="dashboard-description">Control power and brightness immediately, or open a switch for presence zones and detailed configuration.</p>
+                </div>
+                <span class="dashboard-summary" id="dashboardSummary" aria-live="polite">Discovering devices…</span>
+            </div>
+            <div class="device-grid" id="deviceGrid"></div>
+            <div class="dashboard-empty" id="dashboardEmpty">
+                Waiting for VZM32-SN devices from Zigbee2MQTT. Newly discovered switches will appear automatically.
+            </div>
+        </div>
+    </main>
+
+    <div class="tab-bar" id="tabBar" role="tablist" aria-label="Inovelli Switch Studio tabs" hidden>
         <button class="tab-btn" type="button" data-tab-target="zones" role="tab" aria-selected="true">Presence & Zones</button>
         <button class="tab-btn" type="button" data-tab-target="load" role="tab" aria-selected="false">Load & Dimming</button>
         <button class="tab-btn" type="button" data-tab-target="led" role="tab" aria-selected="false">LED & Notifications</button>
@@ -1790,13 +2143,13 @@
     </div>
 
     <div id="zoneStatus"></div>
-    <div id="toastContainer"></div>
+    <div id="toastContainer" role="status" aria-live="polite" aria-atomic="true"></div>
 
-    <div class="app-container focus-zones" id="appContainer">
+    <div class="app-container focus-zones" id="appContainer" hidden>
         <div class="main-content">
             <div id="nonMmwaveWarning" data-tab-panels="zones,load,led,buttons,power,advanced">WARNING: Standard Switch Detected<br><span style="font-size: 0.8em; font-weight: normal;">This device does not have mmWave hardware.</span></div>
 
-            <div class="zones-live-strip" data-tab-panels="zones">
+            <div class="zones-live-strip" data-tab-panels="zones" data-tab-panel-primary>
                 <div class="zones-live-status">
                     <span class="zones-meta-item zones-status-item"><span id="packetInfo">Awaiting data...</span></span>
                     <span class="zones-meta-item zones-status-item zones-last-packet">Last packet: <span id="timestamp">--:--:--</span> <span id="packetAge"></span></span>
@@ -1811,7 +2164,7 @@
                 </div>
             </div>
             
-            <section id="chartContainer" data-tab-panels="zones">
+            <section id="chartContainer" data-tab-panels="zones" data-tab-panel-primary>
                 <div class="chart-panel-title">Live Radar Map</div>
                 <div class="config-content">
                     <div class="chart-canvas-wrap">
@@ -1820,7 +2173,7 @@
                 </div>
             </section>
 
-            <section class="panel-section zone-status-inline" id="zoneStatusSection" data-tab-panels="zones">
+            <section class="panel-section zone-status-inline" id="zoneStatusSection" data-tab-panels="zones" data-tab-panel-primary>
                 <div class="panel-section-title">Zone Status</div>
                 <div class="config-content">
                     <div class="sensor-row">
@@ -1842,7 +2195,7 @@
                 </div>
             </section>
 
-            <div class="table-container" data-tab-panels="zones">
+            <div class="table-container" data-tab-panels="zones" data-tab-panel-primary>
                 <table class="target-table">
                     <thead>
                         <tr>
@@ -1904,13 +2257,13 @@
                             <div class="zone-input-group"><label>Z Max (Height)</label><input type="number" id="editZMax" onchange="manualZoneUpdate()"></div>
                         </div>
                         <div style="display:flex; gap: 5px;">
-                            <button class="cmd-btn btn-danger" style="flex:1;" onclick="cancelZoneEdit()">Cancel Editing</button>
-                            <button class="cmd-btn" style="background: #00bcd4; color: #1a1a1a; flex:1;" onclick="applyZoneEdit()">Apply Changes</button>
+                            <button class="cmd-btn btn-danger" id="btnCancelZoneEdit" style="flex:1;" onclick="cancelZoneEdit()">Cancel Editing</button>
+                            <button class="cmd-btn" id="btnApplyZoneEdit" style="background: #00bcd4; color: #1a1a1a; flex:1;" onclick="applyZoneEdit()">Apply Changes</button>
                         </div>
                     </div>
 
                     <button id="btnStartEdit" class="cmd-btn btn-full" onclick="startZoneEdit()" style="margin-top:5px; background: #00bcd4; color: #1a1a1a;">Draw / Edit Selected Zone</button>
-                    <button class="cmd-btn btn-full btn-danger" onclick="deleteZone()" style="margin-top:5px;">Delete Selected Zone</button>
+                    <button class="cmd-btn btn-full btn-danger" id="btnDeleteZone" onclick="deleteZone()" style="margin-top:5px;">Delete Selected Zone</button>
                 </div>
             </section>
             <section class="panel-section" data-tab-panels="zones">
@@ -2026,7 +2379,7 @@
             </section>
             </div>
 
-            <div class="config-tab-shell" data-tab-panels="load">
+            <div class="config-tab-shell" data-tab-panels="load" data-tab-panel-primary>
                 <section class="panel-section" data-tab-section="load-main">
                     <div class="panel-section-title">Load & Dimming</div>
                     <div class="config-content">
@@ -2038,7 +2391,7 @@
                 </section>
             </div>
 
-            <div class="config-tab-shell" data-tab-panels="led">
+            <div class="config-tab-shell" data-tab-panels="led" data-tab-panel-primary>
                 <section class="panel-section" data-tab-section="led-main">
                     <div class="panel-section-title">LED & Notifications</div>
                     <div class="config-content">
@@ -2050,7 +2403,7 @@
                 </section>
             </div>
 
-            <div class="config-tab-shell" data-tab-panels="buttons">
+            <div class="config-tab-shell" data-tab-panels="buttons" data-tab-panel-primary>
                 <section class="panel-section" data-tab-section="buttons-main">
                     <div class="panel-section-title">Buttons & Scenes</div>
                     <div class="config-content">
@@ -2062,7 +2415,7 @@
                 </section>
             </div>
 
-            <div class="config-tab-shell" data-tab-panels="power">
+            <div class="config-tab-shell" data-tab-panels="power" data-tab-panel-primary>
                 <section class="panel-section" data-tab-section="power-firmware">
                     <div class="panel-section-title">Firmware Updates</div>
                     <div class="config-content">
@@ -2128,7 +2481,7 @@
                 </section>
             </div>
 
-            <div class="config-tab-shell" data-tab-panels="advanced">
+            <div class="config-tab-shell" data-tab-panels="advanced" data-tab-panel-primary>
                 <section class="panel-section" data-tab-section="advanced-main">
                     <div class="panel-section-title">Advanced Settings</div>
                     <div class="config-content">
@@ -2167,6 +2520,8 @@
 
     <script src="{{ ingress_path }}/static/js/app_tabs.js"></script>
     <script src="{{ ingress_path }}/static/js/app_state.js"></script>
+    <script src="{{ ingress_path }}/static/js/app_devices.js"></script>
+    <script src="{{ ingress_path }}/static/js/app_firmware.js"></script>
     <script src="{{ ingress_path }}/static/js/app_load_dimming.js"></script>
     <script src="{{ ingress_path }}/static/js/app_zones.js"></script>
     <script>
@@ -2181,6 +2536,11 @@
         const dataTableBody = document.getElementById('dataTableBody');
         const tabBar = document.getElementById('tabBar');
         const appContainer = document.getElementById('appContainer');
+        const dashboardView = document.getElementById('dashboardView');
+        const deviceGrid = document.getElementById('deviceGrid');
+        const dashboardEmpty = document.getElementById('dashboardEmpty');
+        const dashboardSummary = document.getElementById('dashboardSummary');
+        const btnDashboardHome = document.getElementById('btnDashboardHome');
 
         // UI Elements
         const nonMmwaveWarning = document.getElementById('nonMmwaveWarning');
@@ -2238,9 +2598,20 @@
         const basicControlSupport = { state: false, brightness: false };
         const basicControlLastKnown = { state: null, brightness: null };
         const basicControlPending = new Map();
+        const basicControlFinished = new Set();
+        const targetReportingPending = new Map();
         let basicControlRequestCounter = 0;
         let basicControlBrightnessTimer = null;
         let suppressBasicControlEvents = false;
+        let socketTransportConnected = false;
+        let mqttTransportConnected = false;
+        let mqttInventoryReady = false;
+        let activeDeviceTopic = null;
+        let activeDeviceFriendlyName = null;
+        let serverSelectedTopic = null;
+        let controllerInitialized = false;
+        let firmwareResponseTimer = null;
+        const FIRMWARE_RESPONSE_TIMEOUT_MS = 60000;
         let firmwareStateModel = {
             available: null,
             downgrade: null,
@@ -2282,6 +2653,9 @@
         let isEditingZone = false;
         let editingTarget = null;
         let draftZoneConfig = null;
+        let zoneEditRequestId = null;
+        let zoneDeleteRequestId = null;
+        const zoneUpdatePending = new Map();
         
         const zoneEditorSelect = document.getElementById('zoneEditorSelect');
         const zoneEditorRawData = document.getElementById('zoneEditorRawData');
@@ -2294,6 +2668,9 @@
         const editYMax = document.getElementById('editYMax');
         const editZMin = document.getElementById('editZMin');
         const editZMax = document.getElementById('editZMax');
+        const btnCancelZoneEdit = document.getElementById('btnCancelZoneEdit');
+        const btnApplyZoneEdit = document.getElementById('btnApplyZoneEdit');
+        const btnDeleteZone = document.getElementById('btnDeleteZone');
         const schemaPresenceControlsFields = document.getElementById('schemaPresenceControlsFields');
         const schemaPresenceConfigFields = document.getElementById('schemaPresenceConfigFields');
         const schemaLoadFields = document.getElementById('schemaLoadFields');
@@ -2306,6 +2683,7 @@
         let schemaModel = null;
         let schemaFieldMap = {};
         let schemaCompositeMap = {};
+        let schemaBindingUnsubscribers = [];
         let zoneModule = null;
 
         function parsePanelTargets(raw) {
@@ -2391,42 +2769,44 @@
             };
         }
 
-        function normalizeFirmwareStatePayload(payload) {
-            if (!payload || typeof payload !== 'object') return null;
-
-            const next = {};
-            if (Object.prototype.hasOwnProperty.call(payload, 'available')) next.available = payload.available;
-            if (Object.prototype.hasOwnProperty.call(payload, 'update_available')) next.available = payload.update_available;
-            if (Object.prototype.hasOwnProperty.call(payload, 'downgrade')) next.downgrade = payload.downgrade;
-            if (Object.prototype.hasOwnProperty.call(payload, 'installed_version')) next.installed_version = payload.installed_version;
-            if (Object.prototype.hasOwnProperty.call(payload, 'installed_version_detail')) next.installed_version_detail = payload.installed_version_detail;
-            if (Object.prototype.hasOwnProperty.call(payload, 'latest_version')) next.latest_version = payload.latest_version;
-            if (Object.prototype.hasOwnProperty.call(payload, 'latest_version_detail')) next.latest_version_detail = payload.latest_version_detail;
-            if (Object.prototype.hasOwnProperty.call(payload, 'official_versions')) next.official_versions = payload.official_versions;
-            if (Object.prototype.hasOwnProperty.call(payload, 'state')) next.state = payload.state;
-            if (Object.prototype.hasOwnProperty.call(payload, 'progress')) next.progress = payload.progress;
-            if (Object.prototype.hasOwnProperty.call(payload, 'remaining')) next.remaining = payload.remaining;
-            if (Object.prototype.hasOwnProperty.call(payload, 'last_checked')) next.last_checked = payload.last_checked;
-            if (Object.prototype.hasOwnProperty.call(payload, 'last_error')) next.last_error = payload.last_error;
-            if (Object.prototype.hasOwnProperty.call(payload, 'bridge_status')) next.bridge_status = payload.bridge_status;
-
-            if (payload.update && typeof payload.update === 'object') {
-                const update = payload.update;
-                if (Object.prototype.hasOwnProperty.call(update, 'installed_version')) next.installed_version = update.installed_version;
-                if (Object.prototype.hasOwnProperty.call(update, 'latest_version')) next.latest_version = update.latest_version;
-                if (Object.prototype.hasOwnProperty.call(update, 'installed_version_detail')) next.installed_version_detail = update.installed_version_detail;
-                if (Object.prototype.hasOwnProperty.call(update, 'latest_version_detail')) next.latest_version_detail = update.latest_version_detail;
-                if (Object.prototype.hasOwnProperty.call(update, 'downgrade')) next.downgrade = update.downgrade;
-                if (Object.prototype.hasOwnProperty.call(update, 'state')) next.state = update.state;
-                if (Object.prototype.hasOwnProperty.call(update, 'progress')) next.progress = update.progress;
-                if (Object.prototype.hasOwnProperty.call(update, 'remaining')) next.remaining = update.remaining;
+        function normalizeFirmwareStatePayload(payload, options) {
+            if (window.SwitchStudioFirmware && typeof window.SwitchStudioFirmware.normalize === 'function') {
+                return window.SwitchStudioFirmware.normalize(payload, options);
             }
+            return null;
+        }
 
-            return next;
+        function clearFirmwareResponseTimer() {
+            if (firmwareResponseTimer === null) return;
+            clearTimeout(firmwareResponseTimer);
+            firmwareResponseTimer = null;
+        }
+
+        function armFirmwareResponseTimer(action) {
+            clearFirmwareResponseTimer();
+            const requestTopic = activeDeviceTopic;
+            const waitingState = action === 'check' ? 'checking' : 'requested';
+            firmwareResponseTimer = setTimeout(() => {
+                firmwareResponseTimer = null;
+                if (!requestTopic || requestTopic !== activeDeviceTopic) return;
+                if (String(firmwareStateModel.state || '').toLowerCase() !== waitingState) return;
+                const message = action === 'check'
+                    ? 'Zigbee2MQTT did not return a firmware check result. Try again after confirming the device is online.'
+                    : 'Zigbee2MQTT did not confirm that the firmware update started. Check the device before retrying.';
+                applyFirmwareStateUpdate({
+                    state: 'error',
+                    last_error: message,
+                    bridge_status: 'timeout'
+                });
+                if (window.SwitchStudioState) {
+                    window.SwitchStudioState.setPacketStatus('error', message);
+                    window.SwitchStudioState.showToast('error', message, 4200);
+                }
+            }, FIRMWARE_RESPONSE_TIMEOUT_MS);
         }
 
         function applyFirmwareStateUpdate(payload, options) {
-            const normalized = normalizeFirmwareStatePayload(payload);
+            const normalized = normalizeFirmwareStatePayload(payload, options);
             const opts = options || {};
             if (opts.reset === true) {
                 firmwareStateModel = getDefaultFirmwareState();
@@ -2437,10 +2817,27 @@
                     ...normalized
                 };
             }
+            const stateValue = String(firmwareStateModel.state || '').toLowerCase();
+            const bridgeStatus = String(firmwareStateModel.bridge_status || '').toLowerCase();
+            if (
+                firmwareResponseTimer !== null &&
+                (
+                    !['checking', 'requested'].includes(stateValue) ||
+                    !!firmwareStateModel.last_error ||
+                    (bridgeStatus && bridgeStatus !== 'pending')
+                )
+            ) {
+                clearFirmwareResponseTimer();
+            }
+            if (opts.trackPendingResponse === true && firmwareResponseTimer === null) {
+                if (stateValue === 'checking') armFirmwareResponseTimer('check');
+                else if (stateValue === 'requested') armFirmwareResponseTimer('update');
+            }
             renderFirmwarePanel();
         }
 
         function resetFirmwareStateForDeviceChange() {
+            clearFirmwareResponseTimer();
             firmwareStateModel = getDefaultFirmwareState();
             renderFirmwarePanel();
         }
@@ -2614,6 +3011,7 @@
 
         function renderFirmwarePanel() {
             const hasSelection = !!(deviceSelect && deviceSelect.value);
+            const commandReady = hasSelection && isActiveDeviceCommandReady();
             const stateValue = String(firmwareStateModel.state || '').toLowerCase();
             const inProgress = stateValue === 'checking' || stateValue === 'requested' || stateValue === 'updating';
             const progressValue = Number(firmwareStateModel.progress);
@@ -2626,7 +3024,7 @@
             const installedVersionLabel = describeFirmwareVersion(installedDetail, firmwareStateModel.installed_version);
             const latestVersionLabel = describeFirmwareVersion(latestDetail, firmwareStateModel.latest_version);
             const installedOfficialMatchSummary = getInstalledOfficialMatchSummary(installedDetail);
-            const canInstall = hasSelection && !inProgress && (
+            const canInstall = commandReady && !inProgress && (
                 firmwareStateModel.downgrade === true
                 || (firmwareStateModel.available === true && versionComparison !== 1)
             );
@@ -2652,7 +3050,9 @@
             if (firmwareStatusMessage) {
                 firmwareStatusMessage.classList.remove('status-error', 'status-ready');
                 let message = 'Select a device, then check for updates.';
-                if (hasSelection) {
+                if (hasSelection && !commandReady) {
+                    message = 'Cached firmware information is available, but this device is offline or reconnecting.';
+                } else if (hasSelection) {
                     if (firmwareStateModel.last_error) {
                         message = firmwareStateModel.last_error;
                         firmwareStatusMessage.classList.add('status-error');
@@ -2692,17 +3092,25 @@
                 firmwareStatusMessage.innerText = message;
             }
 
-            if (btnFirmwareCheck) btnFirmwareCheck.disabled = !hasSelection || inProgress;
+            if (btnFirmwareCheck) btnFirmwareCheck.disabled = !commandReady || inProgress;
             if (btnFirmwareInstall) btnFirmwareInstall.disabled = !canInstall;
         }
 
         function handleFirmwareCheckClick() {
             if (!deviceSelect || !deviceSelect.value) return;
+            if (!isActiveDeviceCommandReady()) {
+                reportActiveDeviceUnavailable('Firmware checks');
+                return;
+            }
             socket.emit('check_firmware_update', { request_id: `firmware-check-${Date.now()}` });
         }
 
         function handleFirmwareInstallClick() {
             if (!deviceSelect || !deviceSelect.value) return;
+            if (!isActiveDeviceCommandReady()) {
+                reportActiveDeviceUnavailable('Firmware updates');
+                return;
+            }
             const confirmMessage = firmwareStateModel.downgrade === true
                 ? 'Zigbee2MQTT reports this catalog image as older than the currently installed firmware. Continue with the downgrade?'
                 : 'Start firmware update for the selected device? Keep the switch powered until the update completes.';
@@ -2803,11 +3211,50 @@
             applyZonesSidebarPane(activeZonesSidebarPane);
         }
 
-        function setConnectionState(isConnected) {
-            if (!connectionChip || !connectionText) return;
-            const connected = !!isConnected;
-            connectionChip.classList.toggle('offline', !connected);
-            connectionText.textContent = connected ? 'Connected' : 'Disconnected';
+        function isGlobalTransportReady() {
+            return socketTransportConnected && mqttTransportConnected && mqttInventoryReady;
+        }
+
+        function getActiveDeviceRecord() {
+            if (!activeDeviceTopic || !window.SwitchStudioDevices || typeof window.SwitchStudioDevices.getDevice !== 'function') {
+                return null;
+            }
+            return window.SwitchStudioDevices.getDevice(activeDeviceTopic);
+        }
+
+        function isActiveDeviceCommandReady() {
+            if (!isGlobalTransportReady() || !activeDeviceTopic) return false;
+            const device = getActiveDeviceRecord();
+            if (!device) return false;
+            return String(device.availability || '').trim().toLowerCase() !== 'offline';
+        }
+
+        function reportActiveDeviceUnavailable(actionLabel) {
+            const action = String(actionLabel || 'This action').trim();
+            const message = `${action} is unavailable while this device is offline or reconnecting.`;
+            if (window.SwitchStudioState) {
+                window.SwitchStudioState.setPacketStatus('error', message);
+                window.SwitchStudioState.showToast('error', message, 2600);
+            }
+        }
+
+        function setConnectionState(isSocketConnected, isMqttConnected, backendReason) {
+            socketTransportConnected = !!isSocketConnected;
+            if (isMqttConnected !== undefined && isMqttConnected !== null) {
+                mqttTransportConnected = !!isMqttConnected;
+            }
+            const connected = socketTransportConnected && mqttTransportConnected && mqttInventoryReady;
+            if (connectionChip && connectionText) {
+                connectionChip.classList.toggle('offline', !connected);
+                if (!socketTransportConnected) connectionText.textContent = 'Disconnected';
+                else if (!mqttTransportConnected) connectionText.textContent = backendReason || 'Device service reconnecting';
+                else if (!mqttInventoryReady) connectionText.textContent = 'Restoring devices…';
+                else connectionText.textContent = 'Connected';
+            }
+            if (window.SwitchStudioDevices && typeof window.SwitchStudioDevices.setTransportState === 'function') {
+                window.SwitchStudioDevices.setTransportState(socketTransportConnected, mqttTransportConnected && mqttInventoryReady);
+            }
+            updateDeviceSelectState();
         }
 
         function parseBasicStateValue(value) {
@@ -2821,6 +3268,8 @@
         }
 
         function clampBrightnessRaw(value) {
+            if (value === null || value === undefined) return null;
+            if (typeof value === 'string' && value.trim() === '') return null;
             const parsed = Number(value);
             if (!Number.isFinite(parsed)) return null;
             return Math.min(254, Math.max(0, Math.round(parsed)));
@@ -2875,8 +3324,9 @@
         function updateBasicControlVisibility() {
             if (!headerQuickControls) return;
             const hasAnyControl = basicControlSupport.state || basicControlSupport.brightness;
-            headerQuickControls.hidden = !hasAnyControl;
-            if (!hasAnyControl) return;
+            const hasSelection = !!(deviceSelect && String(deviceSelect.value || '').trim());
+            headerQuickControls.hidden = !hasAnyControl || !hasSelection;
+            if (!hasAnyControl || !hasSelection) return;
 
             if (quickPowerGroup) {
                 quickPowerGroup.style.display = basicControlSupport.state ? '' : 'none';
@@ -2908,26 +3358,58 @@
         }
 
         function emitBasicControl(payload, statusMessage, previousSnapshot) {
-            if (!payload || typeof payload !== 'object') return;
-            if (!deviceSelect || !String(deviceSelect.value || '').trim()) return;
+            if (!payload || typeof payload !== 'object') return false;
+            if (!deviceSelect || !String(deviceSelect.value || '').trim()) return false;
+            if (!isActiveDeviceCommandReady()) {
+                reportActiveDeviceUnavailable('Quick controls');
+                return false;
+            }
+
+            const commandTopic = activeDeviceTopic || String(deviceSelect.value || '').trim();
+            const nextKeys = new Set(Object.keys(payload));
+            let inheritedPreviousState = null;
+            basicControlPending.forEach((entry, pendingRequestId) => {
+                if (entry.topic !== commandTopic) return;
+                const overlaps = Object.keys(entry.expected || {}).some((key) => nextKeys.has(key));
+                if (!overlaps) return;
+                if (!inheritedPreviousState) {
+                    inheritedPreviousState = {
+                        state: entry.state,
+                        brightness: entry.brightness
+                    };
+                }
+                basicControlPending.delete(pendingRequestId);
+                basicControlFinished.add(pendingRequestId);
+            });
+            while (basicControlFinished.size > 100) {
+                basicControlFinished.delete(basicControlFinished.values().next().value);
+            }
 
             const requestId = `basic-control-${Date.now()}-${basicControlRequestCounter++}`;
             basicControlPending.set(requestId, {
-                state: previousSnapshot && Object.prototype.hasOwnProperty.call(previousSnapshot, 'state')
+                state: inheritedPreviousState
+                    ? inheritedPreviousState.state
+                    : previousSnapshot && Object.prototype.hasOwnProperty.call(previousSnapshot, 'state')
                     ? previousSnapshot.state
                     : basicControlLastKnown.state,
-                brightness: previousSnapshot && Object.prototype.hasOwnProperty.call(previousSnapshot, 'brightness')
+                brightness: inheritedPreviousState
+                    ? inheritedPreviousState.brightness
+                    : previousSnapshot && Object.prototype.hasOwnProperty.call(previousSnapshot, 'brightness')
                     ? previousSnapshot.brightness
-                    : basicControlLastKnown.brightness
+                    : basicControlLastKnown.brightness,
+                expected: { ...payload },
+                topic: commandTopic
             });
             socket.emit('set_basic_control', {
                 ...payload,
+                topic: commandTopic,
                 request_id: requestId
             });
 
             if (window.SwitchStudioState) {
                 window.SwitchStudioState.setPacketStatus('syncing', statusMessage || 'Updating quick control...');
             }
+            return true;
         }
 
         function commitBrightnessPercent(percentValue) {
@@ -2948,7 +3430,11 @@
             }
             basicControlLastKnown.brightness = rawBrightness;
             applyBasicControlUiState();
-            emitBasicControl(payload, 'Updating brightness...', previousSnapshot);
+            if (!emitBasicControl(payload, 'Updating brightness...', previousSnapshot)) {
+                basicControlLastKnown.state = previousSnapshot.state;
+                basicControlLastKnown.brightness = previousSnapshot.brightness;
+                applyBasicControlUiState();
+            }
         }
 
         function queueBrightnessCommit(percentValue) {
@@ -2989,6 +3475,7 @@
                 basicControlBrightnessTimer = null;
             }
             basicControlPending.clear();
+            basicControlFinished.clear();
             basicControlLastKnown.state = null;
             basicControlLastKnown.brightness = null;
             suppressBasicControlEvents = true;
@@ -3002,9 +3489,187 @@
         function updateDeviceSelectState() {
             if (!deviceSelect) return;
             const hasSelection = !!String(deviceSelect.value || '').trim();
-            deviceSelect.classList.toggle('device-unselected', !hasSelection);
-            deviceSelect.setAttribute('aria-label', hasSelection ? 'Select a Device' : 'Select a Device (required)');
-            setBasicControlInputsEnabled(hasSelection);
+            const needsSelection = !hasSelection && !!(dashboardView && dashboardView.hidden);
+            deviceSelect.classList.toggle('device-unselected', needsSelection);
+            deviceSelect.setAttribute('aria-label', hasSelection ? 'Select a Device' : 'Show all devices');
+            const controlsReady = hasSelection && isActiveDeviceCommandReady();
+            setBasicControlInputsEnabled(controlsReady);
+            if (targetReportToggle) {
+                targetReportToggle.disabled = !controlsReady || targetReportingPending.size > 0;
+            }
+            if (btnForceSync) {
+                btnForceSync.disabled = hasSelection ? !controlsReady : !isGlobalTransportReady();
+            }
+            if (window.SwitchStudioState && typeof window.SwitchStudioState.setTransportReady === 'function') {
+                window.SwitchStudioState.setTransportReady(activeDeviceTopic ? isActiveDeviceCommandReady() : isGlobalTransportReady());
+            }
+            updateBasicControlVisibility();
+            renderFirmwarePanel();
+            if (controllerInitialized) updateZoneActionState();
+        }
+
+        function getDeviceDisplayName(topic) {
+            if (window.SwitchStudioDevices && typeof window.SwitchStudioDevices.getDevice === 'function') {
+                const device = window.SwitchStudioDevices.getDevice(topic);
+                if (device && device.friendly_name) return device.friendly_name;
+            }
+            if (topic && topic === activeDeviceTopic && activeDeviceFriendlyName) return activeDeviceFriendlyName;
+            return String(topic || '').split('/').pop() || 'device';
+        }
+
+        function showDashboardView(options) {
+            const opts = options || {};
+            if (dashboardView) dashboardView.hidden = false;
+            if (appContainer) appContainer.hidden = true;
+            if (tabBar) tabBar.hidden = true;
+            document.body.classList.add('dashboard-active');
+            if (deviceSelect) deviceSelect.value = '';
+            if (window.SwitchStudioDevices && typeof window.SwitchStudioDevices.setSelectedTopic === 'function') {
+                window.SwitchStudioDevices.setSelectedTopic(null);
+            }
+            updateDeviceSelectState();
+            if (!opts.keepSession) {
+                serverSelectedTopic = null;
+                socket.emit('change_device', '');
+            }
+        }
+
+        function showWorkspaceView(topic) {
+            if (dashboardView) dashboardView.hidden = true;
+            if (appContainer) appContainer.hidden = false;
+            if (tabBar) tabBar.hidden = !SWITCH_STUDIO_UI_ENABLED;
+            document.body.classList.remove('dashboard-active');
+            if (deviceSelect) deviceSelect.value = topic || '';
+            if (window.SwitchStudioDevices && typeof window.SwitchStudioDevices.setSelectedTopic === 'function') {
+                window.SwitchStudioDevices.setSelectedTopic(topic || null);
+            }
+            updateDeviceSelectState();
+        }
+
+        function resetWorkspaceForDeviceChange() {
+            resetBasicControlsForDeviceChange();
+            resetFirmwareStateForDeviceChange();
+            if (window.SwitchStudioLoadDimming && typeof window.SwitchStudioLoadDimming.resetForDeviceChange === 'function') {
+                window.SwitchStudioLoadDimming.resetForDeviceChange();
+            }
+            timestampSpan.innerText = '--:--:--';
+            packetAgeSpan.innerText = '';
+            lastPacketTime = null;
+            if (stripIlluminanceVal) stripIlluminanceVal.innerText = '-- lx';
+            occupancyState = { global: null, area1: null, area2: null, area3: null, area4: null };
+            setTargetReportingState(false, 'Disable');
+            targetReportingPending.clear();
+            for (let i = 1; i <= 4; i++) setAreaStatusIndicators(i, false);
+            setMapStandbyState(false);
+            if (zoneModule && typeof zoneModule.resetHistory === 'function') zoneModule.resetHistory();
+            else targetHistory = {};
+            deviceZones = {
+                global: null,
+                mmwave_detection_areas: { area1: null, area2: null, area3: null, area4: null },
+                mmwave_interference_areas: { area1: null, area2: null, area3: null, area4: null },
+                mmwave_stay_areas: { area1: null, area2: null, area3: null, area4: null }
+            };
+            if (isEditingZone) endZoneEdit();
+            if (typeof Plotly !== 'undefined') {
+                Plotly.update('chart', { x: [[]], y: [[]], text: [[]] }, { shapes: getChartShapes(), annotations: [] });
+            }
+            dataTableBody.innerHTML = '<tr><td colspan="5" class="no-data">No targets detected</td></tr>';
+            nonMmwaveWarning.style.display = 'none';
+        }
+
+        function shouldConfirmDeviceChange(currentTopic) {
+            const stateApi = window.SwitchStudioState;
+            const hasStateWork = !!(
+                currentTopic &&
+                stateApi &&
+                typeof stateApi.hasUncommitted === 'function' &&
+                stateApi.hasUncommitted(currentTopic)
+            );
+            const hasZoneDraft = !!(isEditingZone && draftZoneConfig);
+            return { hasStateWork, hasZoneDraft, required: hasStateWork || hasZoneDraft };
+        }
+
+        function requestDeviceSelection(nextTopic, options) {
+            const opts = options || {};
+            const normalizedNext = String(nextTopic || '').trim();
+            if (!normalizedNext) {
+                showDashboardView();
+                return true;
+            }
+
+            const requestedDevice = window.SwitchStudioDevices && typeof window.SwitchStudioDevices.getDevice === 'function'
+                ? window.SwitchStudioDevices.getDevice(normalizedNext)
+                : null;
+            if (requestedDevice && requestedDevice.capabilities && requestedDevice.capabilities.full_editor === false) {
+                if (window.SwitchStudioState) {
+                    window.SwitchStudioState.showToast('info', 'This Blue Series model currently supports dashboard quick controls only.', 2600);
+                }
+                if (deviceSelect) deviceSelect.value = dashboardView && !dashboardView.hidden ? '' : (activeDeviceTopic || '');
+                updateDeviceSelectState();
+                return false;
+            }
+
+            const currentTopic = activeDeviceTopic;
+            const isDifferentDevice = !!currentTopic && currentTopic !== normalizedNext;
+            if (isDifferentDevice && !opts.skipConfirm) {
+                const guard = shouldConfirmDeviceChange(currentTopic);
+                if (guard.required) {
+                    const stateStatus = window.SwitchStudioState && typeof window.SwitchStudioState.getDeviceStatus === 'function'
+                        ? window.SwitchStudioState.getDeviceStatus(currentTopic)
+                        : { pending: 0, sending: 0 };
+                    const details = [];
+                    if (stateStatus.pending) details.push(`${stateStatus.pending} pending configuration change${stateStatus.pending === 1 ? '' : 's'} will be discarded`);
+                    if (stateStatus.sending) details.push(`${stateStatus.sending} change${stateStatus.sending === 1 ? '' : 's'} still awaiting confirmation will continue in the background`);
+                    if (guard.hasZoneDraft) details.push('the zone draft will be discarded');
+                    const confirmed = window.confirm(`Open ${getDeviceDisplayName(normalizedNext)}?\n\n${details.join('. ')}.`);
+                    if (!confirmed) {
+                        if (deviceSelect) deviceSelect.value = dashboardView && !dashboardView.hidden ? '' : currentTopic;
+                        updateDeviceSelectState();
+                        return false;
+                    }
+                    if (window.SwitchStudioState && typeof window.SwitchStudioState.discardDevice === 'function') {
+                        window.SwitchStudioState.discardDevice(currentTopic, { silent: true });
+                    }
+                    if (isEditingZone) endZoneEdit();
+                }
+            }
+
+            if (currentTopic !== normalizedNext) resetWorkspaceForDeviceChange();
+            activeDeviceTopic = normalizedNext;
+            activeDeviceFriendlyName = requestedDevice && requestedDevice.friendly_name
+                ? requestedDevice.friendly_name
+                : getDeviceDisplayName(normalizedNext);
+            if (window.SwitchStudioState && typeof window.SwitchStudioState.setActiveDevice === 'function') {
+                window.SwitchStudioState.setActiveDevice(normalizedNext);
+                window.SwitchStudioState.setPacketStatus('info', 'Awaiting fresh device data…');
+            }
+            showWorkspaceView(normalizedNext);
+            if (window.SwitchStudioTabs && typeof window.SwitchStudioTabs.setActiveTab === 'function') {
+                window.SwitchStudioTabs.setActiveTab('zones');
+            }
+
+            const cachedDevice = window.SwitchStudioDevices && typeof window.SwitchStudioDevices.getDevice === 'function'
+                ? window.SwitchStudioDevices.getDevice(normalizedNext)
+                : null;
+            if (cachedDevice && cachedDevice.last_config) {
+                syncBasicControlsFromConfig(cachedDevice.last_config);
+                if (window.SwitchStudioState && typeof window.SwitchStudioState.syncConfig === 'function') {
+                    window.SwitchStudioState.syncConfig(normalizedNext, cachedDevice.last_config);
+                }
+                if (Object.prototype.hasOwnProperty.call(cachedDevice.last_config, 'mmWaveTargetInfoReport')) {
+                    const reportValue = cachedDevice.last_config.mmWaveTargetInfoReport;
+                    setTargetReportingState(String(reportValue || '').toLowerCase().includes('enable'), reportValue);
+                }
+            }
+
+            serverSelectedTopic = null;
+            socket.emit('change_device', normalizedNext);
+            socket.emit('force_sync');
+            setTimeout(() => {
+                const chartDiv = document.getElementById('chart');
+                if (chartDiv && chartDiv.data && typeof Plotly !== 'undefined') Plotly.Plots.resize(chartDiv);
+            }, 40);
+            return true;
         }
 
         function applyLegacyLayout() {
@@ -3060,9 +3725,36 @@
                 dirtyTextEl: dirtyText,
                 applyBtnEl: btnApplyChanges,
                 discardBtnEl: btnDiscardChanges,
-                toastContainerEl: toastContainer
+                toastContainerEl: toastContainer,
+                transportReady: false
             });
         }
+
+        if (window.SwitchStudioDevices && typeof window.SwitchStudioDevices.init === 'function') {
+            window.SwitchStudioDevices.init({
+                socket,
+                gridEl: deviceGrid,
+                emptyEl: dashboardEmpty,
+                summaryEl: dashboardSummary,
+                onOpenDevice: (topic) => requestDeviceSelection(topic),
+                onStatus: (mode, message) => {
+                    if (!window.SwitchStudioState) return;
+                    window.SwitchStudioState.setPacketStatus(mode, message);
+                    window.SwitchStudioState.showToast(mode === 'confirmed' ? 'saved' : 'error', message, 2200);
+                }
+            });
+        }
+
+        if (btnDashboardHome) {
+            btnDashboardHome.addEventListener('click', () => showDashboardView());
+        }
+        window.addEventListener('beforeunload', (event) => {
+            if (!window.SwitchStudioState || typeof window.SwitchStudioState.hasUncommitted !== 'function') return;
+            if (!activeDeviceTopic || !window.SwitchStudioState.hasUncommitted(activeDeviceTopic)) return;
+            event.preventDefault();
+            event.returnValue = '';
+        });
+        showDashboardView({ keepSession: true });
 
         if (window.SwitchStudioLoadDimming && typeof window.SwitchStudioLoadDimming.init === 'function') {
             window.SwitchStudioLoadDimming.init({
@@ -3130,7 +3822,19 @@
             targetReportToggle.addEventListener('change', () => {
                 const enabled = !!targetReportToggle.checked;
                 const requestId = `target-report-${Date.now()}`;
-                socket.emit('set_target_reporting', { enabled: enabled, request_id: requestId });
+                if (!isActiveDeviceCommandReady()) {
+                    setTargetReportingState(!enabled, !enabled ? 'Enable' : 'Disable');
+                    updateDeviceSelectState();
+                    reportActiveDeviceUnavailable('Target reporting');
+                    return;
+                }
+                targetReportingPending.set(requestId, !enabled);
+                updateDeviceSelectState();
+                socket.emit('set_target_reporting', {
+                    enabled: enabled,
+                    topic: activeDeviceTopic,
+                    request_id: requestId
+                });
                 if (window.SwitchStudioState) {
                     window.SwitchStudioState.setPacketStatus('syncing', enabled ? 'Enabling target reporting...' : 'Disabling target reporting...');
                 } else {
@@ -3150,11 +3854,16 @@
                 };
                 basicControlLastKnown.state = nextState;
                 setQuickPowerStateBadge(nextState);
-                emitBasicControl(
+                const sent = emitBasicControl(
                     { state: nextState ? 'ON' : 'OFF' },
                     nextState ? 'Turning switch on...' : 'Turning switch off...',
                     previousSnapshot
                 );
+                if (!sent) {
+                    basicControlLastKnown.state = previousSnapshot.state;
+                    basicControlLastKnown.brightness = previousSnapshot.brightness;
+                    applyBasicControlUiState();
+                }
             });
         }
 
@@ -3188,11 +3897,10 @@
                 commitBrightnessPercent(bounded);
             };
             headerBrightnessInput.addEventListener('change', commitFromInput);
-            headerBrightnessInput.addEventListener('blur', commitFromInput);
             headerBrightnessInput.addEventListener('keydown', (event) => {
                 if (event.key !== 'Enter') return;
                 event.preventDefault();
-                commitFromInput();
+                headerBrightnessInput.blur();
             });
         }
 
@@ -3935,6 +4643,17 @@
             return null;
         }
 
+        function clearSchemaInputBindings() {
+            schemaBindingUnsubscribers.forEach((unsubscribe) => {
+                try {
+                    unsubscribe();
+                } catch (err) {
+                    // A detached control must not prevent the schema from rerendering.
+                }
+            });
+            schemaBindingUnsubscribers = [];
+        }
+
         function createSchemaFieldRow(field) {
             const row = document.createElement('div');
             row.className = 'input-row schema-field-row';
@@ -3949,7 +4668,8 @@
                 row.appendChild(control);
                 const controlInput = resolveSchemaControlInput(control, field.name);
                 if (window.SwitchStudioState && typeof window.SwitchStudioState.registerInputBinding === 'function' && controlInput) {
-                    window.SwitchStudioState.registerInputBinding(field.name, controlInput);
+                    const unsubscribe = window.SwitchStudioState.registerInputBinding(field.name, controlInput);
+                    if (typeof unsubscribe === 'function') schemaBindingUnsubscribers.push(unsubscribe);
                 }
             } else {
                 row.appendChild(createReadOnlyValueElement(field));
@@ -4017,11 +4737,16 @@
         }
 
         function sendCompositeUpdate(field) {
+            if (!isActiveDeviceCommandReady()) {
+                reportActiveDeviceUnavailable(getReadableFieldLabel(field));
+                return;
+            }
             try {
                 const payload = collectCompositePayload(field);
                 socket.emit('update_parameter', {
                     param: field.name,
                     value: payload,
+                    topic: activeDeviceTopic,
                     request_id: `composite-${Date.now()}-${field.name}`
                 });
                 if (window.SwitchStudioState) {
@@ -4157,6 +4882,7 @@
         }
 
         function renderAllSchemaFields() {
+            clearSchemaInputBindings();
             if (!schemaModel || !Array.isArray(schemaModel.fields)) {
                 const unavailable = '<div class="schema-empty-note">Schema unavailable.</div>';
                 if (schemaPresenceControlsFields) schemaPresenceControlsFields.innerHTML = unavailable;
@@ -4941,6 +5667,10 @@
         }
 
         function sendCommand(actionId) {
+            if (!isActiveDeviceCommandReady()) {
+                reportActiveDeviceUnavailable('Zone maintenance commands');
+                return;
+            }
             socket.emit('send_command', actionId);
 
             if (zoneModule && typeof zoneModule.setPendingCommand === 'function') {
@@ -4960,15 +5690,22 @@
         }
 
         function handleForceSyncClick() {
-            if (isEditingZone) {
-                cancelZoneEdit();
-            }
+            const workspaceVisible = !!(dashboardView && dashboardView.hidden && activeDeviceTopic);
             socket.emit('request_devices');
-            socket.emit('force_sync');
+            if (workspaceVisible && !isActiveDeviceCommandReady()) {
+                reportActiveDeviceUnavailable('Device sync');
+                return;
+            }
+            if (workspaceVisible && isEditingZone) {
+                const discardDraft = window.confirm('Discard the current zone draft and sync fresh device data?');
+                if (!discardDraft) return;
+                endZoneEdit();
+            }
+            if (workspaceVisible) socket.emit('force_sync');
             if (window.SwitchStudioState) {
-                window.SwitchStudioState.setPacketStatus('syncing', 'Syncing...');
+                window.SwitchStudioState.setPacketStatus('syncing', workspaceVisible ? 'Syncing…' : 'Refreshing devices…');
             } else {
-                packetInfo.innerText = 'Syncing...';
+                packetInfo.innerText = workspaceVisible ? 'Syncing…' : 'Refreshing devices…';
             }
         }
 
@@ -4996,21 +5733,50 @@
                 return;
             }
 
-            socket.emit('update_parameter', { param: param, value: value, request_id: `ui-${Date.now()}-${param}` });
+            socket.emit('update_parameter', {
+                param: param,
+                value: value,
+                topic: activeDeviceTopic,
+                request_id: `ui-${Date.now()}-${param}`
+            });
         });
 
         // --- SOCKET EVENT HANDLERS ---
         socket.on('connect', () => {
-            setConnectionState(true);
+            serverSelectedTopic = null;
+            mqttInventoryReady = false;
+            setConnectionState(true, null);
             socket.emit('request_devices');
             socket.emit('request_schema');
             syncTargetReportingAutoOffPreference();
+            if (activeDeviceTopic && dashboardView && dashboardView.hidden) {
+                if (window.SwitchStudioState) {
+                    window.SwitchStudioState.setPacketStatus('syncing', 'Restoring device session…');
+                }
+            }
         });
         socket.on('disconnect', () => {
-            setConnectionState(false);
+            serverSelectedTopic = null;
+            if (basicControlBrightnessTimer) {
+                clearTimeout(basicControlBrightnessTimer);
+                basicControlBrightnessTimer = null;
+            }
+            basicControlPending.clear();
+            basicControlFinished.clear();
+            targetReportingPending.clear();
+            zoneUpdatePending.clear();
+            zoneEditRequestId = null;
+            zoneDeleteRequestId = null;
+            updateZoneActionState();
+            setConnectionState(false, null);
         });
         socket.on('connect_error', () => {
-            setConnectionState(false);
+            setConnectionState(false, null);
+        });
+        socket.on('backend_status', (status) => {
+            const mqttStatus = status && status.mqtt ? status.mqtt : {};
+            mqttInventoryReady = mqttStatus.inventory_ready === true;
+            setConnectionState(socket.connected === true, mqttStatus.connected === true, mqttStatus.reason);
         });
 
         socket.on('schema_model', function(schema) {
@@ -5022,51 +5788,104 @@
 
         socket.on('command_result', function(result) {
             if (!result || !result.status) return;
+            const dashboardControlHandled = !!(
+                window.SwitchStudioDevices &&
+                typeof window.SwitchStudioDevices.handleControlResult === 'function' &&
+                window.SwitchStudioDevices.handleControlResult(result)
+            );
             if (zoneModule && typeof zoneModule.handleCommandResult === 'function') {
                 zoneModule.handleCommandResult(result);
             }
 
+            if (result.action === 'change_device') {
+                if (result.status === 'sent' && result.topic) serverSelectedTopic = result.topic;
+                if (result.status === 'error') serverSelectedTopic = null;
+            }
+
             if (result.action === 'set_target_reporting') {
                 const payload = result.payload || {};
-                if (result.status === 'error') {
-                    // Revert the toggle on errors so the UI reflects actual device state.
-                    if (targetReportToggle) targetReportToggle.checked = !targetReportToggle.checked;
+                const previousState = result.request_id ? targetReportingPending.get(result.request_id) : null;
+                if (result.topic && activeDeviceTopic && result.topic !== activeDeviceTopic) return;
+                if (
+                    result.request_id &&
+                    !targetReportingPending.has(result.request_id) &&
+                    (result.status === 'sent' || result.status === 'sending')
+                ) return;
+                if (result.status === 'error' || result.status === 'not_confirmed') {
+                    if (result.request_id) targetReportingPending.delete(result.request_id);
+                    if (previousState !== null && previousState !== undefined) {
+                        setTargetReportingState(previousState, previousState ? 'Enable' : 'Disable');
+                    }
+                    updateDeviceSelectState();
                     if (window.SwitchStudioState) {
                         window.SwitchStudioState.setPacketStatus('error', result.message ? `Error: ${result.message}` : 'Target reporting update failed');
                     } else {
                         packetInfo.innerText = result.message ? `Error: ${result.message}` : 'Target reporting update failed';
                     }
-                } else if (result.status === 'sent') {
-                    const enabled = !!payload.enabled;
-                    setTargetReportingState(enabled, payload.value);
+                } else if (result.status === 'sent' || result.status === 'sending') {
+                    if (Object.prototype.hasOwnProperty.call(payload, 'enabled')) {
+                        setTargetReportingState(!!payload.enabled, payload.value);
+                    }
                     if (window.SwitchStudioState) {
+                        window.SwitchStudioState.setPacketStatus('sending', 'Waiting for target reporting confirmation…');
+                    }
+                } else if (result.status === 'confirmed') {
+                    if (result.request_id) targetReportingPending.delete(result.request_id);
+                    const rawValue = payload.mmWaveTargetInfoReport;
+                    const enabled = typeof rawValue === 'string'
+                        ? rawValue.toLowerCase().includes('enable')
+                        : !!rawValue;
+                    setTargetReportingState(enabled, rawValue);
+                    updateDeviceSelectState();
+                    if (window.SwitchStudioState) {
+                        window.SwitchStudioState.setPacketStatus('confirmed', 'Target reporting confirmed');
                         window.SwitchStudioState.showToast('saved', enabled ? 'Target reporting enabled' : 'Target reporting disabled', 1500);
                     }
                 }
             }
 
             if (result.action === 'set_basic_control') {
+                if (dashboardControlHandled) return;
                 const requestId = result.request_id || null;
                 const previousState = requestId ? basicControlPending.get(requestId) : null;
-                if (requestId) basicControlPending.delete(requestId);
+                if (requestId && !previousState && basicControlFinished.has(requestId)) return;
+                if (requestId && !previousState) return;
 
-                if (result.topic && deviceSelect && deviceSelect.value && result.topic !== deviceSelect.value) {
+                if (result.topic && activeDeviceTopic && result.topic !== activeDeviceTopic) {
                     return;
                 }
 
-                if (result.status === 'error') {
+                if (result.status === 'error' || result.status === 'not_confirmed') {
+                    if (requestId) {
+                        basicControlPending.delete(requestId);
+                        basicControlFinished.add(requestId);
+                    }
                     if (previousState) {
-                        basicControlLastKnown.state = previousState.state;
-                        basicControlLastKnown.brightness = previousState.brightness;
+                        const confirmedFields = result.status === 'not_confirmed' && result.payload && Array.isArray(result.payload.confirmed_fields)
+                            ? new Set(result.payload.confirmed_fields)
+                            : new Set();
+                        if (!confirmedFields.has('state')) basicControlLastKnown.state = previousState.state;
+                        if (!confirmedFields.has('brightness')) basicControlLastKnown.brightness = previousState.brightness;
                         applyBasicControlUiState();
                     }
                     if (window.SwitchStudioState) {
-                        window.SwitchStudioState.setPacketStatus('error', result.message ? `Error: ${result.message}` : 'Quick control update failed');
-                        window.SwitchStudioState.showToast('error', result.message || 'Quick control update failed', 2200);
+                        const fallbackMessage = result.status === 'not_confirmed'
+                            ? 'Quick control was not confirmed'
+                            : 'Quick control update failed';
+                        window.SwitchStudioState.setPacketStatus('error', result.message ? `Error: ${result.message}` : fallbackMessage);
+                        window.SwitchStudioState.showToast('error', result.message || fallbackMessage, 2200);
                     } else {
                         packetInfo.innerText = result.message ? `Error: ${result.message}` : 'Quick control update failed';
                     }
-                } else if (result.status === 'sent') {
+                } else if (result.status === 'sent' || result.status === 'sending') {
+                    if (window.SwitchStudioState) {
+                        window.SwitchStudioState.setPacketStatus('sending', 'Waiting for device confirmation…');
+                    }
+                } else if (result.status === 'confirmed') {
+                    if (requestId) {
+                        basicControlPending.delete(requestId);
+                        basicControlFinished.add(requestId);
+                    }
                     const payload = result.payload || {};
                     if (Object.prototype.hasOwnProperty.call(payload, 'state')) {
                         const parsedState = parseBasicStateValue(payload.state);
@@ -5078,13 +5897,78 @@
                     }
                     applyBasicControlUiState();
                     if (window.SwitchStudioState) {
-                        window.SwitchStudioState.showToast('saved', 'Quick control updated', 1300);
+                        window.SwitchStudioState.setPacketStatus('confirmed', 'Quick control confirmed');
+                        window.SwitchStudioState.showToast('saved', 'Quick control confirmed', 1300);
                     }
                 }
             }
 
-            if (result.action === 'check_firmware_update') {
-                if (result.status === 'error') {
+            if (
+                result.action === 'update_parameter' &&
+                typeof result.request_id === 'string' &&
+                result.request_id.startsWith('zone-')
+            ) {
+                const zoneRequest = zoneUpdatePending.get(result.request_id);
+                const isDelete = zoneRequest ? zoneRequest.isDelete : result.request_id.startsWith('zone-delete-');
+                if (!zoneRequest && (result.status === 'sent' || result.status === 'sending')) return;
+                if (zoneRequest && result.topic && zoneRequest.topic && result.topic !== zoneRequest.topic) return;
+                const requestTopic = (zoneRequest && zoneRequest.topic) || result.topic || null;
+                const isActiveRequest = !!(requestTopic && activeDeviceTopic === requestTopic);
+                if (result.status === 'sent') {
+                    if (zoneRequest) {
+                        zoneRequest.sent = true;
+                        if (
+                            isActiveRequest &&
+                            zoneEditRequestId === result.request_id &&
+                            isEditingZone &&
+                            editingTarget === zoneRequest.target
+                        ) {
+                            endZoneEdit();
+                        }
+                    }
+                    if (isActiveRequest && window.SwitchStudioState) {
+                        window.SwitchStudioState.setPacketStatus('sending', 'Waiting for zone confirmation…');
+                        window.SwitchStudioState.showToast('syncing', isDelete ? 'Zone deletion sent.' : 'Zone update sent.', 1300);
+                    }
+                } else if (result.status === 'sending') {
+                    if (isActiveRequest && window.SwitchStudioState) {
+                        window.SwitchStudioState.setPacketStatus('sending', 'Waiting for zone confirmation…');
+                    }
+                } else if (result.status === 'confirmed') {
+                    zoneUpdatePending.delete(result.request_id);
+                    if (zoneDeleteRequestId === result.request_id) zoneDeleteRequestId = null;
+                    if (zoneEditRequestId === result.request_id) zoneEditRequestId = null;
+                    updateZoneActionState();
+                    if (isActiveRequest && window.SwitchStudioState) {
+                        window.SwitchStudioState.setPacketStatus('confirmed', isDelete ? 'Zone deletion confirmed' : 'Zone confirmed');
+                        window.SwitchStudioState.showToast('saved', isDelete ? 'Zone deletion confirmed.' : 'Zone confirmed.', 1600);
+                    }
+                } else if (result.status === 'not_confirmed') {
+                    zoneUpdatePending.delete(result.request_id);
+                    if (zoneDeleteRequestId === result.request_id) zoneDeleteRequestId = null;
+                    if (zoneEditRequestId === result.request_id) zoneEditRequestId = null;
+                    updateZoneActionState();
+                    if (isActiveRequest && window.SwitchStudioState) {
+                        window.SwitchStudioState.setPacketStatus('unconfirmed', 'Zone update was not confirmed');
+                        window.SwitchStudioState.showToast('error', 'The zone update was not confirmed. Sync before retrying.', 2800);
+                    }
+                } else if (result.status === 'error') {
+                    zoneUpdatePending.delete(result.request_id);
+                    if (zoneDeleteRequestId === result.request_id) zoneDeleteRequestId = null;
+                    if (zoneEditRequestId === result.request_id) zoneEditRequestId = null;
+                    updateZoneActionState();
+                    if (isActiveRequest && window.SwitchStudioState) {
+                        window.SwitchStudioState.setPacketStatus('error', 'Zone update was not sent; your draft is still open');
+                    }
+                }
+            }
+
+            if (
+                result.action === 'check_firmware_update' &&
+                (!result.topic || result.topic === activeDeviceTopic)
+            ) {
+                if (result.status === 'error' || result.status === 'not_confirmed') {
+                    clearFirmwareResponseTimer();
                     applyFirmwareStateUpdate({
                         state: 'error',
                         last_error: result.message || 'Firmware check failed',
@@ -5096,14 +5980,19 @@
                         last_error: null,
                         bridge_status: 'pending'
                     });
+                    armFirmwareResponseTimer('check');
                     if (window.SwitchStudioState) {
                         window.SwitchStudioState.showToast('syncing', 'Checking for firmware updates...', 1500);
                     }
                 }
             }
 
-            if (result.action === 'start_firmware_update') {
-                if (result.status === 'error') {
+            if (
+                result.action === 'start_firmware_update' &&
+                (!result.topic || result.topic === activeDeviceTopic)
+            ) {
+                if (result.status === 'error' || result.status === 'not_confirmed') {
+                    clearFirmwareResponseTimer();
                     applyFirmwareStateUpdate({
                         state: 'error',
                         last_error: result.message || 'Firmware update request failed',
@@ -5116,6 +6005,7 @@
                         bridge_status: 'pending',
                         progress: 0
                     });
+                    armFirmwareResponseTimer('update');
                     if (window.SwitchStudioState) {
                         window.SwitchStudioState.showToast('syncing', 'Firmware update requested', 1500);
                     }
@@ -5136,89 +6026,104 @@
         });
         
         socket.on('device_list', function(devices) {
-            const currentSelection = deviceSelect.value;
-            deviceSelect.innerHTML = '<option value="" disabled selected>Select a Device</option>';
-            devices.forEach(device => {
+            const normalizedDevices = Array.isArray(devices) ? devices : [];
+            const previousActiveDevice = getActiveDeviceRecord();
+            if (previousActiveDevice && previousActiveDevice.friendly_name) {
+                activeDeviceFriendlyName = previousActiveDevice.friendly_name;
+            }
+            if (window.SwitchStudioDevices && typeof window.SwitchStudioDevices.setDevices === 'function') {
+                window.SwitchStudioDevices.setDevices(normalizedDevices);
+            }
+            if (window.SwitchStudioState && typeof window.SwitchStudioState.syncConfig === 'function') {
+                normalizedDevices.forEach((device) => {
+                    if (device && device.topic && device.last_config) {
+                        window.SwitchStudioState.syncConfig(device.topic, device.last_config);
+                    }
+                });
+            }
+
+            const availableTopics = new Set(normalizedDevices.map((device) => device && device.topic).filter(Boolean));
+            deviceSelect.innerHTML = '<option value="">All Devices</option>';
+            normalizedDevices.forEach(device => {
                 const option = document.createElement('option');
-                option.value = device.topic; option.text = device.friendly_name;
+                option.value = device.topic;
+                const fullEditorSupported = !device.capabilities || device.capabilities.full_editor !== false;
+                option.text = fullEditorSupported ? device.friendly_name : `${device.friendly_name} (quick controls only)`;
+                option.disabled = !fullEditorSupported;
                 deviceSelect.appendChild(option);
+                if (device.topic === activeDeviceTopic && device.friendly_name) {
+                    activeDeviceFriendlyName = device.friendly_name;
+                }
             });
-            if (currentSelection) deviceSelect.value = currentSelection;
+
+            if (activeDeviceTopic && mqttInventoryReady && !availableTopics.has(activeDeviceTopic)) {
+                const guard = shouldConfirmDeviceChange(activeDeviceTopic);
+                if (guard.required) {
+                    const unavailableOption = document.createElement('option');
+                    unavailableOption.value = activeDeviceTopic;
+                    unavailableOption.text = `${getDeviceDisplayName(activeDeviceTopic)} (unavailable — unsaved changes kept)`;
+                    deviceSelect.appendChild(unavailableOption);
+                    deviceSelect.value = activeDeviceTopic;
+                    serverSelectedTopic = null;
+                    if (window.SwitchStudioState) {
+                        window.SwitchStudioState.setPacketStatus('error', 'Device unavailable; unsaved changes are still staged');
+                    }
+                } else {
+                    activeDeviceTopic = null;
+                    activeDeviceFriendlyName = null;
+                    if (window.SwitchStudioState && typeof window.SwitchStudioState.setActiveDevice === 'function') {
+                        window.SwitchStudioState.setActiveDevice(null);
+                    }
+                    showDashboardView({ keepSession: true });
+                }
+            } else if (activeDeviceTopic && dashboardView && dashboardView.hidden) {
+                if (!availableTopics.has(activeDeviceTopic) && !mqttInventoryReady) {
+                    const restoringOption = document.createElement('option');
+                    restoringOption.value = activeDeviceTopic;
+                    restoringOption.text = `${getDeviceDisplayName(activeDeviceTopic)} (restoring…)`;
+                    deviceSelect.appendChild(restoringOption);
+                }
+                deviceSelect.value = activeDeviceTopic;
+                if (availableTopics.has(activeDeviceTopic) && serverSelectedTopic !== activeDeviceTopic) {
+                    socket.emit('change_device', activeDeviceTopic);
+                    if (isActiveDeviceCommandReady()) socket.emit('force_sync');
+                }
+            } else {
+                deviceSelect.value = '';
+            }
             updateDeviceSelectState();
-            // else deviceSelect.selectedIndex = 0; // Don't auto-select to prevent confusion
         });
 
         deviceSelect.addEventListener('change', function() {
-            updateDeviceSelectState();
-            resetBasicControlsForDeviceChange();
-            resetFirmwareStateForDeviceChange();
-            socket.emit('change_device', this.value);
-            
-            // FIRE A FORCE SYNC TO PREVENT STALE DATA ON LOAD
-            socket.emit('force_sync'); 
-
-            if (window.SwitchStudioState) {
-                window.SwitchStudioState.resetForDeviceChange();
-                window.SwitchStudioState.setPacketStatus('info', 'Awaiting data...');
-            } else {
-                packetInfo.innerText = "Awaiting data...";
-            }
-            if (window.SwitchStudioLoadDimming && typeof window.SwitchStudioLoadDimming.resetForDeviceChange === 'function') {
-                window.SwitchStudioLoadDimming.resetForDeviceChange();
-            }
-            timestampSpan.innerText = "--:--:--";
-            packetAgeSpan.innerText = "";
-            lastPacketTime = null;
-            
-            if (stripIlluminanceVal) stripIlluminanceVal.innerText = "-- lx";
-            occupancyState = { global: null, area1: null, area2: null, area3: null, area4: null };
-            setTargetReportingState(false, 'Disable');
-            
-            // Reset Zone Indicators
-            for(let i=1; i<=4; i++) {
-                setAreaStatusIndicators(i, false);
-            }
-            setMapStandbyState(false);
-
-            // Reset Visualization
-            if (zoneModule && typeof zoneModule.resetHistory === 'function') {
-                zoneModule.resetHistory();
-            } else {
-                targetHistory = {};
-            }
-            // Reset Zone Data
-            deviceZones = {
-                global: null,
-                mmwave_detection_areas: { area1: null, area2: null, area3: null, area4: null },
-                mmwave_interference_areas: { area1: null, area2: null, area3: null, area4: null },
-                mmwave_stay_areas: { area1: null, area2: null, area3: null, area4: null }
-            };
-            
-            // Cancel any active edits
-            if (isEditingZone) cancelZoneEdit();
-
-            Plotly.update('chart', {x: [[]], y: [[]], text: [[]]}, {shapes: getChartShapes(), annotations: []}); // Clear annotations on switch
-            dataTableBody.innerHTML = '<tr><td colspan="5" class="no-data">No targets detected</td></tr>';
-            nonMmwaveWarning.style.display = 'none'; 
+            requestDeviceSelection(this.value);
         });
 
         socket.on('device_snapshot', function(msg) {
             if (!msg || !msg.topic || !msg.payload) return;
-            if (msg.topic !== deviceSelect.value) return;
+            if (window.SwitchStudioDevices && typeof window.SwitchStudioDevices.mergeSnapshot === 'function') {
+                window.SwitchStudioDevices.mergeSnapshot(msg);
+            }
 
             const snapshotConfig = msg.payload.last_config;
+            if (snapshotConfig && typeof snapshotConfig === 'object') {
+                if (window.SwitchStudioState && typeof window.SwitchStudioState.syncConfig === 'function') {
+                    window.SwitchStudioState.syncConfig(msg.topic, snapshotConfig);
+                }
+            }
+            if (msg.topic !== activeDeviceTopic) return;
+
             if (snapshotConfig && typeof snapshotConfig === 'object') {
                 syncBasicControlsFromConfig(snapshotConfig);
             }
             if (msg.payload.ota_status && typeof msg.payload.ota_status === 'object') {
-                applyFirmwareStateUpdate(msg.payload.ota_status, { reset: true });
+                applyFirmwareStateUpdate(msg.payload.ota_status, { reset: true, trackPendingResponse: true });
             }
         });
 
         socket.on('firmware_status', function(msg) {
             if (!msg || !msg.topic || !msg.payload) return;
             if (msg.topic !== deviceSelect.value) return;
-            applyFirmwareStateUpdate(msg.payload);
+            applyFirmwareStateUpdate(msg.payload, { trackPendingResponse: true });
         });
 
         // Helper: Convert Z2M area object to internal format and handle zeroed-out zones
@@ -5258,12 +6163,19 @@
             // Unpack wrapper
             if (!msg.topic || !msg.payload) return;
             const config = msg.payload;
+
+            if (window.SwitchStudioDevices && typeof window.SwitchStudioDevices.mergeConfig === 'function') {
+                window.SwitchStudioDevices.mergeConfig(msg.topic, config, msg.ts);
+            }
+            if (window.SwitchStudioState && typeof window.SwitchStudioState.syncConfig === 'function') {
+                window.SwitchStudioState.syncConfig(msg.topic, config);
+            }
             
             // FILTER: IGNORE DATA FROM OTHER DEVICES
-            if (msg.topic !== deviceSelect.value) return;
+            if (msg.topic !== activeDeviceTopic || (dashboardView && !dashboardView.hidden)) return;
 
             syncBasicControlsFromConfig(config);
-            applyFirmwareStateUpdate(config);
+            applyFirmwareStateUpdate(config, { devicePayload: true });
 
             updateTimestamp(); 
 
@@ -5323,7 +6235,12 @@
                 }
             }
             if ("illuminance" in config) {
-                if (stripIlluminanceVal) stripIlluminanceVal.innerText = `${config.illuminance} lx`;
+                const illuminance = config.illuminance === null || config.illuminance === undefined || config.illuminance === ''
+                    ? null
+                    : Number(config.illuminance);
+                if (stripIlluminanceVal) {
+                    stripIlluminanceVal.innerText = Number.isFinite(illuminance) ? `${illuminance} lx` : '-- lx';
+                }
             }
             if ("mmWaveTargetInfoReport" in config) {
                 const enabled = parseTargetReportingEnabled(config.mmWaveTargetInfoReport);
@@ -5369,9 +6286,7 @@
             // We removed the logic that forces Warning ON if version is missing, because partial updates (like occupancy) lack it.
 
             // 4. SYNC CONFIG INPUTS
-            if (window.SwitchStudioState && typeof window.SwitchStudioState.syncConfig === 'function') {
-                window.SwitchStudioState.syncConfig(config);
-            } else {
+            if (!window.SwitchStudioState || typeof window.SwitchStudioState.syncConfig !== 'function') {
                 for (const [key, value] of Object.entries(config)) {
                     const element = document.getElementById(key);
                     if (element) {
@@ -5656,6 +6571,22 @@
 
         // --- INTERACTIVE ZONE EDITING ---
 
+        function updateZoneActionState() {
+            const editPending = !!zoneEditRequestId;
+            [editXMin, editXMax, editYMin, editYMax, editZMin, editZMax].forEach((input) => {
+                if (input) input.disabled = editPending;
+            });
+            if (btnCancelZoneEdit) btnCancelZoneEdit.disabled = editPending;
+            if (btnApplyZoneEdit) btnApplyZoneEdit.disabled = editPending;
+            if (zoneEditorSelect) zoneEditorSelect.disabled = isEditingZone || editPending;
+            if (btnDeleteZone) {
+                btnDeleteZone.disabled = !isActiveDeviceCommandReady() || isEditingZone || !!zoneDeleteRequestId;
+            }
+            if (controllerInitialized && chartConfig && chartConfig.edits) {
+                chartConfig.edits.shapePosition = isEditingZone && !editPending;
+            }
+        }
+
         // Start Edit Mode
         function startZoneEdit() {
             const target = zoneEditorSelect.value;
@@ -5688,12 +6619,18 @@
             if (zoneModule && typeof zoneModule.normalizeZoneConfig === 'function') {
                 draftZoneConfig = zoneModule.normalizeZoneConfig(draftZoneConfig, { allowZeroSpan: true, clampToBounds: true });
             }
+            if (window.SwitchStudioState && typeof window.SwitchStudioState.setExternalPending === 'function') {
+                window.SwitchStudioState.setExternalPending('zone-draft', true, {
+                    apply: () => applyZoneEdit(),
+                    discard: () => cancelZoneEdit()
+                });
+            }
             
             zoneEditorRawData.style.display = 'block';
             updateDraftCoordsText();
 
             // Enable drag in Plotly
-            chartConfig.edits.shapePosition = true;
+            updateZoneActionState();
             renderChartForCurrentMode();
         }
 
@@ -5721,7 +6658,7 @@
 
         // Capture Plotly Drag Events
         document.getElementById('chart').on('plotly_relayout', function(eventData) {
-            if (!isEditingZone) return;
+            if (!isEditingZone || zoneEditRequestId) return;
 
             // Check if the event is a shape modification
             if (Object.keys(eventData).some(k => k.includes('shapes['))) {
@@ -5762,7 +6699,7 @@
         
         // Manual Input Update
         function manualZoneUpdate() {
-            if (!isEditingZone) return;
+            if (!isEditingZone || zoneEditRequestId) return;
 
             const rawDraft = {
                 x_min: parseInt(editXMin.value) || 0,
@@ -5800,6 +6737,18 @@
         // Apply Button
         function applyZoneEdit() {
             if (!draftZoneConfig) return;
+            if (zoneEditRequestId) return;
+            if (Array.from(zoneUpdatePending.values()).some((entry) => (
+                entry &&
+                entry.topic === activeDeviceTopic &&
+                entry.target === editingTarget
+            ))) {
+                return;
+            }
+            if (!isActiveDeviceCommandReady()) {
+                reportActiveDeviceUnavailable('Zone updates');
+                return;
+            }
 
             const [category, area] = editingTarget.split(':');
             let areaPayload = null;
@@ -5840,19 +6789,43 @@
                 };
             }
              
-            socket.emit('update_parameter', { param: category, value: areaPayload });
+            const zoneRequestId = `zone-save-${Date.now()}`;
+            zoneEditRequestId = zoneRequestId;
+            zoneUpdatePending.set(zoneRequestId, {
+                topic: activeDeviceTopic,
+                target: editingTarget,
+                isDelete: false,
+                sent: false
+            });
+            updateZoneActionState();
+            socket.emit('update_parameter', {
+                param: category,
+                value: areaPayload,
+                topic: activeDeviceTopic,
+                request_id: zoneRequestId
+            });
 
-            endZoneEdit();
             if (window.SwitchStudioState) {
-                window.SwitchStudioState.setPacketStatus('saved', 'Zone saved');
-                window.SwitchStudioState.showToast('saved', 'Zone saved.', 1500);
+                window.SwitchStudioState.setPacketStatus('sending', 'Sending zone update…');
             } else {
-                packetInfo.innerText = "Zone Saved!";
+                packetInfo.innerText = "Sending zone update";
             }
         }
         
         function deleteZone() {
             if (!confirm("Are you sure you want to delete this zone?")) return;
+            if (!isActiveDeviceCommandReady()) {
+                reportActiveDeviceUnavailable('Zone deletion');
+                return;
+            }
+            if (zoneDeleteRequestId) return;
+            if (Array.from(zoneUpdatePending.values()).some((entry) => (
+                entry &&
+                entry.topic === activeDeviceTopic &&
+                entry.target === zoneEditorSelect.value
+            ))) {
+                return;
+            }
             
             const [category, area] = zoneEditorSelect.value.split(':');
             const areaPayload = {};
@@ -5864,38 +6837,59 @@
                 height_min: 0, height_max: 0 
             };
              
-            socket.emit('update_parameter', { param: category, value: areaPayload });
+            const zoneRequestId = `zone-delete-${Date.now()}`;
+            zoneDeleteRequestId = zoneRequestId;
+            zoneUpdatePending.set(zoneRequestId, {
+                topic: activeDeviceTopic,
+                target: zoneEditorSelect.value,
+                isDelete: true,
+                sent: false
+            });
+            updateZoneActionState();
+            socket.emit('update_parameter', {
+                param: category,
+                value: areaPayload,
+                topic: activeDeviceTopic,
+                request_id: zoneRequestId
+            });
             if (zoneModule && typeof zoneModule.appendCommandLog === 'function') {
                 zoneModule.appendCommandLog(`Deleted zone ${area}`, 'info');
             }
             if (window.SwitchStudioState) {
-                window.SwitchStudioState.setPacketStatus('saved', 'Zone deleted');
-                window.SwitchStudioState.showToast('saved', 'Zone deleted.', 1500);
+                window.SwitchStudioState.setPacketStatus('sending', 'Sending zone deletion…');
             } else {
-                packetInfo.innerText = "Zone Deleted.";
+                packetInfo.innerText = "Sending zone deletion";
             }
-            endZoneEdit(); // Close editor
         }
 
         // Cancel Button - Restores view
         function cancelZoneEdit() {
+            if (zoneEditRequestId) return;
             endZoneEdit();
-            socket.emit('force_sync'); // Refresh from device to undo visual changes
+            if (isActiveDeviceCommandReady()) socket.emit('force_sync');
         }
         
         function endZoneEdit() {
             isEditingZone = false;
             editingTarget = null;
             draftZoneConfig = null;
+            zoneEditRequestId = null;
+            if (window.SwitchStudioState && typeof window.SwitchStudioState.setExternalPending === 'function') {
+                window.SwitchStudioState.setExternalPending('zone-draft', false);
+            }
             //zoneEditorControls.style.display = 'none'; // REMOVED
             zoneEditorRawData.style.display = 'none';
             btnStartEdit.style.display = 'block'; // Show Start Button again
 
             // Reset chart editability
             chartConfig.edits.shapePosition = false;
+            updateZoneActionState();
             
             renderChartForCurrentMode();
         }
+        controllerInitialized = true;
+        updateDeviceSelectState();
+        updateZoneActionState();
     </script>
 </body>
 </html>

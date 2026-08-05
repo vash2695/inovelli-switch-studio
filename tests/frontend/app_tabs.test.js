@@ -36,6 +36,7 @@ class MockElement {
         this.classList = new MockClassList();
         this.style = { display: '' };
         this.listeners = {};
+        this.focused = false;
     }
 
     getAttribute(name) {
@@ -54,6 +55,10 @@ class MockElement {
         if (this.listeners.click) {
             this.listeners.click();
         }
+    }
+
+    focus() {
+        this.focused = true;
     }
 }
 
@@ -78,17 +83,33 @@ function loadTabsModule(options) {
         new MockElement({ 'data-tab-target': 'advanced' }),
     ];
     const panels = [
-        new MockElement({ 'data-tab-panels': 'zones' }),
-        new MockElement({ 'data-tab-panels': 'load' }),
-        new MockElement({ 'data-tab-panels': 'led' }),
-        new MockElement({ 'data-tab-panels': 'advanced' }),
+        new MockElement({ 'data-tab-panels': 'zones', 'data-tab-panel-primary': '' }),
+        new MockElement({ 'data-tab-panels': 'load', 'data-tab-panel-primary': '' }),
+        new MockElement({ 'data-tab-panels': 'led', 'data-tab-panel-primary': '' }),
+        new MockElement({ 'data-tab-panels': 'advanced', 'data-tab-panel-primary': '' }),
         new MockElement({ 'data-tab-panels': '' }),
     ];
+    const nestedPanel = new MockElement({
+        id: 'zonesPaneControls',
+        role: 'tabpanel',
+        'aria-labelledby': 'zonesPaneTabControls',
+        'data-tab-panels': 'zones',
+        'data-zones-pane': 'controls',
+    });
+    const nestedTabList = new MockElement({
+        id: 'zonesSidebarTabs',
+        role: 'tablist',
+        'aria-label': 'Presence and zones sidebar views',
+        'data-tab-panels': 'zones',
+    });
+    panels.push(nestedTabList, nestedPanel);
+    const primaryPanels = panels.filter((panel) => panel.getAttribute('data-tab-panel-primary') !== null);
 
     const root = {
         querySelectorAll: (selector) => {
             if (selector === '[data-tab-target]') return buttons;
             if (selector === '[data-tab-panels]') return panels;
+            if (selector === '[data-tab-panel-primary]') return primaryPanels;
             return [];
         },
     };
@@ -108,6 +129,8 @@ function loadTabsModule(options) {
         tabs: context.window.SwitchStudioTabs,
         buttons,
         panels,
+        nestedPanel,
+        nestedTabList,
         storageMap,
         root,
     };
@@ -153,4 +176,49 @@ test('tab module remaps legacy maintenance tab to advanced', () => {
     assert.equal(buttons[0].classList.contains('active'), false);
     assert.equal(panels[3].style.display, '');
     assert.equal(panels[0].style.display, 'none');
+});
+
+test('programmatic tab changes notify the workspace callback even when forcing the active tab', () => {
+    const { tabs, root } = loadTabsModule();
+    const notifications = [];
+    tabs.init({ root, defaultTab: 'load', onTabChange: (tab) => notifications.push(tab) });
+
+    assert.deepEqual(notifications, ['load']);
+    tabs.setActiveTab('zones');
+    tabs.setActiveTab('zones');
+    assert.deepEqual(notifications, ['load', 'zones', 'zones']);
+});
+
+test('tab keyboard navigation uses arrow keys and a roving tab stop', () => {
+    const { tabs, buttons, root } = loadTabsModule();
+    tabs.init({ root, defaultTab: 'zones' });
+    let prevented = false;
+
+    buttons[0].listeners.keydown({ key: 'ArrowRight', preventDefault: () => { prevented = true; } });
+    assert.equal(prevented, true);
+    assert.equal(tabs.getActiveTab(), 'load');
+    assert.equal(buttons[1].focused, true);
+    assert.equal(buttons[0].getAttribute('tabindex'), '-1');
+    assert.equal(buttons[1].getAttribute('tabindex'), '0');
+});
+
+test('top-level tab ARIA preserves nested zone tablist and tabpanel ownership', () => {
+    const { tabs, buttons, panels, nestedPanel, nestedTabList, root } = loadTabsModule();
+    tabs.init({ root, defaultTab: 'zones' });
+
+    assert.equal(panels[0].getAttribute('role'), 'tabpanel');
+    assert.equal(panels[0].getAttribute('aria-labelledby'), buttons[0].getAttribute('id'));
+    assert.match(buttons[0].getAttribute('aria-controls'), new RegExp(panels[0].getAttribute('id')));
+    assert.doesNotMatch(buttons[0].getAttribute('aria-controls'), /zonesPaneControls/);
+    assert.equal(nestedTabList.getAttribute('role'), 'tablist');
+    assert.equal(nestedTabList.getAttribute('aria-label'), 'Presence and zones sidebar views');
+    assert.equal(nestedTabList.getAttribute('aria-labelledby'), null);
+    assert.equal(nestedPanel.getAttribute('role'), 'tabpanel');
+    assert.equal(nestedPanel.getAttribute('aria-labelledby'), 'zonesPaneTabControls');
+
+    buttons[1].click();
+    assert.equal(nestedTabList.style.display, 'none');
+    assert.equal(nestedPanel.style.display, 'none');
+    assert.equal(nestedTabList.getAttribute('role'), 'tablist');
+    assert.equal(nestedPanel.getAttribute('aria-labelledby'), 'zonesPaneTabControls');
 });

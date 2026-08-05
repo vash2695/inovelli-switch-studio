@@ -79,6 +79,18 @@ def _as_int_or_none(value):
         return None
 
 
+def _as_number_or_none(value):
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed != parsed or parsed in {float('inf'), float('-inf')}:
+        return None
+    return int(parsed) if parsed.is_integer() else parsed
+
+
 def _as_bool(value, default=False):
     if value is None:
         return bool(default)
@@ -104,14 +116,14 @@ def _normalize_basic_state(value):
 
     if isinstance(value, str):
         normalized = value.strip().upper()
-        if normalized in {'ON', 'OFF', 'TOGGLE'}:
+        if normalized in {'ON', 'OFF'}:
             return normalized, None
         if normalized in {'TRUE', 'YES', '1'}:
             return 'ON', None
         if normalized in {'FALSE', 'NO', '0'}:
             return 'OFF', None
 
-    return None, "State must be ON, OFF, TOGGLE, or a boolean"
+    return None, "State must be ON, OFF, or a boolean"
 
 
 def _normalize_basic_brightness(value):
@@ -124,6 +136,51 @@ def _normalize_basic_brightness(value):
     if parsed > 254:
         parsed = 254
     return parsed, None
+
+
+def _values_equal(expected, observed):
+    if isinstance(expected, bool) or isinstance(observed, bool):
+        def as_bool_like(value):
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, (int, float)) and value in {0, 1}:
+                return bool(value)
+            normalized = str(value).strip().lower()
+            if normalized in {'true', 'on', 'yes', '1'}:
+                return True
+            if normalized in {'false', 'off', 'no', '0'}:
+                return False
+            return None
+
+        expected_bool = as_bool_like(expected)
+        observed_bool = as_bool_like(observed)
+        if expected_bool is not None and observed_bool is not None:
+            return expected_bool is observed_bool
+        return False
+
+    if isinstance(expected, (int, float)) or isinstance(observed, (int, float)):
+        try:
+            return float(expected) == float(observed)
+        except (TypeError, ValueError):
+            pass
+
+    if isinstance(expected, dict) or isinstance(observed, dict):
+        if not isinstance(expected, dict) or not isinstance(observed, dict):
+            return False
+        return all(
+            key in observed and _values_equal(value, observed.get(key))
+            for key, value in expected.items()
+        )
+
+    if isinstance(expected, list) or isinstance(observed, list):
+        if not isinstance(expected, list) or not isinstance(observed, list):
+            return False
+        return len(expected) == len(observed) and all(
+            _values_equal(expected_value, observed_value)
+            for expected_value, observed_value in zip(expected, observed)
+        )
+
+    return str(expected) == str(observed)
 
 try:
     with open(CONFIG_PATH) as f:
@@ -180,6 +237,10 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 # Stores device names, topics, config, and throttling timers
 device_list = {}
 device_list_lock = threading.Lock()
+# Retained availability messages can arrive before Zigbee2MQTT's retained
+# bridge/devices inventory. Keep the latest exact-topic value so inventory
+# creation is independent of MQTT delivery order.
+device_availability_cache = {}
 
 # Stores per-socket selected MQTT topic to avoid cross-session command routing
 session_topics = {}
@@ -187,6 +248,28 @@ session_topics_lock = threading.Lock()
 # Stores per-socket preference for auto-disabling target reporting on disconnect
 session_reporting_auto_off = {}
 session_reporting_auto_off_lock = threading.Lock()
+
+# Tracks writes until Zigbee2MQTT echoes the requested values on the device topic.
+pending_writes = {}
+pending_writes_lock = threading.Lock()
+PENDING_WRITE_TIMEOUT_SECONDS = 10.0
+
+# Correlates Zigbee2MQTT OTA responses (including responses with empty data on
+# failure) back to the device that initiated the request.
+ota_requests = {}
+ota_requests_lock = threading.Lock()
+OTA_REQUEST_RETENTION_SECONDS = 86400.0
+
+mqtt_state = {
+    'connected': False,
+    'broker_connected': False,
+    'zigbee2mqtt_connected': None,
+    'inventory_ready': False,
+    'reason': 'Starting',
+    'updated_at': time.time(),
+}
+mqtt_state_lock = threading.Lock()
+_MQTT_STATE_UNSET = object()
 
 
 def get_device_snapshot():
@@ -202,6 +285,186 @@ def get_device_by_topic(topic):
     return None
 
 
+def _iter_expose_nodes(value):
+    if isinstance(value, list):
+        for item in value:
+            yield from _iter_expose_nodes(item)
+        return
+    if not isinstance(value, dict):
+        return
+    yield value
+    yield from _iter_expose_nodes(value.get('features'))
+
+
+def _expose_allows(node, access_bit):
+    access = node.get('access') if isinstance(node, dict) else None
+    if isinstance(access, bool):
+        return True
+    if isinstance(access, int):
+        return bool(access & access_bit)
+    return True
+
+
+def infer_blue_series_capabilities(definition, model):
+    definition_data = definition if isinstance(definition, dict) else {}
+    top_level_exposes = definition_data.get('exposes', [])
+    control_groups = []
+    if isinstance(top_level_exposes, list):
+        for expose in top_level_exposes:
+            if not isinstance(expose, dict):
+                continue
+            expose_type = str(expose.get('type') or '').strip().lower()
+            if expose_type not in {'light', 'switch', 'fan'}:
+                continue
+            group_properties = {
+                str(node.get('property') or '').strip()
+                for node in _iter_expose_nodes(expose)
+                if str(node.get('property') or '').strip()
+            }
+            if group_properties.intersection({'state', 'brightness', 'fan_state', 'fan_mode'}):
+                control_groups.append(expose)
+
+    controls_ambiguous = len(control_groups) > 1
+    control_source = control_groups[0] if len(control_groups) == 1 else top_level_exposes
+    nodes_by_property = {}
+    for node in _iter_expose_nodes(control_source):
+        prop = str(node.get('property') or '').strip()
+        if prop:
+            nodes_by_property.setdefault(prop, []).append(node)
+    all_properties = {
+        str(node.get('property') or '').strip().lower()
+        for node in _iter_expose_nodes(top_level_exposes)
+        if str(node.get('property') or '').strip()
+    }
+
+    def find_property(candidates, access_bit):
+        for candidate in candidates:
+            if any(_expose_allows(node, access_bit) for node in nodes_by_property.get(candidate, [])):
+                return candidate
+        return None
+
+    state_property = None if controls_ambiguous else find_property(('state', 'fan_state'), 2)
+    brightness_property = None if controls_ambiguous else find_property(('brightness',), 2)
+    readable_state_property = (
+        find_property((state_property,), 4)
+        if state_property
+        else None
+    )
+    readable_brightness_property = (
+        find_property((brightness_property,), 4)
+        if brightness_property
+        else None
+    )
+    normalized_model = str(model or '').strip().upper()
+    has_mmwave = any(prop.startswith('mmwave') for prop in all_properties)
+    is_vzm32 = normalized_model == 'VZM32-SN'
+
+    return {
+        'state': state_property is not None,
+        'brightness': brightness_property is not None,
+        'presence': 'occupancy' in all_properties or has_mmwave,
+        'zones': is_vzm32,
+        'full_editor': is_vzm32,
+        'state_property': state_property,
+        'brightness_property': brightness_property,
+        'readable_state_property': readable_state_property,
+        'readable_brightness_property': readable_brightness_property,
+        'quick_controls_ambiguous': controls_ambiguous,
+    }
+
+
+def get_basic_control_mapping(device):
+    if not isinstance(device, dict):
+        return {'state': None, 'brightness': None}
+    capabilities = device.get('capabilities') if isinstance(device.get('capabilities'), dict) else {}
+    if capabilities.get('quick_controls_ambiguous'):
+        return {'state': None, 'brightness': None}
+    if 'state_property' in capabilities:
+        state_property = capabilities.get('state_property')
+    else:
+        state_property = 'state' if capabilities.get('state') else None
+    if 'brightness_property' in capabilities:
+        brightness_property = capabilities.get('brightness_property')
+    else:
+        brightness_property = 'brightness' if capabilities.get('brightness') else None
+    return {
+        'state': str(state_property).strip() if state_property else None,
+        'brightness': str(brightness_property).strip() if brightness_property else None,
+    }
+
+
+def get_initial_control_query(device):
+    if not isinstance(device, dict):
+        return {}
+    capabilities = device.get('capabilities') if isinstance(device.get('capabilities'), dict) else {}
+    properties = (
+        capabilities.get('readable_state_property'),
+        capabilities.get('readable_brightness_property'),
+    )
+    return {str(prop): '' for prop in properties if prop}
+
+
+def upsert_discovered_device(
+    friendly_name,
+    model='VZM32-SN',
+    manufacturer='Inovelli',
+    capabilities=None,
+    seen_at=None,
+    inventory_present=False,
+):
+    name = str(friendly_name or '').strip()
+    if not name or name == 'bridge':
+        return None, False
+    topic = f"{MQTT_BASE_TOPIC}/{name}"
+    created = False
+    with device_list_lock:
+        cached_availability = device_availability_cache.get(topic)
+        cached_state = (
+            cached_availability.get('state')
+            if isinstance(cached_availability, dict)
+            else None
+        )
+        if name not in device_list:
+            device_list[name] = {
+                'friendly_name': name,
+                'topic': topic,
+                'manufacturer': manufacturer or 'Inovelli',
+                'model': model or 'Unknown Blue Series model',
+                'availability': cached_state,
+                'inventory_present': bool(inventory_present),
+                'capabilities': {
+                    'state': False,
+                    'brightness': False,
+                    'presence': False,
+                    'zones': False,
+                    **(capabilities or {}),
+                },
+                'interference_zones': [],
+                'detection_zones': [],
+                'stay_zones': [],
+                'zone_config': {'x_min': -400, 'x_max': 400, 'y_min': 0, 'y_max': 600},
+                'last_config': {},
+                'ota_status': default_ota_status(),
+                'last_update': 0,
+                'last_seen': time.time() if seen_at is None else seen_at,
+            }
+            created = True
+        else:
+            device = device_list[name]
+            if model:
+                device['model'] = model
+            if manufacturer:
+                device['manufacturer'] = manufacturer
+            device.setdefault('capabilities', {}).update(capabilities or {})
+            if cached_state:
+                device['availability'] = cached_state
+            if inventory_present:
+                device['inventory_present'] = True
+            if seen_at is not None:
+                device['last_seen'] = seen_at
+    return topic, created
+
+
 def set_session_topic(sid, topic):
     with session_topics_lock:
         session_topics[sid] = topic
@@ -210,6 +473,40 @@ def set_session_topic(sid, topic):
 def get_session_topic(sid):
     with session_topics_lock:
         return session_topics.get(sid)
+
+
+def get_valid_session_topic(sid):
+    topic = get_session_topic(sid)
+    if not topic or not get_device_by_topic(topic):
+        return None
+    return topic
+
+
+def device_supports_full_editor(topic):
+    device = get_device_by_topic(topic)
+    if not device:
+        return False
+    capabilities = device.get('capabilities') if isinstance(device.get('capabilities'), dict) else {}
+    if 'full_editor' in capabilities:
+        return bool(capabilities.get('full_editor'))
+    return str(device.get('model') or '').strip().upper() == 'VZM32-SN'
+
+
+def resolve_command_topic(sid, data=None):
+    requested_topic = data.get('topic') if isinstance(data, dict) else None
+    if requested_topic:
+        topic = get_device_topic_from_identifier(requested_topic)
+        if not topic:
+            return None, 'Unknown device topic'
+        if not device_supports_full_editor(topic):
+            return None, 'Full configuration is not supported for this model yet'
+        return topic, None
+    topic = get_valid_session_topic(sid)
+    if not topic:
+        return None, 'No device selected'
+    if not device_supports_full_editor(topic):
+        return None, 'Full configuration is not supported for this model yet'
+    return topic, None
 
 
 def clear_session_topic(sid):
@@ -237,6 +534,226 @@ def get_session_reporting_auto_off(sid):
 def clear_session_reporting_auto_off(sid):
     with session_reporting_auto_off_lock:
         session_reporting_auto_off.pop(sid, None)
+
+
+def get_mqtt_state():
+    with mqtt_state_lock:
+        return copy.deepcopy(mqtt_state)
+
+
+def update_mqtt_state(
+    connected=_MQTT_STATE_UNSET,
+    reason=None,
+    zigbee2mqtt_connected=_MQTT_STATE_UNSET,
+    inventory_ready=_MQTT_STATE_UNSET,
+):
+    with mqtt_state_lock:
+        if connected is not _MQTT_STATE_UNSET:
+            mqtt_state['broker_connected'] = bool(connected)
+        if zigbee2mqtt_connected is not _MQTT_STATE_UNSET:
+            mqtt_state['zigbee2mqtt_connected'] = (
+                None if zigbee2mqtt_connected is None else bool(zigbee2mqtt_connected)
+            )
+        if inventory_ready is not _MQTT_STATE_UNSET:
+            mqtt_state['inventory_ready'] = bool(inventory_ready)
+        broker_connected = bool(mqtt_state.get('broker_connected'))
+        bridge_connected = mqtt_state.get('zigbee2mqtt_connected')
+        mqtt_state['connected'] = broker_connected and bridge_connected is True
+        mqtt_state['reason'] = str(
+            reason
+            or ('Connected' if mqtt_state['connected'] else 'Disconnected')
+        )
+        mqtt_state['updated_at'] = time.time()
+        payload = copy.deepcopy(mqtt_state)
+    socketio.emit('backend_status', {'mqtt': payload, 'ts': time.time()})
+    return payload
+
+
+def emit_backend_status(room=None):
+    socketio.emit(
+        'backend_status',
+        {'mqtt': get_mqtt_state(), 'ts': time.time()},
+        room=room
+    )
+
+
+def register_ota_request(topic, action):
+    transaction = f"switch-studio-{time.time_ns()}"
+    now = time.monotonic()
+    with ota_requests_lock:
+        for key, entry in list(ota_requests.items()):
+            if now - entry.get('created_at', now) > OTA_REQUEST_RETENTION_SECONDS:
+                ota_requests.pop(key, None)
+        ota_requests[transaction] = {
+            'topic': topic,
+            'action': action,
+            'created_at': now,
+        }
+    return transaction
+
+
+def remove_ota_request(transaction):
+    if not transaction:
+        return None
+    with ota_requests_lock:
+        return ota_requests.pop(str(transaction), None)
+
+
+def _pending_write_key(sid, request_id):
+    return f"{sid}:{request_id}"
+
+
+def _cancel_pending_timer(entry):
+    timer = entry.get('timer') if isinstance(entry, dict) else None
+    if timer is not None:
+        try:
+            timer.cancel()
+        except Exception:
+            pass
+
+
+def remove_pending_write(sid, request_id):
+    key = _pending_write_key(sid, request_id)
+    with pending_writes_lock:
+        entry = pending_writes.pop(key, None)
+    _cancel_pending_timer(entry)
+    return entry
+
+
+def expire_pending_write(sid, request_id):
+    entry = remove_pending_write(sid, request_id)
+    if not entry:
+        return None
+
+    expected = entry.get('expected', {})
+    confirmed_fields = sorted(entry.get('confirmed_fields', set()))
+    unresolved_fields = sorted(set(expected.keys()) - set(confirmed_fields))
+    emit_command_result(
+        sid,
+        action=entry.get('action') or 'apply_parameters',
+        status='not_confirmed',
+        topic=entry.get('topic'),
+        request_id=request_id,
+        payload={
+            'expected': copy.deepcopy(expected),
+            'observed': copy.deepcopy(entry.get('observed', {})),
+            'confirmed_fields': confirmed_fields,
+            'unresolved_fields': unresolved_fields,
+        },
+        message='Device did not confirm every requested value'
+    )
+    return entry
+
+
+def register_pending_write(sid, request_id, topic, action, expected):
+    if not sid or not request_id or not topic or not isinstance(expected, dict) or not expected:
+        return None
+
+    key = _pending_write_key(sid, request_id)
+    entry = {
+        'sid': sid,
+        'request_id': request_id,
+        'topic': topic,
+        'action': action,
+        'expected': copy.deepcopy(expected),
+        'observed': {},
+        'confirmed_fields': set(),
+        'created_at': time.monotonic(),
+        'timer': None,
+    }
+
+    if not TEST_MODE:
+        timer = threading.Timer(PENDING_WRITE_TIMEOUT_SECONDS, expire_pending_write, args=(sid, request_id))
+        timer.daemon = True
+        entry['timer'] = timer
+
+    with pending_writes_lock:
+        previous = pending_writes.pop(key, None)
+        pending_writes[key] = entry
+    _cancel_pending_timer(previous)
+
+    if entry['timer'] is not None:
+        entry['timer'].start()
+    return entry
+
+
+def clear_pending_writes_for_sid(sid):
+    removed = []
+    prefix = f"{sid}:"
+    with pending_writes_lock:
+        for key in [item for item in pending_writes if item.startswith(prefix)]:
+            removed.append(pending_writes.pop(key))
+    for entry in removed:
+        _cancel_pending_timer(entry)
+
+
+def reconcile_pending_writes(topic, config_payload):
+    if not topic or not isinstance(config_payload, dict):
+        return
+
+    completed = []
+    partial = []
+    with pending_writes_lock:
+        for key, entry in list(pending_writes.items()):
+            if entry.get('topic') != topic:
+                continue
+
+            newly_confirmed = []
+            confirmation_changed = False
+            for param, expected_value in entry.get('expected', {}).items():
+                if param not in config_payload:
+                    continue
+                observed_value = config_payload.get(param)
+                entry['observed'][param] = copy.deepcopy(observed_value)
+                if _values_equal(expected_value, observed_value) and param not in entry['confirmed_fields']:
+                    entry['confirmed_fields'].add(param)
+                    newly_confirmed.append(param)
+                    confirmation_changed = True
+                elif not _values_equal(expected_value, observed_value) and param in entry['confirmed_fields']:
+                    entry['confirmed_fields'].remove(param)
+                    confirmation_changed = True
+
+            if not confirmation_changed:
+                continue
+
+            if len(entry['confirmed_fields']) == len(entry.get('expected', {})):
+                completed.append(pending_writes.pop(key))
+            else:
+                partial.append(copy.deepcopy({
+                    'sid': entry.get('sid'),
+                    'request_id': entry.get('request_id'),
+                    'topic': entry.get('topic'),
+                    'action': entry.get('action'),
+                    'expected': entry.get('expected', {}),
+                    'confirmed_fields': set(entry.get('confirmed_fields', set())),
+                }))
+
+    for entry in completed:
+        _cancel_pending_timer(entry)
+        emit_command_result(
+            entry.get('sid'),
+            action=entry.get('action') or 'apply_parameters',
+            status='confirmed',
+            topic=entry.get('topic'),
+            request_id=entry.get('request_id'),
+            payload=copy.deepcopy(entry.get('expected', {})),
+            message='Device confirmed requested values'
+        )
+
+    for entry in partial:
+        expected_fields = set(entry.get('expected', {}).keys())
+        confirmed_fields = set(entry.get('confirmed_fields', set()))
+        emit_command_result(
+            entry.get('sid'),
+            action=entry.get('action') or 'apply_parameters',
+            status='sending',
+            topic=entry.get('topic'),
+            request_id=entry.get('request_id'),
+            payload={
+                'confirmed_fields': sorted(confirmed_fields),
+                'unresolved_fields': sorted(expected_fields - confirmed_fields),
+            }
+        )
 
 
 def default_ota_status():
@@ -292,7 +809,7 @@ def get_device_id_from_topic(topic):
     prefix = f"{MQTT_BASE_TOPIC}/"
     if topic.startswith(prefix):
         suffix = topic[len(prefix):]
-        return suffix.split('/')[0] if suffix else None
+        return suffix or None
     return topic.split('/')[-1]
 
 
@@ -356,9 +873,12 @@ def update_device_ota_status(topic, values):
 
             if ota_status.get('state'):
                 normalized_state = str(ota_status.get('state')).strip().lower()
-                if normalized_state in {'idle', 'available', 'up_to_date', 'completed', 'success', 'done', 'checked'}:
-                    ota_status['progress'] = None if ota_status.get('progress') in {None, '', 0} else ota_status.get('progress')
-                if normalized_state in {'idle', 'completed', 'success', 'done', 'up_to_date'}:
+                terminal_states = {'idle', 'available', 'up_to_date', 'completed', 'success', 'done', 'checked'}
+                if normalized_state in terminal_states and 'progress' not in values:
+                    ota_status['progress'] = None
+                if normalized_state in {'idle', 'available', 'up_to_date', 'checked'}:
+                    ota_status['progress'] = None
+                if normalized_state in terminal_states:
                     ota_status['remaining'] = None
             ota_payload = copy.deepcopy(ota_status)
             break
@@ -383,87 +903,63 @@ def extract_ota_status_from_payload(payload):
         return None
 
     update_info = payload.get('update') if isinstance(payload.get('update'), dict) else {}
-    available = None
-    for key in ('update_available', 'updateAvailable', 'available'):
-        if key in payload and payload.get(key) is not None:
-            available = _as_bool(payload.get(key), False)
-            break
-        if key in update_info and update_info.get(key) is not None:
-            available = _as_bool(update_info.get(key), False)
+    result = {}
+
+    for source in (payload, update_info):
+        for key in ('update_available', 'updateAvailable'):
+            if key in source and source.get(key) is not None:
+                result['available'] = _as_bool(source.get(key), False)
+                break
+        if 'available' in result:
             break
 
-    downgrade = None
-    for key in ('downgrade',):
-        if key in payload and payload.get(key) is not None:
-            downgrade = _as_bool(payload.get(key), False)
-            break
-        if key in update_info and update_info.get(key) is not None:
-            downgrade = _as_bool(update_info.get(key), False)
+    for source in (payload, update_info):
+        if 'downgrade' in source and source.get('downgrade') is not None:
+            result['downgrade'] = _as_bool(source.get('downgrade'), False)
             break
 
-    installed_version = None
-    for key in ('installed_version', 'installedVersion', 'current_version', 'currentVersion'):
-        if key in update_info and update_info.get(key) is not None:
-            installed_version = str(update_info.get(key))
-            break
-        if key in payload and payload.get(key) is not None:
-            installed_version = str(payload.get(key))
-            break
-
-    latest_version = None
-    for key in ('latest_version', 'latestVersion', 'available_version', 'availableVersion'):
-        if key in update_info and update_info.get(key) is not None:
-            latest_version = str(update_info.get(key))
-            break
-        if key in payload and payload.get(key) is not None:
-            latest_version = str(payload.get(key))
+    for source in (update_info, payload):
+        for key in ('installed_version', 'installedVersion', 'current_version', 'currentVersion'):
+            if key in source and source.get(key) is not None:
+                result['installed_version'] = str(source.get(key))
+                break
+        if 'installed_version' in result:
             break
 
-    state = None
+    for source in (update_info, payload):
+        for key in ('latest_version', 'latestVersion', 'available_version', 'availableVersion'):
+            if key in source and source.get(key) is not None:
+                result['latest_version'] = str(source.get(key))
+                break
+        if 'latest_version' in result:
+            break
+
+    # Device payloads also contain a top-level ON/OFF load state. OTA lifecycle
+    # fields are authoritative only inside Zigbee2MQTT's nested update object.
     for key in ('state', 'status'):
         if key in update_info and update_info.get(key) is not None:
-            state = str(update_info.get(key))
-            break
-        if key in payload and payload.get(key) is not None:
-            state = str(payload.get(key))
+            result['state'] = str(update_info.get(key))
             break
 
-    progress = _as_int_or_none(update_info.get('progress')) if isinstance(update_info, dict) else None
-    if progress is None:
-        progress = _as_int_or_none(payload.get('progress'))
+    if 'progress' in update_info:
+        raw_progress = update_info.get('progress')
+        progress = _as_number_or_none(raw_progress)
+        if progress is not None or raw_progress is None:
+            result['progress'] = progress
 
-    remaining = _as_int_or_none(update_info.get('remaining')) if isinstance(update_info, dict) else None
-    if remaining is None:
-        remaining = _as_int_or_none(payload.get('remaining'))
+    if 'remaining' in update_info:
+        raw_remaining = update_info.get('remaining')
+        remaining = _as_number_or_none(raw_remaining)
+        if remaining is not None or raw_remaining is None:
+            result['remaining'] = remaining
 
-    last_error = None
     for key in ('error', 'message'):
-        if key in payload and payload.get(key):
-            last_error = str(payload.get(key))
+        if key in update_info:
+            error_value = update_info.get(key)
+            result['last_error'] = None if error_value in {None, ''} else str(error_value)
             break
 
-    if (
-        available is None
-        and downgrade is None
-        and installed_version is None
-        and latest_version is None
-        and state is None
-        and progress is None
-        and remaining is None
-        and last_error is None
-    ):
-        return None
-
-    return {
-        'available': available,
-        'downgrade': downgrade,
-        'installed_version': installed_version,
-        'latest_version': latest_version,
-        'state': state,
-        'progress': progress,
-        'remaining': remaining,
-        'last_error': last_error,
-    }
+    return result or None
 
 
 def resolve_target_reporting_value(enabled):
@@ -597,11 +1093,29 @@ def on_connect(client, userdata, flags, rc):
         subscribe_topic = f"{MQTT_BASE_TOPIC}/#"
         client.subscribe(subscribe_topic)
         print(f"Subscribed to topic: {subscribe_topic}", flush=True)
+        update_mqtt_state(
+            True,
+            'Waiting for Zigbee2MQTT',
+            zigbee2mqtt_connected=None,
+            inventory_ready=False,
+        )
     else:
+        update_mqtt_state(False, reason)
         print(
             "MQTT connection was not accepted. Check broker host/port and credentials in add-on Configuration.",
             flush=True
         )
+
+
+def on_disconnect(client, userdata, rc):
+    reason = 'Connection lost' if rc else 'Disconnected'
+    print(f"Disconnected from MQTT Broker with code {rc}", flush=True)
+    update_mqtt_state(False, reason, zigbee2mqtt_connected=None, inventory_ready=False)
+
+
+def on_connect_fail(client, userdata):
+    print("MQTT connection attempt failed; retrying", flush=True)
+    update_mqtt_state(False, 'MQTT broker unavailable', zigbee2mqtt_connected=None, inventory_ready=False)
 
 def on_message(client, userdata, msg):
     global device_list
@@ -613,9 +1127,122 @@ def on_message(client, userdata, msg):
         if not payload_str:
             return
             
+        bridge_state_topic = f"{MQTT_BASE_TOPIC}/bridge/state"
+        is_exact_device_topic = get_device_by_topic(topic) is not None
+        is_availability_topic = (
+            not is_exact_device_topic
+            and topic.startswith(f"{MQTT_BASE_TOPIC}/")
+            and topic.endswith('/availability')
+        )
         try:
             payload = json.loads(payload_str)
         except json.JSONDecodeError:
+            if topic != bridge_state_topic and not is_availability_topic:
+                return
+            payload = payload_str
+
+        if topic == bridge_state_topic:
+            bridge_state = payload.get('state') if isinstance(payload, dict) else payload
+            normalized_bridge_state = str(bridge_state or '').strip().lower()
+            if normalized_bridge_state in {'online', 'offline'}:
+                is_online = normalized_bridge_state == 'online'
+                update_mqtt_state(
+                    zigbee2mqtt_connected=is_online,
+                    reason='Connected' if is_online else 'Zigbee2MQTT is offline'
+                )
+            return
+
+        if is_availability_topic:
+            availability_value = payload.get('state') if isinstance(payload, dict) else payload
+            normalized_availability = str(availability_value or '').strip().lower()
+            if normalized_availability in {'online', 'offline'}:
+                base_topic = topic[:-len('/availability')]
+                changed = False
+                with device_list_lock:
+                    device_availability_cache[base_topic] = {
+                        'state': normalized_availability,
+                        'updated_at': time.time(),
+                    }
+                    if len(device_availability_cache) > 512:
+                        oldest_topic = min(
+                            device_availability_cache,
+                            key=lambda cached_topic: device_availability_cache[cached_topic].get('updated_at', 0),
+                        )
+                        device_availability_cache.pop(oldest_topic, None)
+                    for device in device_list.values():
+                        if device.get('topic') != base_topic:
+                            continue
+                        changed = device.get('availability') != normalized_availability
+                        device['availability'] = normalized_availability
+                        if normalized_availability == 'online':
+                            device['last_seen'] = time.time()
+                        break
+                if changed:
+                    emit_device_list()
+            return
+
+        bridge_devices_topic = f"{MQTT_BASE_TOPIC}/bridge/devices"
+        if topic == bridge_devices_topic and isinstance(payload, list):
+            initial_queries = []
+            inventory_names = set()
+            for entry in payload:
+                if not isinstance(entry, dict):
+                    continue
+                if (
+                    entry.get('disabled') is True
+                    or entry.get('supported') is False
+                    or entry.get('interview_completed') is False
+                ):
+                    continue
+                definition = entry.get('definition') if isinstance(entry.get('definition'), dict) else {}
+                manufacturer = str(definition.get('vendor') or entry.get('manufacturer') or '').strip()
+                model = str(definition.get('model') or entry.get('model_id') or '').strip()
+                if manufacturer.lower() != 'inovelli' or not model.upper().startswith('VZM'):
+                    continue
+                friendly_name = entry.get('friendly_name')
+                if not friendly_name:
+                    continue
+                inventory_names.add(str(friendly_name))
+                capabilities = infer_blue_series_capabilities(definition, model)
+                discovered_topic, _ = upsert_discovered_device(
+                    friendly_name,
+                    model=model,
+                    manufacturer=manufacturer,
+                    capabilities=capabilities,
+                    seen_at=None,
+                    inventory_present=True,
+                )
+                if discovered_topic:
+                    discovered_device = get_device_by_topic(discovered_topic)
+                    query_payload = get_initial_control_query(discovered_device)
+                    if query_payload:
+                        initial_queries.append((discovered_topic, query_payload))
+
+            with device_list_lock:
+                for existing_name in list(device_list.keys()):
+                    if existing_name not in inventory_names:
+                        device_list.pop(existing_name, None)
+                active_topics = {
+                    device.get('topic')
+                    for device in device_list.values()
+                    if device.get('topic')
+                }
+                for cached_topic in list(device_availability_cache):
+                    if cached_topic not in active_topics:
+                        device_availability_cache.pop(cached_topic, None)
+
+            current_mqtt_state = get_mqtt_state()
+            update_mqtt_state(
+                reason=current_mqtt_state.get('reason'),
+                inventory_ready=True,
+            )
+            emit_device_list()
+            if client is not None:
+                for discovered_topic, query_data in initial_queries:
+                    try:
+                        client.publish(f"{discovered_topic}/get", json.dumps(query_data), qos=0)
+                    except Exception as query_error:
+                        print(f"Failed to request initial state for {discovered_topic}: {query_error}", flush=True)
             return
 
         # Zigbee2MQTT bridge topics may publish arrays/literals; this app only processes object payloads.
@@ -626,6 +1253,10 @@ def on_message(client, userdata, msg):
         bridge_update_topic = f"{MQTT_BASE_TOPIC}/bridge/response/device/ota_update/update"
         if topic in {bridge_check_topic, bridge_update_topic}:
             bridge_data = payload.get('data') if isinstance(payload.get('data'), dict) else payload
+            transaction = payload.get('transaction')
+            if not transaction and isinstance(bridge_data, dict):
+                transaction = bridge_data.get('transaction')
+            ota_request = remove_ota_request(transaction)
             target_identifier = None
             if isinstance(bridge_data, dict):
                 target_identifier = bridge_data.get('id') or bridge_data.get('device') or bridge_data.get('friendly_name')
@@ -633,17 +1264,35 @@ def on_message(client, userdata, msg):
                 target_identifier = payload.get('id') or payload.get('device')
 
             target_topic = get_device_topic_from_identifier(target_identifier)
+            if not target_topic and ota_request:
+                target_topic = ota_request.get('topic')
             if target_topic:
                 status_payload = extract_ota_status_from_payload(bridge_data if isinstance(bridge_data, dict) else payload) or {}
                 bridge_status = str(payload.get('status') or '').strip().lower() or None
                 if bridge_status:
                     status_payload['bridge_status'] = bridge_status
+                if bridge_status == 'ok' and 'last_error' not in status_payload:
+                    status_payload['last_error'] = None
                 if topic == bridge_check_topic:
                     status_payload['last_checked'] = time.time()
                     if status_payload.get('state') is None and bridge_status == 'ok':
                         status_payload['state'] = 'checked'
-                elif topic == bridge_update_topic and status_payload.get('state') is None and bridge_status == 'ok':
-                    status_payload['state'] = 'requested'
+                elif topic == bridge_update_topic and bridge_status == 'ok':
+                    status_payload.update({
+                        'state': 'completed',
+                        'available': False,
+                        'progress': 100,
+                        'remaining': None,
+                    })
+                    to_version = bridge_data.get('to') if isinstance(bridge_data.get('to'), dict) else {}
+                    completed_version = (
+                        to_version.get('file_version')
+                        or to_version.get('fileVersion')
+                        or to_version.get('version')
+                    )
+                    if completed_version is not None:
+                        status_payload['installed_version'] = str(completed_version)
+                        status_payload['latest_version'] = str(completed_version)
 
                 if bridge_status and bridge_status != 'ok':
                     status_payload['last_error'] = str(payload.get('error') or payload.get('message') or 'OTA request failed')
@@ -654,38 +1303,47 @@ def on_message(client, userdata, msg):
 
         # --- DEVICE DISCOVERY ---
         if topic.startswith(MQTT_BASE_TOPIC):
-            payload_keys = [k for k in payload.keys() if isinstance(k, str)]
-            has_mmwave_key = (
-                "mmWaveVersion" in payload
-                or any(key.startswith("mmWave") or key.startswith("mmwave_") for key in payload_keys)
+            has_inovelli_mmwave_signature = (
+                'mmWaveVersion' in payload
+                and any(
+                    key in payload
+                    for key in ('mmwaveControlWiredDevice', 'mmWaveRoomSizePreset', 'mmWaveTargetInfoReport')
+                )
             )
-            if has_mmwave_key:
-                parts = topic.split('/')
-                if len(parts) >= 2:
-                    friendly_name = parts[1]
-                    if friendly_name and friendly_name != 'bridge':
-                        discovered = False
-                        with device_list_lock:
-                            if friendly_name not in device_list:
-                                print(f"Discovered Inovelli Switch: {friendly_name}", flush=True)
-                                device_list[friendly_name] = {
-                                    'friendly_name': friendly_name, 
-                                    'topic': f"{MQTT_BASE_TOPIC}/{friendly_name}", 
-                                    'interference_zones': [],
-                                    'detection_zones': [],
-                                    'stay_zones': [],
-                                    'zone_config': {"x_min": -400, "x_max": 400, "y_min": 0, "y_max": 600},
-                                    'last_config': {},
-                                    'ota_status': default_ota_status(),
-                                    'last_update': 0,
-                                    'last_seen': time.time()
-                                }
-                                discovered = True
-                            else:
-                                device_list[friendly_name]['last_seen'] = time.time()
-
-                        if discovered:
-                            emit_device_list()
+            # Signature discovery is only a fallback for topics that were not
+            # already seeded from bridge/devices. Sparse state reports must not
+            # downgrade the authoritative expose-based control mappings.
+            if has_inovelli_mmwave_signature and not is_exact_device_topic:
+                prefix = f"{MQTT_BASE_TOPIC}/"
+                friendly_name = topic[len(prefix):] if topic.startswith(prefix) else ''
+                is_command_topic = any(
+                    topic.endswith(suffix)
+                    and get_device_by_topic(topic[:-len(suffix)]) is not None
+                    for suffix in ('/get', '/set', '/availability')
+                )
+                if friendly_name and not friendly_name.startswith('bridge/') and not is_command_topic:
+                    _, discovered = upsert_discovered_device(
+                        friendly_name,
+                        model='VZM32-SN',
+                        manufacturer='Inovelli',
+                        capabilities={
+                            'state': 'state' in payload,
+                            'brightness': 'brightness' in payload,
+                            'presence': True,
+                            'zones': True,
+                            'full_editor': True,
+                            'state_property': 'state' if 'state' in payload else None,
+                            'brightness_property': 'brightness' if 'brightness' in payload else None,
+                            'readable_state_property': 'state' if 'state' in payload else None,
+                            'readable_brightness_property': 'brightness' if 'brightness' in payload else None,
+                            'quick_controls_ambiguous': False,
+                        },
+                        seen_at=time.time(),
+                        inventory_present=False,
+                    )
+                    if discovered:
+                        print(f"Discovered Inovelli Switch: {friendly_name}", flush=True)
+                        emit_device_list()
 
         # --- CURRENT DEVICE PROCESSING ---
         fname = None
@@ -695,6 +1353,7 @@ def on_message(client, userdata, msg):
                 if topic == data['topic']:
                     fname = name
                     device_topic = data['topic']
+                    data['last_seen'] = time.time()
                     break
         if not fname: return
 
@@ -805,6 +1464,13 @@ def on_message(client, userdata, msg):
         
         # --- STANDARD STATE UPDATE ---
         config_payload = {k: v for k, v in payload.items() if not k.isdigit()}
+        basic_control_mapping = get_basic_control_mapping(get_device_by_topic(device_topic))
+        state_property = basic_control_mapping.get('state')
+        brightness_property = basic_control_mapping.get('brightness')
+        if state_property and state_property != 'state' and state_property in config_payload:
+            config_payload['state'] = config_payload[state_property]
+        if brightness_property and brightness_property != 'brightness' and brightness_property in config_payload:
+            config_payload['brightness'] = config_payload[brightness_property]
         
         if config_payload:
             socketio.emit('device_config', {'topic': device_topic, 'payload': config_payload})
@@ -821,6 +1487,11 @@ def on_message(client, userdata, msg):
                     if not isinstance(device_data.get('last_config'), dict):
                         device_data['last_config'] = {}
                     device_data['last_config'].update(config_payload)
+                    capabilities = device_data.setdefault('capabilities', {})
+                    if 'state' in config_payload and 'state' not in capabilities:
+                        capabilities['state'] = True
+                    if 'brightness' in config_payload and 'brightness' not in capabilities:
+                        capabilities['brightness'] = True
 
                     current_zone = dict(device_data.get('zone_config', {"x_min": -400, "x_max": 400, "y_min": 0, "y_max": 600}))
 
@@ -852,6 +1523,8 @@ def on_message(client, userdata, msg):
             if ota_status_update:
                 update_device_ota_status(device_topic, ota_status_update)
 
+            reconcile_pending_writes(device_topic, config_payload)
+
             if zone_payload:
                 socketio.emit('zone_config', {'topic': device_topic, 'payload': zone_payload})
                 emit_device_delta('zone_config', zone_payload, topic=device_topic)
@@ -865,21 +1538,31 @@ if MQTT_USERNAME or MQTT_PASSWORD:
     mqtt_client.username_pw_set(MQTT_USERNAME or '', MQTT_PASSWORD or None)
 
 mqtt_client.on_connect = on_connect
+mqtt_client.on_connect_fail = on_connect_fail
+mqtt_client.on_disconnect = on_disconnect
 mqtt_client.on_message = on_message
 
-try:
-    if not TEST_MODE:
-        mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
-        mqtt_client.loop_start()
-except Exception as e:
-    print(f"Connection Failed: {e}", flush=True)
+def start_mqtt_client(client):
+    client.reconnect_delay_set(min_delay=1, max_delay=30)
+    try:
+        client.connect_async(MQTT_BROKER, MQTT_PORT, 60)
+    except Exception as e:
+        print(f"Initial MQTT connection setup failed: {e}", flush=True)
+    finally:
+        client.loop_start()
+
+
+if not TEST_MODE:
+    start_mqtt_client(mqtt_client)
 
 
 def publish_json(topic, payload, origin, sid=None):
     payload_str = json.dumps(payload)
     print(f"[MQTT-PUBLISH] origin={origin} sid={sid or '-'} topic={topic} payload={payload_str}", flush=True)
     try:
-        publish_result = mqtt_client.publish(topic, payload_str)
+        # QoS 0 makes a disconnected command fail immediately instead of being
+        # buffered by Paho and unexpectedly executing after a later reconnect.
+        publish_result = mqtt_client.publish(topic, payload_str, qos=0)
         rc = getattr(publish_result, 'rc', None)
         ok = (rc == mqtt.MQTT_ERR_SUCCESS)
         return ok, rc
@@ -897,15 +1580,19 @@ def handle_socket_connect():
     print(f"WebSocket connected: sid={request.sid}", flush=True)
     set_session_reporting_auto_off(request.sid, False)
     emit_schema_model(room=request.sid)
+    emit_backend_status(room=request.sid)
 
 
 @socketio.on('disconnect')
 def handle_socket_disconnect():
     sid = request.sid
+    # This topic was validated when selected. Keep it for cleanup even if the
+    # device was evicted from the in-memory discovery list before disconnect.
     current_topic = get_session_topic(sid)
     should_auto_off = get_session_reporting_auto_off(sid)
     clear_session_topic(sid)
     clear_session_reporting_auto_off(sid)
+    clear_pending_writes_for_sid(sid)
 
     if should_auto_off and current_topic and not has_session_for_topic(current_topic):
         disable_value = resolve_target_reporting_value(False)
@@ -940,21 +1627,49 @@ def handle_change_device(new_topic):
         clear_session_topic(request.sid)
         return
 
-    set_session_topic(request.sid, new_topic)
-    print(f"Switched monitoring to: {new_topic} (sid={request.sid})", flush=True)
-    emit_device_delta('selected_device', {'topic': new_topic}, topic=new_topic, room=request.sid)
-    emit_device_snapshot(new_topic, room=request.sid)
+    resolved_topic = get_device_topic_from_identifier(new_topic)
+    if not resolved_topic:
+        clear_session_topic(request.sid)
+        emit_command_result(
+            request.sid,
+            action='change_device',
+            status='error',
+            message='Device is not currently available'
+        )
+        return
+    if not device_supports_full_editor(resolved_topic):
+        clear_session_topic(request.sid)
+        emit_command_result(
+            request.sid,
+            action='change_device',
+            status='error',
+            topic=resolved_topic,
+            message='Full configuration is not supported for this model yet'
+        )
+        return
 
-    device_data = get_device_by_topic(new_topic)
+    set_session_topic(request.sid, resolved_topic)
+    print(f"Switched monitoring to: {resolved_topic} (sid={request.sid})", flush=True)
+    emit_command_result(
+        request.sid,
+        action='change_device',
+        status='sent',
+        topic=resolved_topic,
+        payload={'topic': resolved_topic}
+    )
+    emit_device_delta('selected_device', {'topic': resolved_topic}, topic=resolved_topic, room=request.sid)
+    emit_device_snapshot(resolved_topic, room=request.sid)
+
+    device_data = get_device_by_topic(resolved_topic)
     if device_data:
         if 'zone_config' in device_data: 
-            socketio.emit('zone_config', {'topic': new_topic, 'payload': device_data['zone_config']}, room=request.sid)
+            socketio.emit('zone_config', {'topic': resolved_topic, 'payload': device_data['zone_config']}, room=request.sid)
         if 'interference_zones' in device_data: 
-            socketio.emit('interference_zones', {'topic': new_topic, 'payload': device_data['interference_zones']}, room=request.sid)
+            socketio.emit('interference_zones', {'topic': resolved_topic, 'payload': device_data['interference_zones']}, room=request.sid)
         if 'detection_zones' in device_data:
-            socketio.emit('detection_zones', {'topic': new_topic, 'payload': device_data['detection_zones']}, room=request.sid)
+            socketio.emit('detection_zones', {'topic': resolved_topic, 'payload': device_data['detection_zones']}, room=request.sid)
         if 'stay_zones' in device_data:
-            socketio.emit('stay_zones', {'topic': new_topic, 'payload': device_data['stay_zones']}, room=request.sid)
+            socketio.emit('stay_zones', {'topic': resolved_topic, 'payload': device_data['stay_zones']}, room=request.sid)
 
 
 @socketio.on('set_reporting_auto_off')
@@ -978,14 +1693,15 @@ def handle_set_reporting_auto_off(data):
 @socketio.on('set_target_reporting')
 def handle_set_target_reporting(data):
     request_id = data.get('request_id') if isinstance(data, dict) else None
-    current_topic = get_session_topic(request.sid)
+    request_id = request_id or f"target-report-{time.time_ns()}"
+    current_topic, topic_error = resolve_command_topic(request.sid, data)
     if not current_topic:
         emit_command_result(
             request.sid,
             action='set_target_reporting',
             status='error',
             request_id=request_id,
-            message='No device selected'
+            message=topic_error
         )
         return
 
@@ -997,12 +1713,21 @@ def handle_set_target_reporting(data):
 
     target_value = resolve_target_reporting_value(enabled)
     payload = {'mmWaveTargetInfoReport': target_value}
+    register_pending_write(
+        request.sid,
+        request_id,
+        current_topic,
+        'set_target_reporting',
+        payload
+    )
     ok, rc = publish_json(
         f"{current_topic}/set",
         payload,
         origin='set_target_reporting',
         sid=request.sid
     )
+    if not ok:
+        remove_pending_write(request.sid, request_id)
     emit_command_result(
         request.sid,
         action='set_target_reporting',
@@ -1017,45 +1742,64 @@ def handle_set_target_reporting(data):
 
 @socketio.on('set_basic_control')
 def handle_set_basic_control(data):
-    request_id = data.get('request_id') if isinstance(data, dict) else None
-    current_topic = get_session_topic(request.sid)
-    if not current_topic:
-        emit_command_result(
-            request.sid,
-            action='set_basic_control',
-            status='error',
-            request_id=request_id,
-            message='No device selected'
-        )
-        return
-
     if not isinstance(data, dict):
         emit_command_result(
             request.sid,
             action='set_basic_control',
             status='error',
-            topic=current_topic,
-            request_id=request_id,
+            request_id=None,
             message='Invalid payload'
         )
         return
 
+    request_id = data.get('request_id') or f"basic-{time.time_ns()}"
+    requested_topic = data.get('topic')
+    if requested_topic:
+        current_topic = get_device_topic_from_identifier(requested_topic)
+        if not current_topic:
+            emit_command_result(
+                request.sid,
+                action='set_basic_control',
+                status='error',
+                request_id=request_id,
+                message='Unknown device topic'
+            )
+            return
+    else:
+        current_topic = get_valid_session_topic(request.sid)
+        if not current_topic:
+            emit_command_result(
+                request.sid,
+                action='set_basic_control',
+                status='error',
+                request_id=request_id,
+                message='No device selected'
+            )
+            return
+
     control_payload = {}
     errors = []
+    basic_control_mapping = get_basic_control_mapping(get_device_by_topic(current_topic))
 
     if 'state' in data:
-        normalized_state, state_error = _normalize_basic_state(data.get('state'))
-        if state_error:
-            errors.append(state_error)
+        if not basic_control_mapping.get('state'):
+            errors.append('Power control is not supported for this device')
         else:
-            control_payload['state'] = normalized_state
+            normalized_state, state_error = _normalize_basic_state(data.get('state'))
+            if state_error:
+                errors.append(state_error)
+            else:
+                control_payload['state'] = normalized_state
 
     if 'brightness' in data:
-        normalized_brightness, brightness_error = _normalize_basic_brightness(data.get('brightness'))
-        if brightness_error:
-            errors.append(brightness_error)
+        if not basic_control_mapping.get('brightness'):
+            errors.append('Brightness control is not supported for this device')
         else:
-            control_payload['brightness'] = normalized_brightness
+            normalized_brightness, brightness_error = _normalize_basic_brightness(data.get('brightness'))
+            if brightness_error:
+                errors.append(brightness_error)
+            else:
+                control_payload['brightness'] = normalized_brightness
 
     if errors:
         emit_command_result(
@@ -1080,12 +1824,25 @@ def handle_set_basic_control(data):
         )
         return
 
+    register_pending_write(
+        request.sid,
+        request_id,
+        current_topic,
+        'set_basic_control',
+        control_payload
+    )
+    publish_payload = {
+        basic_control_mapping[control_name]: value
+        for control_name, value in control_payload.items()
+    }
     ok, rc = publish_json(
         f"{current_topic}/set",
-        control_payload,
+        publish_payload,
         origin='set_basic_control',
         sid=request.sid
     )
+    if not ok:
+        remove_pending_write(request.sid, request_id)
     emit_command_result(
         request.sid,
         action='set_basic_control',
@@ -1101,7 +1858,7 @@ def handle_set_basic_control(data):
 @socketio.on('check_firmware_update')
 def handle_check_firmware_update(data=None):
     request_id = data.get('request_id') if isinstance(data, dict) else None
-    current_topic = get_session_topic(request.sid)
+    current_topic = get_valid_session_topic(request.sid)
     if not current_topic:
         emit_command_result(
             request.sid,
@@ -1113,13 +1870,16 @@ def handle_check_firmware_update(data=None):
         return
 
     device_id = get_device_id_from_topic(current_topic)
-    request_payload = {'id': device_id}
+    transaction = register_ota_request(current_topic, 'check_firmware_update')
+    request_payload = {'id': device_id, 'transaction': transaction}
     ok, rc = publish_json(
         f"{MQTT_BASE_TOPIC}/bridge/request/device/ota_update/check",
         request_payload,
         origin='check_firmware_update',
         sid=request.sid
     )
+    if not ok:
+        remove_ota_request(transaction)
 
     if ok:
         update_device_ota_status(current_topic, {
@@ -1144,7 +1904,7 @@ def handle_check_firmware_update(data=None):
 @socketio.on('start_firmware_update')
 def handle_start_firmware_update(data=None):
     request_id = data.get('request_id') if isinstance(data, dict) else None
-    current_topic = get_session_topic(request.sid)
+    current_topic = get_valid_session_topic(request.sid)
     if not current_topic:
         emit_command_result(
             request.sid,
@@ -1155,12 +1915,20 @@ def handle_start_firmware_update(data=None):
         )
         return
 
+    if isinstance(data, dict) and 'url' in data:
+        emit_command_result(
+            request.sid,
+            action='start_firmware_update',
+            status='error',
+            topic=current_topic,
+            request_id=request_id,
+            message='Custom firmware URLs are not supported'
+        )
+        return
+
     device_id = get_device_id_from_topic(current_topic)
-    request_payload = {'id': device_id}
-    if isinstance(data, dict):
-        custom_url = str(data.get('url') or '').strip()
-        if custom_url:
-            request_payload['url'] = custom_url
+    transaction = register_ota_request(current_topic, 'start_firmware_update')
+    request_payload = {'id': device_id, 'transaction': transaction}
 
     ok, rc = publish_json(
         f"{MQTT_BASE_TOPIC}/bridge/request/device/ota_update/update",
@@ -1168,6 +1936,8 @@ def handle_start_firmware_update(data=None):
         origin='start_firmware_update',
         sid=request.sid
     )
+    if not ok:
+        remove_ota_request(transaction)
 
     if ok:
         update_device_ota_status(current_topic, {
@@ -1192,14 +1962,14 @@ def handle_start_firmware_update(data=None):
 @socketio.on('update_parameter')
 def handle_update_parameter(data):
     request_id = data.get('request_id') if isinstance(data, dict) else None
-    current_topic = get_session_topic(request.sid)
+    current_topic, topic_error = resolve_command_topic(request.sid, data)
     if not current_topic:
         emit_command_result(
             request.sid,
             action='update_parameter',
             status='error',
             request_id=request_id,
-            message='No device selected'
+            message=topic_error
         )
         return
 
@@ -1242,7 +2012,17 @@ def handle_update_parameter(data):
         return
 
     control_payload = {param: normalized_value}
+    if request_id:
+        register_pending_write(
+            request.sid,
+            request_id,
+            current_topic,
+            'update_parameter',
+            control_payload
+        )
     ok, rc = publish_json(f"{current_topic}/set", control_payload, origin='update_parameter', sid=request.sid)
+    if not ok and request_id:
+        remove_pending_write(request.sid, request_id)
     emit_command_result(
         request.sid,
         action='update_parameter',
@@ -1255,10 +2035,96 @@ def handle_update_parameter(data):
     )
 
 
+@socketio.on('apply_parameters')
+def handle_apply_parameters(data):
+    request_id = data.get('request_id') if isinstance(data, dict) else None
+    current_topic, topic_error = resolve_command_topic(request.sid, data)
+    if not current_topic:
+        emit_command_result(
+            request.sid,
+            action='apply_parameters',
+            status='error',
+            request_id=request_id,
+            message=topic_error
+        )
+        return
+
+    if not isinstance(data, dict) or not isinstance(data.get('changes'), dict) or not data.get('changes'):
+        emit_command_result(
+            request.sid,
+            action='apply_parameters',
+            status='error',
+            topic=current_topic,
+            request_id=request_id,
+            message='Changes must be a non-empty object'
+        )
+        return
+
+    request_id = request_id or f"apply-{time.time_ns()}"
+    normalized_changes = {}
+    unknown_fields = []
+    validation_errors = []
+
+    for param, value in data.get('changes', {}).items():
+        if not isinstance(param, str) or not param:
+            validation_errors.append('Every change must have a valid parameter name')
+            continue
+        is_valid, validation_error, normalized_value, is_unknown_field = schema_service.validate_update(param, value)
+        if not is_valid:
+            validation_errors.append(f"{param}: {validation_error}")
+            continue
+        normalized_changes[param] = normalized_value
+        if is_unknown_field:
+            unknown_fields.append(param)
+
+    if validation_errors:
+        emit_command_result(
+            request.sid,
+            action='apply_parameters',
+            status='error',
+            topic=current_topic,
+            request_id=request_id,
+            payload={'errors': validation_errors},
+            message='; '.join(validation_errors)
+        )
+        return
+
+    register_pending_write(
+        request.sid,
+        request_id,
+        current_topic,
+        'apply_parameters',
+        normalized_changes
+    )
+    ok, rc = publish_json(
+        f"{current_topic}/set",
+        normalized_changes,
+        origin='apply_parameters',
+        sid=request.sid
+    )
+    if not ok:
+        remove_pending_write(request.sid, request_id)
+
+    emit_command_result(
+        request.sid,
+        action='apply_parameters',
+        status='sent' if ok else 'error',
+        topic=current_topic,
+        request_id=request_id,
+        payload=normalized_changes,
+        rc=rc,
+        message=(
+            f"Sent with {len(unknown_fields)} unrecognized field(s)"
+            if ok and unknown_fields
+            else (None if ok else 'MQTT publish failed')
+        )
+    )
+
+
 @socketio.on('force_sync')
 def handle_force_sync(data=None):
     request_id = data.get('request_id') if isinstance(data, dict) else None
-    current_topic = get_session_topic(request.sid)
+    current_topic = get_valid_session_topic(request.sid)
     if not current_topic:
         emit_command_result(
             request.sid,
@@ -1311,7 +2177,7 @@ def handle_force_sync(data=None):
 
 @socketio.on('send_command')
 def handle_command(cmd_action):
-    current_topic = get_session_topic(request.sid)
+    current_topic = get_valid_session_topic(request.sid)
     if not current_topic:
         emit_command_result(
             request.sid,
@@ -1368,7 +2234,10 @@ def cleanup_stale_devices():
         time.sleep(60)
         current_time = time.time()
         with device_list_lock:
-            stale_keys = [k for k, v in device_list.items() if (current_time - v.get('last_seen', 0)) > 3600]
+            stale_keys = [
+                key for key, value in device_list.items()
+                if not value.get('inventory_present') and (current_time - value.get('last_seen', 0)) > 3600
+            ]
             for key in stale_keys:
                 del device_list[key]
         if stale_keys:
