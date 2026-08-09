@@ -328,7 +328,7 @@
 
     function getDeviceReadiness(device) {
         if (!socketConnected || !mqttConnected) {
-            return { ready: false, label: 'Reconnecting', state: 'unavailable' };
+            return { ready: false, label: '', state: 'unavailable' };
         }
         const availability = String(device && device.availability || '').trim().toLowerCase();
         if (availability === 'offline') {
@@ -503,6 +503,7 @@
         refs.nameText.setAttribute('title', canOpenEditor ? '' : 'Full configuration is not supported for this device');
         refs.status.className = `device-card-status ${online ? 'is-online' : 'is-offline'}`;
         refs.status.textContent = readiness.label;
+        refs.status.hidden = !readiness.label;
         refs.occupancyValue.textContent = occupancy === true ? 'Occupied' : occupancy === false ? 'Clear' : '—';
         refs.powerValue.textContent = power !== null ? `${power.toFixed(power % 1 ? 1 : 0)} W` : '—';
         refs.illuminanceValue.textContent = illuminance !== null ? `${illuminance} lx` : '—';

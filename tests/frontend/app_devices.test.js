@@ -261,13 +261,29 @@ test('dashboard only opens known devices through its navigation callback', () =>
 });
 
 test('dashboard controls are blocked while either local transport is disconnected', () => {
-    const { devices, emitted } = loadDevicesModule();
+    const document = new MockDocument();
+    const gridEl = new MockElement('div');
+    const { devices, emitted, timers } = loadDevicesModule({ document, gridEl });
     const topic = seedDevice(devices);
     devices.setTransportState(true, false);
+    Array.from(timers.values()).forEach((callback) => callback());
+
+    const status = findByClass(gridEl, 'device-card-status');
+    const powerToggle = findByClass(gridEl, 'device-card-power-toggle');
+    const brightnessSlider = findByClass(gridEl, 'device-card-brightness-slider');
+    assert.equal(status.hidden, true);
+    assert.equal(status.textContent, '');
+    assert.equal(powerToggle.disabled, true);
+    assert.equal(brightnessSlider.disabled, true);
 
     assert.equal(devices.sendControl(topic, { state: 'OFF' }), null);
     assert.equal(emitted.length, 0);
     assert.equal(devices.getDevice(topic).last_config.state, 'ON');
+
+    devices.setTransportState(true, true);
+    Array.from(timers.values()).forEach((callback) => callback());
+    assert.equal(status.hidden, false);
+    assert.equal(status.textContent, 'Ready');
 });
 
 test('dashboard timeout restores the last confirmed value', () => {
