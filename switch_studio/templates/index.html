@@ -133,17 +133,48 @@
             gap: 14px;
         }
         .header-brand {
-            display: none;
+            display: flex;
             align-items: center;
             gap: 8px;
             min-width: 0;
-            border: 0;
-            background: transparent;
-            color: inherit;
-            padding: 0;
-            font: inherit;
+            flex: 0 0 auto;
         }
-        body.dashboard-active .header-brand { display: flex; }
+        .header-back {
+            width: 36px;
+            height: 36px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex: 0 0 36px;
+            padding: 0;
+            border: 1px solid transparent;
+            border-radius: var(--radius-sm);
+            background: transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+        }
+        .header-back:hover {
+            background: var(--bg-elev-3);
+            border-color: var(--border-strong);
+            color: var(--text-primary);
+        }
+        .header-back svg { width: 19px; height: 19px; }
+        body.dashboard-active .header-back { display: none; }
+        body:not(.dashboard-active) .header-logo,
+        body:not(.dashboard-active) .studio-title { display: none; }
+        .device-page-title {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
+        body.dashboard-active .device-page-title { display: none; }
         body.dashboard-active .header-controls { display: none; }
         .header-logo { height: 18px; width: auto; object-fit: contain; }
         .header-wordmark { height: 15px; width: auto; object-fit: contain; display: block; opacity: 0.98; }
@@ -1630,9 +1661,7 @@
                 flex-wrap: wrap;
                 gap: 7px;
             }
-            .header-brand {
-                display: none;
-            }
+            .header-back { width: 40px; height: 40px; flex-basis: 40px; }
             .header-controls {
                 width: 100%;
                 display: grid;
@@ -1989,9 +2018,15 @@
 <body class="dashboard-active">
     <div class="header">
         <div class="header-brand">
+            <button class="header-back" id="headerBackButton" type="button" aria-label="Back to all devices">
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path d="M15 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                </svg>
+            </button>
             <img class="header-logo" src="{{ ingress_path }}/static/logo.png" alt="">
             <img class="header-wordmark" src="{{ ingress_path }}/static/brand_name.svg" alt="Inovelli">
             <h1 class="studio-title">Switch Studio</h1>
+            <h1 class="device-page-title" id="devicePageTitle">Device</h1>
         </div>
         <div class="header-controls">
             <div class="header-device-wrap">
@@ -2434,6 +2469,8 @@
         const deviceGrid = document.getElementById('deviceGrid');
         const dashboardEmpty = document.getElementById('dashboardEmpty');
         const dashboardSummary = document.getElementById('dashboardSummary');
+        const headerBackButton = document.getElementById('headerBackButton');
+        const devicePageTitle = document.getElementById('devicePageTitle');
 
         // UI Elements
         const nonMmwaveWarning = document.getElementById('nonMmwaveWarning');
@@ -3417,6 +3454,7 @@
             if (dashboardView) dashboardView.hidden = true;
             if (appContainer) appContainer.hidden = false;
             if (tabBar) tabBar.hidden = !SWITCH_STUDIO_UI_ENABLED;
+            if (devicePageTitle) devicePageTitle.textContent = getDeviceDisplayName(topic);
             document.body.classList.remove('dashboard-active');
             if (deviceSelect) deviceSelect.value = topic || '';
             if (window.SwitchStudioDevices && typeof window.SwitchStudioDevices.setSelectedTopic === 'function') {
@@ -3471,12 +3509,7 @@
         function requestDeviceSelection(nextTopic, options) {
             const opts = options || {};
             const normalizedNext = String(nextTopic || '').trim();
-            if (!normalizedNext) {
-                showDashboardView();
-                return true;
-            }
-
-            const requestedDevice = window.SwitchStudioDevices && typeof window.SwitchStudioDevices.getDevice === 'function'
+            const requestedDevice = normalizedNext && window.SwitchStudioDevices && typeof window.SwitchStudioDevices.getDevice === 'function'
                 ? window.SwitchStudioDevices.getDevice(normalizedNext)
                 : null;
             if (requestedDevice && requestedDevice.capabilities && requestedDevice.capabilities.full_editor === false) {
@@ -3499,8 +3532,12 @@
                     const details = [];
                     if (stateStatus.pending) details.push(`${stateStatus.pending} pending configuration change${stateStatus.pending === 1 ? '' : 's'} will be discarded`);
                     if (stateStatus.sending) details.push(`${stateStatus.sending} change${stateStatus.sending === 1 ? '' : 's'} still awaiting confirmation will continue in the background`);
-                    if (guard.hasZoneDraft) details.push('the zone draft will be discarded');
-                    const confirmed = window.confirm(`Open ${getDeviceDisplayName(normalizedNext)}?\n\n${details.join('. ')}.`);
+                    if (guard.hasZoneDraft) details.push('The zone draft will be discarded');
+                    if (details.length === 0) details.push('Unsaved changes will be discarded');
+                    const destinationPrompt = normalizedNext
+                        ? `Open ${getDeviceDisplayName(normalizedNext)}?`
+                        : 'Return to all devices?';
+                    const confirmed = window.confirm(`${destinationPrompt}\n\n${details.join('. ')}.`);
                     if (!confirmed) {
                         if (deviceSelect) deviceSelect.value = dashboardView && !dashboardView.hidden ? '' : currentTopic;
                         updateDeviceSelectState();
@@ -3511,6 +3548,11 @@
                     }
                     if (isEditingZone) endZoneEdit();
                 }
+            }
+
+            if (!normalizedNext) {
+                showDashboardView();
+                return true;
             }
 
             if (currentTopic !== normalizedNext) resetWorkspaceForDeviceChange();
@@ -3623,6 +3665,8 @@
                 }
             });
         }
+
+        headerBackButton.addEventListener('click', () => requestDeviceSelection(''));
 
         window.addEventListener('beforeunload', (event) => {
             if (!window.SwitchStudioState || typeof window.SwitchStudioState.hasUncommitted !== 'function') return;
