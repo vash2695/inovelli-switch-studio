@@ -1,5 +1,6 @@
 reference_resources/
 agent_mental_model.md
 .codex/
+.playwright-cli/
 __pycache__/
 *.pyc

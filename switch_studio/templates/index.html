@@ -133,7 +133,7 @@
             gap: 14px;
         }
         .header-brand {
-            display: flex;
+            display: none;
             align-items: center;
             gap: 8px;
             min-width: 0;
@@ -141,9 +141,10 @@
             background: transparent;
             color: inherit;
             padding: 0;
-            cursor: pointer;
             font: inherit;
         }
+        body.dashboard-active .header-brand { display: flex; }
+        body.dashboard-active .header-controls { display: none; }
         .header-logo { height: 18px; width: auto; object-fit: contain; }
         .header-wordmark { height: 15px; width: auto; object-fit: contain; display: block; opacity: 0.98; }
         .studio-title { color: var(--text-primary); margin: 0; white-space: nowrap; letter-spacing: -0.01em; font-size: 0.92rem; font-weight: 600; }
@@ -177,13 +178,6 @@
         select#deviceSelect.device-unselected:hover {
             border-color: rgba(251, 191, 36, 0.92);
             box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.24);
-        }
-        .header-right {
-            margin-left: auto;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            flex-wrap: nowrap;
         }
         .header-quick-controls {
             display: inline-flex;
@@ -265,9 +259,11 @@
             min-width: 110px;
             accent-color: var(--accent);
         }
-        .quick-brightness-input {
-            width: 58px;
-            min-width: 58px;
+        input.quick-brightness-input {
+            width: 50px;
+            min-width: 50px;
+            max-width: 50px;
+            flex: 0 0 50px;
             background: var(--bg-elev-3);
             color: var(--text-primary);
             border: 1px solid var(--border-strong);
@@ -275,6 +271,7 @@
             padding: 4px 6px;
             font-size: 0.72rem;
             font-weight: 600;
+            font-variant-numeric: tabular-nums;
             text-align: right;
         }
         .quick-brightness-unit {
@@ -290,48 +287,6 @@
         .header-quick-controls.quick-disabled .quick-brightness-slider,
         .header-quick-controls.quick-disabled .quick-brightness-input {
             cursor: not-allowed;
-        }
-        .status-chip {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 3px 8px;
-            border-radius: 999px;
-            border: 1px solid var(--border-subtle);
-            background: rgba(31, 36, 50, 0.9);
-            color: var(--text-secondary);
-            font-size: 0.7rem;
-            white-space: nowrap;
-        }
-        .status-dot {
-            width: 7px;
-            height: 7px;
-            border-radius: 50%;
-            background: var(--success);
-            box-shadow: 0 0 8px rgba(74, 197, 109, 0.75);
-        }
-        .status-chip.offline {
-            color: #ffd6d6;
-            border-color: rgba(255, 98, 98, 0.55);
-            background: rgba(89, 41, 52, 0.58);
-        }
-        .status-chip.offline .status-dot {
-            background: var(--danger);
-            box-shadow: 0 0 8px rgba(255, 98, 98, 0.8);
-        }
-        .btn-force-sync {
-            border-color: var(--accent);
-            background: linear-gradient(135deg, var(--accent), #09b7aa);
-            color: #061216;
-            font-weight: 700;
-            letter-spacing: 0.01em;
-            padding: 5px 11px;
-            font-size: 0.74rem;
-        }
-        .btn-force-sync:hover {
-            filter: brightness(1.03);
-            border-color: var(--accent);
-            color: #041015;
         }
         
         #packetInfo { color: var(--accent); font-weight: 700; }
@@ -1392,37 +1347,12 @@
             width: min(1180px, 100%);
             margin: 0 auto;
         }
-        .dashboard-hero {
+        .dashboard-summary-row {
             display: flex;
-            align-items: flex-end;
-            justify-content: space-between;
-            gap: 18px;
-            margin-bottom: 22px;
-        }
-        .dashboard-eyebrow {
-            margin: 0 0 5px;
-            color: var(--accent);
-            font-size: 0.72rem;
-            font-weight: 700;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-        }
-        .dashboard-title {
-            margin: 0;
-            color: #f5f7fb;
-            font-size: clamp(1.55rem, 3vw, 2.35rem);
-            line-height: 1.08;
-            letter-spacing: -0.035em;
-        }
-        .dashboard-description {
-            max-width: 620px;
-            margin: 9px 0 0;
-            color: var(--text-secondary);
-            font-size: 0.9rem;
-            line-height: 1.55;
+            justify-content: flex-end;
+            margin-bottom: 12px;
         }
         .dashboard-summary {
-            flex: 0 0 auto;
             color: var(--text-secondary);
             border: 1px solid var(--border-subtle);
             border-radius: 999px;
@@ -1498,6 +1428,40 @@
             line-height: 1.25;
             text-overflow: ellipsis;
             white-space: nowrap;
+        }
+        .device-card-name-button,
+        .device-card-name-text {
+            display: block;
+            overflow: hidden;
+            max-width: 100%;
+            color: inherit;
+            font: inherit;
+            line-height: inherit;
+            text-align: left;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .device-card-name-button[hidden],
+        .device-card-name-text[hidden] {
+            display: none;
+        }
+        .device-card-name-button {
+            min-height: 28px;
+            margin: -3px 0;
+            padding: 3px 0;
+            border: 0;
+            background: transparent;
+            cursor: pointer;
+        }
+        .device-card-name-button:hover {
+            color: #b9fff8;
+            text-decoration: underline;
+            text-underline-offset: 3px;
+        }
+        .device-card-name-button:focus-visible {
+            border-radius: 3px;
+            outline: 2px solid var(--accent);
+            outline-offset: 3px;
         }
         .device-card-status {
             flex: 0 0 auto;
@@ -1608,9 +1572,10 @@
             cursor: pointer;
         }
         .device-card-footer {
-            min-height: 34px;
-            margin-top: auto;
+            justify-content: flex-start;
+            min-height: 18px;
         }
+        .device-card-footer[hidden] { display: none; }
         .device-card-feedback {
             color: var(--text-muted);
             font-size: 0.66rem;
@@ -1621,26 +1586,6 @@
         .device-card-feedback.not-confirmed,
         .device-card-feedback.error {
             color: #ffd27c;
-        }
-        .device-card-feedback.confirmed {
-            color: #8debc3;
-        }
-        .device-card-open {
-            min-height: 38px;
-            border: 1px solid rgba(13, 212, 192, 0.5);
-            border-radius: var(--radius-sm);
-            background: rgba(13, 212, 192, 0.1);
-            color: #c9fffa;
-            padding: 7px 11px;
-            font: inherit;
-            font-size: 0.72rem;
-            font-weight: 650;
-            cursor: pointer;
-        }
-        .device-card-open:hover,
-        .device-card-open:focus-visible {
-            border-color: var(--accent);
-            background: rgba(13, 212, 192, 0.18);
         }
 
         @media (prefers-reduced-motion: reduce) {
@@ -1691,10 +1636,10 @@
             .header-controls {
                 width: 100%;
                 display: grid;
-                grid-template-columns: minmax(0, 1fr) auto;
+                grid-template-columns: minmax(0, 1fr);
                 grid-template-areas:
-                    "device actions"
-                    "quick quick";
+                    "device"
+                    "quick";
                 align-items: center;
                 gap: 8px;
             }
@@ -1715,29 +1660,8 @@
                 width: 100%;
                 margin-right: 0;
             }
-            .header-right {
-                grid-area: actions;
-                margin-left: 0;
-                width: auto;
-                justify-content: flex-end;
-                flex-wrap: nowrap;
-            }
-            .status-chip {
-                display: none;
-            }
-            .btn-force-sync {
-                width: auto;
-                justify-content: center;
-                padding: 6px 10px;
-                font-size: 0.72rem;
-                white-space: nowrap;
-            }
             .quick-label {
                 font-size: 0.64rem;
-            }
-            .quick-brightness-input {
-                width: 54px;
-                min-width: 54px;
             }
 
             .tab-bar {
@@ -1945,10 +1869,6 @@
                 font-size: 11px;
                 padding: 6px 8px;
             }
-            .btn-force-sync {
-                padding: 6px 9px;
-                font-size: 0.69rem;
-            }
 
             .tab-btn {
                 padding: 7px 8px;
@@ -2046,24 +1966,10 @@
                 height: 100dvh;
                 overflow: hidden;
             }
-            body.dashboard-active .header-brand {
-                display: flex;
-            }
-            body.dashboard-active .studio-title,
-            body.dashboard-active .header-wordmark {
-                display: none;
-            }
             .dashboard-view {
                 padding: 18px 12px calc(24px + env(safe-area-inset-bottom, 0px));
             }
-            .dashboard-hero {
-                align-items: flex-start;
-                flex-direction: column;
-                margin-bottom: 17px;
-            }
-            .dashboard-summary {
-                align-self: flex-start;
-            }
+            .dashboard-summary-row { justify-content: flex-start; }
         }
 
         @media (max-width: 640px) {
@@ -2077,19 +1983,16 @@
                 grid-template-columns: 58px minmax(0, 1fr);
                 gap: 13px;
             }
-            .device-card-open {
-                min-height: 44px;
-            }
         }
     </style>
 </head>
-<body>
+<body class="dashboard-active">
     <div class="header">
-        <button class="header-brand" id="btnDashboardHome" type="button" aria-label="Show all devices">
-            <img class="header-logo" src="{{ ingress_path }}/static/logo.png" alt="Switch Studio icon">
+        <div class="header-brand">
+            <img class="header-logo" src="{{ ingress_path }}/static/logo.png" alt="">
             <img class="header-wordmark" src="{{ ingress_path }}/static/brand_name.svg" alt="Inovelli">
-            <h2 class="studio-title">Switch Studio</h2>
-        </button>
+            <h1 class="studio-title">Switch Studio</h1>
+        </div>
         <div class="header-controls">
             <div class="header-device-wrap">
                 <select id="deviceSelect" aria-label="Select a device"><option value="" selected>All Devices</option></select>
@@ -2109,21 +2012,12 @@
                     <span class="quick-brightness-unit">%</span>
                 </div>
             </div>
-            <div class="header-right">
-                <span class="status-chip" id="connectionChip"><span class="status-dot" id="connectionDot"></span><span id="connectionText">Connecting...</span></span>
-                <button class="cmd-btn btn-force-sync" id="btnForceSync" onclick="handleForceSyncClick()">Force Sync</button>
-            </div>
         </div>
     </div>
 
     <main class="dashboard-view" id="dashboardView">
         <div class="dashboard-inner">
-            <div class="dashboard-hero">
-                <div>
-                    <p class="dashboard-eyebrow">Inovelli Blue Series</p>
-                    <h1 class="dashboard-title">Your switches, at a glance</h1>
-                    <p class="dashboard-description">Control power and brightness immediately, or open a switch for presence zones and detailed configuration.</p>
-                </div>
+            <div class="dashboard-summary-row">
                 <span class="dashboard-summary" id="dashboardSummary" aria-live="polite">Discovering devices…</span>
             </div>
             <div class="device-grid" id="deviceGrid"></div>
@@ -2540,12 +2434,10 @@
         const deviceGrid = document.getElementById('deviceGrid');
         const dashboardEmpty = document.getElementById('dashboardEmpty');
         const dashboardSummary = document.getElementById('dashboardSummary');
-        const btnDashboardHome = document.getElementById('btnDashboardHome');
 
         // UI Elements
         const nonMmwaveWarning = document.getElementById('nonMmwaveWarning');
         const configSidebar = document.getElementById('configSidebar');
-        const btnForceSync = document.getElementById('btnForceSync');
         const btnFirmwareCheck = document.getElementById('btnFirmwareCheck');
         const btnFirmwareInstall = document.getElementById('btnFirmwareInstall');
         const dirtyBar = document.getElementById('dirtyBar');
@@ -2568,8 +2460,6 @@
         const zonesSidebarTabs = document.getElementById('zonesSidebarTabs');
         const zonesSidebarTabButtons = Array.from(document.querySelectorAll('[data-zones-pane-target]'));
         const zonesSidebarPanes = Array.from(document.querySelectorAll('[data-zones-pane]'));
-        const connectionChip = document.getElementById('connectionChip');
-        const connectionText = document.getElementById('connectionText');
         const firmwareInstalledVersion = document.getElementById('firmwareInstalledVersion');
         const firmwareInstalledVersionMeta = document.getElementById('firmwareInstalledVersionMeta');
         const firmwareLatestVersion = document.getElementById('firmwareLatestVersion');
@@ -3243,14 +3133,6 @@
             if (isMqttConnected !== undefined && isMqttConnected !== null) {
                 mqttTransportConnected = !!isMqttConnected;
             }
-            const connected = socketTransportConnected && mqttTransportConnected && mqttInventoryReady;
-            if (connectionChip && connectionText) {
-                connectionChip.classList.toggle('offline', !connected);
-                if (!socketTransportConnected) connectionText.textContent = 'Disconnected';
-                else if (!mqttTransportConnected) connectionText.textContent = backendReason || 'Device service reconnecting';
-                else if (!mqttInventoryReady) connectionText.textContent = 'Restoring devices…';
-                else connectionText.textContent = 'Connected';
-            }
             if (window.SwitchStudioDevices && typeof window.SwitchStudioDevices.setTransportState === 'function') {
                 window.SwitchStudioDevices.setTransportState(socketTransportConnected, mqttTransportConnected && mqttInventoryReady);
             }
@@ -3497,9 +3379,6 @@
             if (targetReportToggle) {
                 targetReportToggle.disabled = !controlsReady || targetReportingPending.size > 0;
             }
-            if (btnForceSync) {
-                btnForceSync.disabled = hasSelection ? !controlsReady : !isGlobalTransportReady();
-            }
             if (window.SwitchStudioState && typeof window.SwitchStudioState.setTransportReady === 'function') {
                 window.SwitchStudioState.setTransportReady(activeDeviceTopic ? isActiveDeviceCommandReady() : isGlobalTransportReady());
             }
@@ -3745,9 +3624,6 @@
             });
         }
 
-        if (btnDashboardHome) {
-            btnDashboardHome.addEventListener('click', () => showDashboardView());
-        }
         window.addEventListener('beforeunload', (event) => {
             if (!window.SwitchStudioState || typeof window.SwitchStudioState.hasUncommitted !== 'function') return;
             if (!activeDeviceTopic || !window.SwitchStudioState.hasUncommitted(activeDeviceTopic)) return;
@@ -5689,26 +5565,6 @@
             }
         }
 
-        function handleForceSyncClick() {
-            const workspaceVisible = !!(dashboardView && dashboardView.hidden && activeDeviceTopic);
-            socket.emit('request_devices');
-            if (workspaceVisible && !isActiveDeviceCommandReady()) {
-                reportActiveDeviceUnavailable('Device sync');
-                return;
-            }
-            if (workspaceVisible && isEditingZone) {
-                const discardDraft = window.confirm('Discard the current zone draft and sync fresh device data?');
-                if (!discardDraft) return;
-                endZoneEdit();
-            }
-            if (workspaceVisible) socket.emit('force_sync');
-            if (window.SwitchStudioState) {
-                window.SwitchStudioState.setPacketStatus('syncing', workspaceVisible ? 'Syncing…' : 'Refreshing devices…');
-            } else {
-                packetInfo.innerText = workspaceVisible ? 'Syncing…' : 'Refreshing devices…';
-            }
-        }
-
         configSidebar.addEventListener('change', function(event) {
             const input = event.target;
             if (!input || !(input.matches('input') || input.matches('select'))) return;
@@ -5896,10 +5752,7 @@
                         if (parsedBrightness !== null) basicControlLastKnown.brightness = parsedBrightness;
                     }
                     applyBasicControlUiState();
-                    if (window.SwitchStudioState) {
-                        window.SwitchStudioState.setPacketStatus('confirmed', 'Quick control confirmed');
-                        window.SwitchStudioState.showToast('saved', 'Quick control confirmed', 1300);
-                    }
+                    if (packetInfo) packetInfo.innerText = '';
                 }
             }
 
@@ -6279,7 +6132,6 @@
                 nonMmwaveWarning.style.display = 'none';
                 configSidebar.style.opacity = '1';
                 configSidebar.style.pointerEvents = 'auto';
-                btnForceSync.disabled = false;
             } else if (nonMmwaveWarning.style.display === 'block') {
                 // If warning is already ON, leave it ON unless we get confirmation otherwise
             }

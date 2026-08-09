@@ -27,6 +27,15 @@ class MockElement {
         return child;
     }
 
+    insertBefore(child, reference) {
+        if (child.parentNode) child.parentNode.removeChild(child);
+        const index = reference ? this.children.indexOf(reference) : -1;
+        child.parentNode = this;
+        if (index < 0) this.children.push(child);
+        else this.children.splice(index, 0, child);
+        return child;
+    }
+
     removeChild(child) {
         this.children = this.children.filter((item) => item !== child);
         child.parentNode = null;
@@ -303,7 +312,7 @@ test('superseded dashboard commands cannot overwrite a newer command result', ()
     assert.equal(devices.getDevice(topic).controlStatus, 'not-confirmed');
 });
 
-test('dashboard renders card controls and routes their interactions without opening the card', () => {
+test('dashboard renders card controls and opens a device from its accessible name', () => {
     const document = new MockDocument();
     const gridEl = new MockElement('div');
     const emptyEl = new MockElement('div');
@@ -332,9 +341,149 @@ test('dashboard renders card controls and routes their interactions without open
     assert.equal(emitted.at(-1).payload.state, 'OFF');
     assert.deepEqual(opened, []);
 
-    const openButton = findByClass(gridEl, 'device-card-open');
-    openButton.listeners.click();
+    const nameButton = findByClass(gridEl, 'device-card-name-button');
+    assert.equal(nameButton.tagName, 'BUTTON');
+    assert.equal(nameButton.attributes['aria-label'], 'Open Kitchen Switch');
+    assert.equal(findByClass(gridEl, 'device-card-open'), null);
+    nameButton.listeners.click();
     assert.deepEqual(opened, [topic]);
+});
+
+test('dashboard telemetry updates visible values while a card control retains focus', () => {
+    const document = new MockDocument();
+    const gridEl = new MockElement('div');
+    const { devices, timers } = loadDevicesModule({ document, gridEl });
+    const topic = seedDevice(devices, {
+        last_config: { state: 'ON', brightness: 127, occupancy: true, power: 1, illuminance: 2 },
+    });
+    Array.from(timers.values()).forEach((callback) => callback());
+
+    const originalCard = gridEl.children[0];
+    const powerToggle = findByClass(originalCard, 'device-card-power-toggle');
+    document.activeElement = powerToggle;
+    devices.mergeConfig(topic, {
+        state: 'OFF',
+        brightness: 50,
+        occupancy: false,
+        power: 3.5,
+        illuminance: 9,
+    }, Date.now() / 1000);
+    Array.from(timers.values()).forEach((callback) => callback());
+
+    assert.equal(gridEl.children[0], originalCard);
+    assert.equal(findByClass(originalCard, 'device-card-power-toggle'), powerToggle);
+    assert.equal(powerToggle.checked, false);
+    assert.deepEqual(
+        findByClass(originalCard, 'device-card-metrics').children.map((metric) => metric.children[1].textContent),
+        ['Clear', '3.5 W', '9 lx'],
+    );
+    assert.equal(findByClass(originalCard, 'device-card-brightness-value').textContent, '20%');
+});
+
+test('dashboard inserts newly discovered devices in friendly-name order without replacing existing cards', () => {
+    const document = new MockDocument();
+    const gridEl = new MockElement('div');
+    const { devices, timers } = loadDevicesModule({ document, gridEl });
+    const now = Date.now() / 1000;
+    const makeDevice = (name) => ({
+        topic: `zigbee2mqtt/${name}`,
+        friendly_name: name,
+        model: 'VZM32-SN',
+        last_seen: now,
+        capabilities: { state: true, brightness: true },
+        last_config: { state: 'ON', brightness: 127 },
+    });
+
+    devices.setDevices([makeDevice('Bedroom'), makeDevice('Den')]);
+    Array.from(timers.values()).forEach((callback) => callback());
+    const bedroomCard = gridEl.children[0];
+    const bedroomToggle = findByClass(bedroomCard, 'device-card-power-toggle');
+    document.activeElement = bedroomToggle;
+
+    devices.setDevices([makeDevice('Bedroom'), makeDevice('Den'), makeDevice('Attic')]);
+    Array.from(timers.values()).forEach((callback) => callback());
+
+    assert.deepEqual(
+        gridEl.children.map((card) => findByClass(card, 'device-card-name-button').textContent),
+        ['Attic', 'Bedroom', 'Den'],
+    );
+    assert.equal(gridEl.children[1], bedroomCard);
+    assert.equal(document.activeElement, bedroomToggle);
+});
+
+test('dashboard preserves an actively adjusted slider while other telemetry keeps updating', () => {
+    const document = new MockDocument();
+    const gridEl = new MockElement('div');
+    const { devices, timers } = loadDevicesModule({ document, gridEl });
+    const topic = seedDevice(devices, {
+        last_config: { state: 'ON', brightness: 127, occupancy: true, power: 1, illuminance: 2 },
+    });
+    Array.from(timers.values()).forEach((callback) => callback());
+
+    const card = gridEl.children[0];
+    const slider = findByClass(card, 'device-card-brightness-slider');
+    slider.value = '80';
+    slider.listeners.pointerdown();
+    slider.listeners.input();
+    document.activeElement = slider;
+
+    devices.mergeConfig(topic, { brightness: 40, power: 5 }, Date.now() / 1000);
+    Array.from(timers.values()).forEach((callback) => callback());
+    assert.equal(slider.value, '80');
+    assert.equal(findByClass(card, 'device-card-brightness-value').textContent, '80%');
+    assert.equal(findByClass(card, 'device-card-metrics').children[1].children[1].textContent, '5 W');
+
+    slider.listeners.pointerup();
+    Array.from(timers.values()).forEach((callback) => callback());
+    assert.equal(slider.value, '16');
+    assert.equal(findByClass(card, 'device-card-brightness-value').textContent, '16%');
+});
+
+test('confirmed dashboard controls clear without rendering success feedback', () => {
+    const document = new MockDocument();
+    const gridEl = new MockElement('div');
+    const statuses = [];
+    const { devices, timers } = loadDevicesModule({
+        document,
+        gridEl,
+        onStatus: (status, message) => statuses.push({ status, message }),
+    });
+    const topic = seedDevice(devices, { last_config: { state: 'OFF', brightness: 127 } });
+    Array.from(timers.values()).forEach((callback) => callback());
+
+    const requestId = devices.sendControl(topic, { state: 'ON' });
+    devices.handleControlResult({
+        action: 'set_basic_control',
+        status: 'confirmed',
+        topic,
+        request_id: requestId,
+        payload: { state: 'ON' },
+    });
+    Array.from(timers.values()).forEach((callback) => callback());
+
+    assert.equal(findByClass(gridEl, 'device-card-footer').hidden, true);
+    assert.equal(findByClass(gridEl, 'device-card-feedback').textContent, '');
+    assert.equal(statuses.some((entry) => entry.status === 'confirmed'), false);
+});
+
+test('quick-control-only devices render a non-interactive name', () => {
+    const document = new MockDocument();
+    const gridEl = new MockElement('div');
+    const opened = [];
+    const { devices, timers } = loadDevicesModule({
+        document,
+        gridEl,
+        onOpenDevice: (topic) => opened.push(topic),
+    });
+    seedDevice(devices, { capabilities: { state: true, brightness: true, full_editor: false } });
+    Array.from(timers.values()).forEach((callback) => callback());
+
+    const nameButton = findByClass(gridEl, 'device-card-name-button');
+    const nameText = findByClass(gridEl, 'device-card-name-text');
+    assert.equal(nameButton.hidden, true);
+    assert.equal(nameText.hidden, false);
+    assert.equal(nameText.textContent, 'Kitchen Switch');
+    assert.deepEqual(opened, []);
 });
 
 test('dashboard renders null telemetry as unavailable instead of zero', () => {

@@ -1,5 +1,6 @@
 (function () {
     const devicesByTopic = new Map();
+    const cardsByTopic = new Map();
     const pendingControls = new Map();
     let socket = null;
     let gridEl = null;
@@ -12,7 +13,7 @@
     let mqttConnected = false;
     let requestCounter = 0;
     let renderTimer = null;
-    let deferredRenderControl = null;
+    let activeRangeControl = null;
     let scheduleTimeout = (callback, delay) => setTimeout(callback, delay);
     let cancelTimeout = (timer) => clearTimeout(timer);
     const finishedControlRequests = new Map();
@@ -99,7 +100,7 @@
     }
 
     function requestRender() {
-        if (!gridEl || renderTimer !== null || deferredRenderControl) return;
+        if (!gridEl || renderTimer !== null) return;
         renderTimer = scheduleTimeout(() => {
             renderTimer = null;
             render();
@@ -317,7 +318,6 @@
                 device.last_config = { ...(device.last_config || {}), ...(result.payload || entry.expected) };
                 device.controlStatus = 'confirmed';
             }
-            if (typeof onStatus === 'function') onStatus('confirmed', 'Quick control confirmed.');
             requestRender();
         } else if (device && (result.status === 'sent' || result.status === 'sending')) {
             device.controlStatus = 'sending';
@@ -351,14 +351,134 @@
         return element;
     }
 
-    function createMetric(label, value) {
+    function createMetric(label) {
         const metric = createElement('div', 'device-card-metric');
         metric.appendChild(createElement('span', 'device-card-metric-label', label));
-        metric.appendChild(createElement('strong', 'device-card-metric-value', value));
-        return metric;
+        const valueEl = createElement('strong', 'device-card-metric-value', '—');
+        metric.appendChild(valueEl);
+        return { element: metric, valueEl };
     }
 
-    function renderCard(device) {
+    function beginRangeInteraction(control) {
+        activeRangeControl = control || null;
+    }
+
+    function endRangeInteraction(control) {
+        if (activeRangeControl !== control) return;
+        activeRangeControl = null;
+        requestRender();
+    }
+
+    function createCard(device) {
+        const card = createElement('article', 'device-card');
+        card.dataset.topic = device.topic;
+
+        const header = createElement('div', 'device-card-header');
+        const identity = createElement('div', 'device-card-identity');
+        const model = createElement('div', 'device-card-model');
+        const nameHeading = createElement('h2', 'device-card-name');
+        const nameButton = createElement('button', 'device-card-name-button');
+        nameButton.type = 'button';
+        const nameText = createElement('span', 'device-card-name-text');
+        nameHeading.appendChild(nameButton);
+        nameHeading.appendChild(nameText);
+        identity.appendChild(model);
+        identity.appendChild(nameHeading);
+        header.appendChild(identity);
+        const status = createElement('span', 'device-card-status');
+        header.appendChild(status);
+        card.appendChild(header);
+
+        const metrics = createElement('div', 'device-card-metrics');
+        const occupancyMetric = createMetric('Presence');
+        const powerMetric = createMetric('Power');
+        const illuminanceMetric = createMetric('Light');
+        metrics.appendChild(occupancyMetric.element);
+        metrics.appendChild(powerMetric.element);
+        metrics.appendChild(illuminanceMetric.element);
+        card.appendChild(metrics);
+
+        const controls = createElement('div', 'device-card-controls');
+        const powerWrap = createElement('label', 'device-card-power');
+        powerWrap.appendChild(createElement('span', 'device-card-control-label', 'Power'));
+        const powerToggle = createElement('input', 'device-card-power-toggle');
+        powerToggle.type = 'checkbox';
+        powerWrap.appendChild(powerToggle);
+        controls.appendChild(powerWrap);
+
+        const brightnessWrap = createElement('label', 'device-card-brightness');
+        const brightnessHeader = createElement('span', 'device-card-brightness-header');
+        const brightnessLabel = createElement('span', 'device-card-control-label');
+        const brightnessValue = createElement('strong', 'device-card-brightness-value');
+        brightnessHeader.appendChild(brightnessLabel);
+        brightnessHeader.appendChild(brightnessValue);
+        brightnessWrap.appendChild(brightnessHeader);
+        const slider = createElement('input', 'device-card-brightness-slider');
+        slider.type = 'range';
+        slider.min = '0';
+        slider.max = '100';
+        slider.step = '1';
+        brightnessWrap.appendChild(slider);
+        controls.appendChild(brightnessWrap);
+        card.appendChild(controls);
+
+        const footer = createElement('div', 'device-card-footer');
+        const feedback = createElement('span', 'device-card-feedback');
+        feedback.setAttribute('role', 'status');
+        feedback.setAttribute('aria-live', 'polite');
+        footer.appendChild(feedback);
+        card.appendChild(footer);
+
+        nameButton.addEventListener('click', () => requestOpenDevice(card.dataset.topic));
+        powerToggle.addEventListener('change', () => {
+            sendControl(card.dataset.topic, { state: powerToggle.checked ? 'ON' : 'OFF' });
+        });
+        slider.addEventListener('input', () => {
+            brightnessValue.textContent = `${slider.value}%`;
+        });
+        slider.addEventListener('pointerdown', () => beginRangeInteraction(slider));
+        slider.addEventListener('pointerup', () => endRangeInteraction(slider));
+        slider.addEventListener('pointercancel', () => endRangeInteraction(slider));
+        slider.addEventListener('lostpointercapture', () => endRangeInteraction(slider));
+        slider.addEventListener('keydown', (event) => {
+            if (event && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) {
+                beginRangeInteraction(slider);
+            }
+        });
+        slider.addEventListener('keyup', () => endRangeInteraction(slider));
+        slider.addEventListener('blur', () => endRangeInteraction(slider));
+        slider.addEventListener('change', () => {
+            const raw = percentToBrightness(slider.value);
+            if (raw !== null) {
+                const currentDevice = devicesByTopic.get(card.dataset.topic);
+                const currentIsOn = normalizeState(currentDevice && currentDevice.last_config && currentDevice.last_config.state) === true;
+                const payload = { brightness: raw };
+                if (!currentIsOn) payload.state = 'ON';
+                sendControl(card.dataset.topic, payload);
+            }
+            endRangeInteraction(slider);
+        });
+
+        card._switchStudioRefs = {
+            model,
+            nameButton,
+            nameText,
+            status,
+            occupancyValue: occupancyMetric.valueEl,
+            powerValue: powerMetric.valueEl,
+            illuminanceValue: illuminanceMetric.valueEl,
+            powerToggle,
+            brightnessLabel,
+            brightnessValue,
+            slider,
+            footer,
+            feedback,
+        };
+        updateCard(card, device);
+        return card;
+    }
+
+    function updateCard(card, device) {
         const readiness = getDeviceReadiness(device);
         const online = readiness.ready;
         const canOpenEditor = device.capabilities.full_editor !== false;
@@ -369,111 +489,71 @@
         const power = finiteNumber(config.power);
         const illuminance = finiteNumber(config.illuminance);
 
-        const card = createElement('article', `device-card${isOn ? ' is-on' : ''}${online ? '' : ' is-offline'}`);
+        const refs = card._switchStudioRefs;
+        if (!refs) return card;
+        card.className = `device-card${isOn ? ' is-on' : ''}${online ? '' : ' is-offline'}`;
         card.dataset.topic = device.topic;
+        refs.model.textContent = device.model || 'VZM32-SN';
+        refs.nameButton.textContent = device.friendly_name;
+        refs.nameButton.hidden = !canOpenEditor;
+        refs.nameButton.disabled = !canOpenEditor;
+        refs.nameButton.setAttribute('aria-label', `Open ${device.friendly_name}`);
+        refs.nameText.textContent = device.friendly_name;
+        refs.nameText.hidden = canOpenEditor;
+        refs.nameText.setAttribute('title', canOpenEditor ? '' : 'Full configuration is not supported for this device');
+        refs.status.className = `device-card-status ${online ? 'is-online' : 'is-offline'}`;
+        refs.status.textContent = readiness.label;
+        refs.occupancyValue.textContent = occupancy === true ? 'Occupied' : occupancy === false ? 'Clear' : '—';
+        refs.powerValue.textContent = power !== null ? `${power.toFixed(power % 1 ? 1 : 0)} W` : '—';
+        refs.illuminanceValue.textContent = illuminance !== null ? `${illuminance} lx` : '—';
+        refs.powerToggle.checked = isOn;
+        refs.powerToggle.disabled = !online || device.capabilities.state === false;
+        refs.powerToggle.setAttribute('aria-label', `Toggle ${device.friendly_name} power`);
+        refs.brightnessLabel.textContent = isOn ? 'Brightness' : 'Last level';
+        refs.slider.disabled = !online || device.capabilities.brightness === false;
+        refs.slider.setAttribute('aria-label', `Set ${device.friendly_name} brightness`);
+        if (activeRangeControl !== refs.slider) {
+            refs.slider.value = String(brightness === null ? 0 : brightness);
+            refs.brightnessValue.textContent = brightness === null ? '—' : `${brightness}%`;
+        }
 
-        const header = createElement('div', 'device-card-header');
-        const identity = createElement('div', 'device-card-identity');
-        identity.appendChild(createElement('div', 'device-card-model', device.model || 'VZM32-SN'));
-        identity.appendChild(createElement('h2', 'device-card-name', device.friendly_name));
-        header.appendChild(identity);
-        const status = createElement('span', `device-card-status ${online ? 'is-online' : 'is-offline'}`, readiness.label);
-        header.appendChild(status);
-        card.appendChild(header);
-
-        const metrics = createElement('div', 'device-card-metrics');
-        metrics.appendChild(createMetric('Presence', occupancy === true ? 'Occupied' : occupancy === false ? 'Clear' : '—'));
-        metrics.appendChild(createMetric('Power', power !== null ? `${power.toFixed(power % 1 ? 1 : 0)} W` : '—'));
-        metrics.appendChild(createMetric('Light', illuminance !== null ? `${illuminance} lx` : '—'));
-        card.appendChild(metrics);
-
-        const controls = createElement('div', 'device-card-controls');
-        const powerWrap = createElement('label', 'device-card-power');
-        powerWrap.appendChild(createElement('span', 'device-card-control-label', 'Power'));
-        const powerToggle = createElement('input', 'device-card-power-toggle');
-        powerToggle.type = 'checkbox';
-        powerToggle.checked = isOn;
-        powerToggle.disabled = !online || device.capabilities.state === false;
-        powerToggle.setAttribute('aria-label', `Toggle ${device.friendly_name} power`);
-        powerToggle.addEventListener('change', () => {
-            sendControl(device.topic, { state: powerToggle.checked ? 'ON' : 'OFF' });
-        });
-        powerWrap.appendChild(powerToggle);
-        controls.appendChild(powerWrap);
-
-        const brightnessWrap = createElement('label', 'device-card-brightness');
-        const brightnessHeader = createElement('span', 'device-card-brightness-header');
-        brightnessHeader.appendChild(createElement('span', 'device-card-control-label', isOn ? 'Brightness' : 'Last level'));
-        const brightnessValue = createElement('strong', 'device-card-brightness-value', brightness === null ? '—' : `${brightness}%`);
-        brightnessHeader.appendChild(brightnessValue);
-        brightnessWrap.appendChild(brightnessHeader);
-        const slider = createElement('input', 'device-card-brightness-slider');
-        slider.type = 'range';
-        slider.min = '0';
-        slider.max = '100';
-        slider.step = '1';
-        slider.value = String(brightness === null ? 0 : brightness);
-        slider.disabled = !online || device.capabilities.brightness === false;
-        slider.setAttribute('aria-label', `Set ${device.friendly_name} brightness`);
-        slider.addEventListener('input', () => {
-            brightnessValue.textContent = `${slider.value}%`;
-        });
-        slider.addEventListener('change', () => {
-            const raw = percentToBrightness(slider.value);
-            if (raw === null) return;
-            const payload = { brightness: raw };
-            if (!isOn) payload.state = 'ON';
-            sendControl(device.topic, payload);
-        });
-        brightnessWrap.appendChild(slider);
-        controls.appendChild(brightnessWrap);
-        card.appendChild(controls);
-
-        const footer = createElement('div', 'device-card-footer');
         const controlState = device.controlStatus === 'sending'
             ? 'Waiting for confirmation…'
             : device.controlStatus === 'not-confirmed'
                 ? 'Last control not confirmed'
-                : device.controlStatus === 'confirmed'
-                    ? 'Control confirmed'
+                : device.controlStatus === 'error'
+                    ? 'Control failed'
                     : '';
-        footer.appendChild(createElement('span', `device-card-feedback ${device.controlStatus || ''}`, controlState));
-        const openButton = createElement('button', 'device-card-open', 'Open device');
-        openButton.type = 'button';
-        openButton.disabled = !canOpenEditor;
-        if (!canOpenEditor) {
-            openButton.textContent = 'Quick controls only';
-            openButton.setAttribute('aria-label', `${device.friendly_name} full configuration is not supported yet`);
-        }
-        openButton.addEventListener('click', () => requestOpenDevice(device.topic));
-        footer.appendChild(openButton);
-        card.appendChild(footer);
+        refs.feedback.className = `device-card-feedback ${device.controlStatus || ''}`;
+        refs.feedback.textContent = controlState;
+        refs.footer.hidden = !controlState;
         return card;
     }
 
     function render() {
         if (!gridEl || typeof document === 'undefined') return;
-        const activeElement = document.activeElement;
-        if (
-            activeElement &&
-            typeof activeElement.matches === 'function' &&
-            activeElement.matches('input, button, select') &&
-            typeof gridEl.contains === 'function' &&
-            gridEl.contains(activeElement)
-        ) {
-            if (deferredRenderControl !== activeElement) {
-                deferredRenderControl = activeElement;
-                activeElement.addEventListener('blur', () => {
-                    deferredRenderControl = null;
-                    requestRender();
-                }, { once: true });
-            }
-            return;
-        }
-        deferredRenderControl = null;
-        while (gridEl.firstChild) gridEl.removeChild(gridEl.firstChild);
         const devices = Array.from(devicesByTopic.values()).sort((a, b) => a.friendly_name.localeCompare(b.friendly_name));
-        devices.forEach((device) => gridEl.appendChild(renderCard(device)));
+        const visibleTopics = new Set(devices.map((device) => device.topic));
+        cardsByTopic.forEach((card, topic) => {
+            if (visibleTopics.has(topic)) return;
+            if (activeRangeControl && typeof card.contains === 'function' && card.contains(activeRangeControl)) {
+                activeRangeControl = null;
+            }
+            if (card.parentNode) card.parentNode.removeChild(card);
+            cardsByTopic.delete(topic);
+        });
+        devices.forEach((device, index) => {
+            let card = cardsByTopic.get(device.topic);
+            if (!card) {
+                card = createCard(device);
+                cardsByTopic.set(device.topic, card);
+            } else {
+                updateCard(card, device);
+            }
+            if (gridEl.children[index] !== card) {
+                gridEl.insertBefore(card, gridEl.children[index] || null);
+            }
+        });
         if (emptyEl) emptyEl.hidden = devices.length > 0;
         if (summaryEl) {
             const readyCount = devices.filter((device) => isDeviceOnline(device)).length;
