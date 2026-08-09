@@ -592,6 +592,7 @@
             updateDirtyUi();
         },
         getLatestValue: (param, topic) => ensureDeviceState(topic).authoritative[param],
+        getCurrentValue: (param, topic) => desiredValueFor(ensureDeviceState(topic), param),
         isPending: (param, topic) => {
             const state = ensureDeviceState(topic);
             return state.pending.has(param) || state.inFlight.has(param);

@@ -19,6 +19,7 @@ Huge thanks for creating the initial tooling that made this expanded Switch Stud
 - Added reconnect-safe device inventory, availability, and command recovery
 - Added stronger mobile responsiveness for Home Assistant app usage
 - Added richer Presence & Zones tooling (zone editor, inline zone status, live target telemetry)
+- Added an interactive VZM32-SN LED-bar editor with a product preview, segment controls, and custom hue selection
 - Added in-strip `Target Reporting` control with optional auto-off on disconnect
 - Added Zigbee2MQTT OTA status, update checks, and catalog-only installation controls
 
@@ -39,6 +40,7 @@ Other discovered Blue Series devices use conservative, expose-derived dashboard 
 - Session-scoped device selection per browser session
 - Live Presence & Zones workflow with radar map editing, zone status, and target telemetry
 - Tabbed configuration for frequent-use and advanced settings
+- Visual VZM32-SN LED defaults editor with On/Off previews, global controls, and seven individually selectable segments
 - Conditional section support for model-specific parameters (for example, shared fan-related fields)
 - Sticky pending-changes action bar that appears only when changes exist
 - Exact device-echo confirmation for writes, with retry-safe timeout and reconnect behavior
@@ -87,7 +89,7 @@ For live target coordinates and radar updates:
 ### Other Tabs
 
 - `Load & Dimming`: daily dimming/load behavior
-- `LED & Notifications`: LED presets, effects, and notification controls
+- `LED & Notifications`: interactive LED-bar defaults, custom colors, effects, and notification controls
 - `Buttons & Scenes`: scene and paddle behavior
 - `Power & Device`: device-level power and operational settings
 - `Advanced`: lower-frequency settings plus conditional model-specific sections
@@ -104,7 +106,6 @@ For live target coordinates and radar updates:
 
 ## :world_map: Roadmap
 
-- Add the interactive VZM32-SN product/LED-bar SVG with segment controls and custom color selection
 - Add a height-aware 3D radar visualization alongside the existing 2D editor
 - Add a local firmware-upload workflow for internet-independent updates
 - Expand verified full-editor coverage to additional Inovelli Blue Series models

@@ -1616,6 +1616,487 @@
             color: #ffd27c;
         }
 
+        /* VZM32-SN LED bar editor */
+        .led-editor-mount:empty {
+            display: none;
+        }
+        .led-editor-shell {
+            position: relative;
+            margin: 2px 0 16px;
+            padding: 16px;
+            border: 1px solid var(--border-strong);
+            border-radius: var(--radius-lg);
+            background:
+                radial-gradient(circle at 18% 10%, rgba(13, 212, 192, 0.08), transparent 34%),
+                linear-gradient(145deg, rgba(20, 27, 40, 0.98), rgba(13, 18, 29, 0.98));
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025), 0 14px 34px rgba(0, 0, 0, 0.18);
+            overflow: visible;
+        }
+        .led-editor-context {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 14px;
+        }
+        .led-editor-section-label {
+            color: var(--text-primary);
+            font-size: 0.8rem;
+            font-weight: 650;
+            letter-spacing: 0.01em;
+        }
+        .led-editor-context-controls,
+        .led-editor-controls {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px;
+            border: 1px solid var(--border-subtle);
+            border-radius: 999px;
+            background: rgba(10, 14, 23, 0.68);
+        }
+        .led-editor-context-btn {
+            min-width: 72px;
+            min-height: 44px;
+            padding: 6px 12px;
+            border: 1px solid transparent;
+            border-radius: 999px;
+            background: transparent;
+            color: var(--text-secondary);
+            font: inherit;
+            font-size: 0.72rem;
+            font-weight: 650;
+            cursor: pointer;
+            transition: background var(--anim-fast), border-color var(--anim-fast), color var(--anim-fast);
+        }
+        .led-editor-context-btn:hover {
+            color: var(--text-primary);
+        }
+        .led-editor-context-btn.is-active,
+        .led-editor-context-btn[aria-pressed="true"] {
+            border-color: rgba(13, 212, 192, 0.42);
+            background: rgba(13, 212, 192, 0.14);
+            color: #bafff8;
+        }
+        .led-editor-layout {
+            display: grid;
+            grid-template-columns: minmax(430px, 1.08fr) minmax(300px, 0.92fr);
+            align-items: stretch;
+            gap: 18px;
+        }
+        .led-switch-stage {
+            position: relative;
+            display: flex;
+            align-items: center;
+            min-height: 506px;
+            padding: 12px 16px;
+            border: 1px solid rgba(61, 75, 99, 0.58);
+            border-radius: var(--radius-md);
+            background:
+                radial-gradient(circle at 34% 40%, rgba(255, 255, 255, 0.055), transparent 36%),
+                linear-gradient(180deg, rgba(27, 34, 48, 0.84), rgba(15, 20, 31, 0.92));
+            overflow: visible;
+        }
+        .led-switch-art {
+            position: relative;
+            flex: 0 0 auto;
+            width: min(240px, 62%);
+            aspect-ratio: 1 / 2;
+            margin-left: 8px;
+            filter: drop-shadow(0 18px 23px rgba(0, 0, 0, 0.36));
+        }
+        .led-switch-svg {
+            display: block;
+            width: 100%;
+            height: 100%;
+            overflow: visible;
+        }
+        .led-switch-body,
+        .led-switch-paddle,
+        .led-switch-config-button,
+        .led-switch-air-gap {
+            vector-effect: non-scaling-stroke;
+        }
+        .led-switch-lux-lens {
+            filter: drop-shadow(0 0 3px rgba(13, 212, 192, 0.18));
+        }
+        .led-segment-hit {
+            position: absolute;
+            left: 81.66%;
+            width: 18.34%;
+            min-width: 44px;
+            margin: 0;
+            padding: 0;
+            border: 0;
+            border-radius: 8px;
+            background: transparent;
+            color: transparent;
+            cursor: pointer;
+            touch-action: manipulation;
+            z-index: 4;
+        }
+        .led-segment-hit::before {
+            content: '';
+            position: absolute;
+            top: 2px;
+            bottom: 2px;
+            left: 15px;
+            width: 14px;
+            border-radius: 2px;
+            background: var(--led-color, #263044);
+            opacity: var(--led-opacity, 0.22);
+            box-shadow: 0 0 var(--led-glow, 4px) var(--led-color, transparent);
+            transition: opacity var(--anim-fast), background var(--anim-fast), box-shadow var(--anim-fast);
+        }
+        .led-segment-hit::after {
+            content: '';
+            position: absolute;
+            inset: 1px;
+            border: 1px solid transparent;
+            border-radius: 8px;
+            transition: border-color var(--anim-fast), background var(--anim-fast);
+        }
+        .led-segment-hit:hover::after {
+            border-color: rgba(186, 255, 248, 0.38);
+            background: rgba(13, 212, 192, 0.055);
+        }
+        .led-segment-hit:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
+        .led-segment-hit.is-selected::after {
+            border-color: rgba(13, 212, 192, 0.82);
+            background: rgba(13, 212, 192, 0.09);
+        }
+        .led-segment-hit.is-dim::before {
+            box-shadow: none;
+        }
+        .led-segment-hit.is-pending::after {
+            border-style: dashed;
+            border-color: rgba(251, 191, 36, 0.78);
+        }
+        .led-global-panel {
+            min-width: 0;
+            padding: 15px;
+            border: 1px solid rgba(61, 75, 99, 0.62);
+            border-radius: var(--radius-md);
+            background: rgba(20, 27, 39, 0.88);
+        }
+        .led-control-header,
+        .led-popover-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+        }
+        .led-control-title,
+        .led-popover-title {
+            color: var(--text-primary);
+            font-size: 0.92rem;
+            font-weight: 700;
+            line-height: 1.25;
+        }
+        .led-control-context,
+        .led-popover-note,
+        .led-editor-note {
+            color: var(--text-muted);
+            font-size: 0.7rem;
+            line-height: 1.45;
+        }
+        .led-control-context {
+            margin-top: 3px;
+        }
+        .led-editor-note {
+            padding: 12px;
+            border: 1px dashed var(--border-subtle);
+            border-radius: var(--radius-sm);
+            background: rgba(10, 14, 22, 0.42);
+        }
+        .led-toggle,
+        .led-customize-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            width: 100%;
+            min-height: 44px;
+            gap: 12px;
+            margin: 13px 0 11px;
+            padding: 9px 10px;
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
+            background: rgba(12, 17, 27, 0.58);
+            color: var(--text-secondary);
+            font: inherit;
+            text-align: left;
+            cursor: pointer;
+        }
+        .led-control-header > .led-toggle {
+            width: auto;
+            min-width: 118px;
+            margin: 0;
+        }
+        .led-toggle:hover,
+        .led-customize-row:hover {
+            border-color: rgba(13, 212, 192, 0.38);
+        }
+        .led-toggle-text {
+            min-width: 0;
+            font-size: 0.73rem;
+            font-weight: 600;
+        }
+        .led-toggle-track {
+            position: relative;
+            flex: 0 0 auto;
+            width: 36px;
+            height: 20px;
+            border: 1px solid var(--border-strong);
+            border-radius: 999px;
+            background: #2d374b;
+            transition: background var(--anim-fast), border-color var(--anim-fast);
+        }
+        .led-toggle-track::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #f3f7fb;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+            transition: transform var(--anim-fast);
+        }
+        .led-toggle[aria-checked="true"] .led-toggle-track,
+        .led-customize-row[aria-checked="true"] .led-toggle-track {
+            border-color: var(--accent);
+            background: var(--accent);
+        }
+        .led-toggle[aria-checked="true"] .led-toggle-track::after,
+        .led-customize-row[aria-checked="true"] .led-toggle-track::after {
+            transform: translateX(16px);
+        }
+        .led-toggle:disabled,
+        .led-customize-row:disabled {
+            cursor: not-allowed;
+            opacity: 0.5;
+        }
+        .led-follow-intensity[hidden] {
+            display: none;
+        }
+        .led-conditional-controls[hidden] {
+            display: none;
+        }
+        .led-preset-grid {
+            display: grid;
+            grid-template-columns: repeat(5, minmax(36px, 1fr));
+            gap: 7px;
+            margin: 10px 0 13px;
+        }
+        .led-color-preset {
+            position: relative;
+            min-width: 0;
+            height: 44px;
+            padding: 0;
+            border: 2px solid rgba(255, 255, 255, 0.14);
+            border-radius: 9px;
+            background: var(--led-preset-color, #334155);
+            color: #fff;
+            font-size: 0.58rem;
+            font-weight: 750;
+            letter-spacing: -0.01em;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95), 0 0 4px rgba(0, 0, 0, 0.65);
+            box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.28);
+            cursor: pointer;
+            transition: transform var(--anim-fast), border-color var(--anim-fast), box-shadow var(--anim-fast);
+        }
+        .led-color-preset:hover {
+            transform: translateY(-1px);
+            border-color: rgba(255, 255, 255, 0.58);
+        }
+        .led-color-preset[aria-pressed="true"],
+        .led-color-preset.is-active {
+            border-color: #f8fbff;
+            box-shadow: 0 0 0 2px rgba(13, 212, 192, 0.75), inset 0 0 0 1px rgba(0, 0, 0, 0.28);
+        }
+        .led-color-preset.is-follow-default {
+            background:
+                linear-gradient(135deg, rgba(255, 255, 255, 0.18) 25%, transparent 25% 50%, rgba(255, 255, 255, 0.18) 50% 75%, transparent 75%),
+                #344054;
+            background-size: 12px 12px;
+        }
+        .led-hue-row {
+            display: grid;
+            grid-template-columns: 126px minmax(0, 1fr);
+            align-items: center;
+            gap: 14px;
+            min-width: 0;
+            margin: 3px 0 13px;
+        }
+        .led-hue-wheel {
+            position: relative;
+            width: 126px;
+            height: 126px;
+            padding: 0;
+            border: 1px solid rgba(255, 255, 255, 0.24);
+            border-radius: 50%;
+            background: conic-gradient(from 0deg, #ff3b3b, #ffe03b, #46e365, #3be7e7, #4169ff, #d94cff, #ff3b85, #ff3b3b);
+            box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.26), 0 8px 22px rgba(0, 0, 0, 0.24);
+            cursor: crosshair;
+            touch-action: none;
+        }
+        .led-hue-wheel::after {
+            content: '';
+            position: absolute;
+            inset: 31px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 50%;
+            background: #171e2a;
+            box-shadow: 0 0 12px rgba(0, 0, 0, 0.32);
+        }
+        .led-hue-marker {
+            position: absolute;
+            z-index: 2;
+            width: 12px;
+            height: 12px;
+            border: 2px solid #fff;
+            border-radius: 50%;
+            background: var(--led-marker-color, #ff3b3b);
+            box-shadow: 0 1px 5px rgba(0, 0, 0, 0.7);
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+        .led-brightness-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 52px;
+            align-items: center;
+            gap: 10px;
+            margin-top: 6px;
+        }
+        .led-brightness-slider {
+            width: 100%;
+            min-width: 0;
+            margin: 0;
+            accent-color: var(--accent);
+        }
+        .led-value {
+            color: var(--text-primary);
+            font-size: 0.75rem;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+            text-align: right;
+        }
+        .led-segment-popover {
+            position: absolute;
+            top: 24px;
+            right: 12px;
+            z-index: 30;
+            width: min(284px, calc(100% - 28px));
+            max-height: calc(100% - 28px);
+            overflow-y: auto;
+            padding: 14px;
+            border: 1px solid rgba(13, 212, 192, 0.5);
+            border-radius: var(--radius-md);
+            background: rgba(17, 24, 36, 0.985);
+            box-shadow: 0 22px 48px rgba(0, 0, 0, 0.48), inset 0 1px 0 rgba(255, 255, 255, 0.035);
+        }
+        .led-segment-popover[hidden] {
+            display: none;
+        }
+        .led-popover-close {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex: 0 0 auto;
+            width: 44px;
+            height: 44px;
+            padding: 0;
+            border: 1px solid var(--border-subtle);
+            border-radius: 9px;
+            background: rgba(255, 255, 255, 0.025);
+            color: var(--text-secondary);
+            font: inherit;
+            font-size: 1rem;
+            cursor: pointer;
+        }
+        .led-popover-close:hover {
+            border-color: var(--border-strong);
+            color: var(--text-primary);
+        }
+        .led-popover-note {
+            margin-top: 4px;
+        }
+
+        @media (max-width: 1180px) {
+            .led-editor-layout {
+                grid-template-columns: minmax(0, 1fr);
+            }
+            .led-switch-stage {
+                width: 100%;
+                max-width: 650px;
+                margin: 0 auto;
+            }
+            .led-switch-art {
+                margin-left: clamp(10px, 10vw, 70px);
+            }
+        }
+        @media (max-width: 720px) {
+            .led-editor-shell {
+                margin-inline: -3px;
+                padding: 12px;
+                border-radius: var(--radius-md);
+            }
+            .led-editor-context {
+                align-items: stretch;
+                flex-direction: column;
+                gap: 8px;
+            }
+            .led-editor-context-controls,
+            .led-editor-controls {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                width: 100%;
+            }
+            .led-editor-context-btn {
+                width: 100%;
+            }
+            .led-switch-stage {
+                min-height: 458px;
+                padding: 8px;
+                overflow: hidden;
+            }
+            .led-switch-art {
+                width: min(240px, 100%);
+                margin: 0 auto;
+            }
+            .led-global-panel {
+                padding: 12px;
+            }
+            .led-preset-grid {
+                grid-template-columns: repeat(5, minmax(34px, 1fr));
+                gap: 6px;
+            }
+            .led-hue-row {
+                grid-template-columns: 112px minmax(0, 1fr);
+                gap: 11px;
+            }
+            .led-hue-wheel {
+                width: 112px;
+                height: 112px;
+            }
+            .led-hue-wheel::after {
+                inset: 28px;
+            }
+            .led-segment-popover {
+                position: fixed;
+                inset: auto 10px calc(10px + env(safe-area-inset-bottom, 0px));
+                z-index: 2400;
+                width: auto;
+                max-height: min(74dvh, 620px);
+                overscroll-behavior: contain;
+                border-radius: 14px;
+            }
+        }
+
         @media (prefers-reduced-motion: reduce) {
             *,
             *::before,
@@ -2321,7 +2802,8 @@
                 <section class="panel-section" data-tab-section="led-main">
                     <div class="panel-section-title">LED & Notifications</div>
                     <div class="config-content">
-                        <div class="panel-lede">Color presets, brightness levels, and notification effects that users tend to tune often.</div>
+                        <div class="panel-lede">Preview the LED bar, customize individual segments, and configure notification effects.</div>
+                        <div id="ledEditorRoot" class="led-editor-mount"></div>
                         <div id="schemaLedFields" class="schema-fields-shell">
                             <div class="schema-loading-note">Loading controls...</div>
                         </div>
@@ -2446,6 +2928,7 @@
 
     <script src="{{ ingress_path }}/static/js/app_tabs.js"></script>
     <script src="{{ ingress_path }}/static/js/app_state.js"></script>
+    <script src="{{ ingress_path }}/static/js/app_led.js"></script>
     <script src="{{ ingress_path }}/static/js/app_devices.js"></script>
     <script src="{{ ingress_path }}/static/js/app_firmware.js"></script>
     <script src="{{ ingress_path }}/static/js/app_load_dimming.js"></script>
@@ -2598,6 +3081,7 @@
         const schemaPresenceControlsFields = document.getElementById('schemaPresenceControlsFields');
         const schemaPresenceConfigFields = document.getElementById('schemaPresenceConfigFields');
         const schemaLoadFields = document.getElementById('schemaLoadFields');
+        const ledEditorRoot = document.getElementById('ledEditorRoot');
         const schemaLedFields = document.getElementById('schemaLedFields');
         const schemaButtonFields = document.getElementById('schemaButtonFields');
         const schemaPowerFields = document.getElementById('schemaPowerFields');
@@ -3432,6 +3916,9 @@
 
         function showDashboardView(options) {
             const opts = options || {};
+            if (window.SwitchStudioLed && typeof window.SwitchStudioLed.closeEditor === 'function') {
+                window.SwitchStudioLed.closeEditor({ restoreFocus: false });
+            }
             if (dashboardView) dashboardView.hidden = false;
             if (appContainer) appContainer.hidden = true;
             if (tabBar) tabBar.hidden = true;
@@ -3463,6 +3950,9 @@
         function resetWorkspaceForDeviceChange() {
             resetBasicControlsForDeviceChange();
             resetFirmwareStateForDeviceChange();
+            if (window.SwitchStudioLed && typeof window.SwitchStudioLed.resetForDeviceChange === 'function') {
+                window.SwitchStudioLed.resetForDeviceChange();
+            }
             if (window.SwitchStudioLoadDimming && typeof window.SwitchStudioLoadDimming.resetForDeviceChange === 'function') {
                 window.SwitchStudioLoadDimming.resetForDeviceChange();
             }
@@ -3557,6 +4047,9 @@
             activeDeviceFriendlyName = requestedDevice && requestedDevice.friendly_name
                 ? requestedDevice.friendly_name
                 : getDeviceDisplayName(normalizedNext);
+            if (window.SwitchStudioLed && typeof window.SwitchStudioLed.setActiveDevice === 'function') {
+                window.SwitchStudioLed.setActiveDevice(normalizedNext);
+            }
             if (window.SwitchStudioState && typeof window.SwitchStudioState.setActiveDevice === 'function') {
                 window.SwitchStudioState.setActiveDevice(normalizedNext);
                 window.SwitchStudioState.setPacketStatus('info', 'Awaiting fresh device data…');
@@ -3615,6 +4108,9 @@
                 defaultTab: 'zones',
                 onTabChange: (activeTab) => {
                     applyLayoutMode(activeTab);
+                    if (String(activeTab || '').toLowerCase() !== 'led' && window.SwitchStudioLed && typeof window.SwitchStudioLed.closeEditor === 'function') {
+                        window.SwitchStudioLed.closeEditor({ restoreFocus: false });
+                    }
                     if (String(activeTab || '').toLowerCase() === 'zones') {
                         applyZonesSidebarPane(activeZonesSidebarPane);
                         setTimeout(() => {
@@ -3645,6 +4141,14 @@
                 discardBtnEl: btnDiscardChanges,
                 toastContainerEl: toastContainer,
                 transportReady: false
+            });
+        }
+
+        if (window.SwitchStudioLed && typeof window.SwitchStudioLed.init === 'function') {
+            window.SwitchStudioLed.init({
+                containerEl: ledEditorRoot,
+                stateApi: window.SwitchStudioState || null,
+                isDeviceSelected: () => !!activeDeviceTopic
             });
         }
 
@@ -4164,6 +4668,19 @@
             { name: 'White', value: 255 }
         ];
 
+        const segmentLedColorPresets = [
+            { name: 'White', value: 0 },
+            { name: 'Red', value: 1 },
+            { name: 'Orange', value: 21 },
+            { name: 'Yellow', value: 42 },
+            { name: 'Green', value: 85 },
+            { name: 'Cyan', value: 127 },
+            { name: 'Blue', value: 170 },
+            { name: 'Violet', value: 212 },
+            { name: 'Pink', value: 234 },
+            { name: 'Sync Default', value: 255 }
+        ];
+
         const concisePresenceDescriptions = {
             mmwaveControlWiredDevice: 'Choose how presence controls the wired load.',
             mmWaveRoomSizePreset: 'Pick a room profile, or use Custom for manual zone tuning.',
@@ -4220,9 +4737,7 @@
             if (explicitPresets.length > 0) return explicitPresets;
 
             if (fieldUsesSyncDefaultColor(field)) {
-                return defaultLedColorPresets
-                    .filter(preset => preset.value !== 255)
-                    .concat([{ name: 'Sync Default', value: 255 }]);
+                return segmentLedColorPresets;
             }
 
             return defaultLedColorPresets.slice();
@@ -4801,6 +5316,9 @@
         function renderAllSchemaFields() {
             clearSchemaInputBindings();
             if (!schemaModel || !Array.isArray(schemaModel.fields)) {
+                if (window.SwitchStudioLed && typeof window.SwitchStudioLed.setSchemaModel === 'function') {
+                    window.SwitchStudioLed.setSchemaModel(null);
+                }
                 const unavailable = '<div class="schema-empty-note">Schema unavailable.</div>';
                 if (schemaPresenceControlsFields) schemaPresenceControlsFields.innerHTML = unavailable;
                 if (schemaPresenceConfigFields) schemaPresenceConfigFields.innerHTML = unavailable;
@@ -4815,6 +5333,10 @@
 
             schemaFieldMap = {};
             schemaCompositeMap = {};
+
+            if (window.SwitchStudioLed && typeof window.SwitchStudioLed.setSchemaModel === 'function') {
+                window.SwitchStudioLed.setSchemaModel(schemaModel);
+            }
 
             const fields = schemaModel.fields.filter(field => field && field.name);
             const options = Array.isArray(schemaModel.options) ? schemaModel.options.filter(opt => opt && opt.name) : [];
@@ -4855,7 +5377,11 @@
 
             const presenceFields = orderPresenceFields(buckets.presence);
             const loadFields = buckets.load;
-            const ledFields = buckets.led;
+            const ledFields = buckets.led.filter((field) => !(
+                window.SwitchStudioLed &&
+                typeof window.SwitchStudioLed.handlesField === 'function' &&
+                window.SwitchStudioLed.handlesField(field)
+            ));
             const buttonFields = buckets.buttons;
             const powerFields = buckets.power;
             const advancedFields = buckets.advanced;
@@ -5965,6 +6491,9 @@
                 } else {
                     activeDeviceTopic = null;
                     activeDeviceFriendlyName = null;
+                    if (window.SwitchStudioLed && typeof window.SwitchStudioLed.setActiveDevice === 'function') {
+                        window.SwitchStudioLed.setActiveDevice(null);
+                    }
                     if (window.SwitchStudioState && typeof window.SwitchStudioState.setActiveDevice === 'function') {
                         window.SwitchStudioState.setActiveDevice(null);
                     }

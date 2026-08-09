@@ -1,6 +1,6 @@
 # Home Assistant Ingress QA Checklist
 
-Last updated: 2026-08-04
+Last updated: 2026-08-09
 
 ## Test Environment
 
@@ -52,7 +52,11 @@ Last updated: 2026-08-04
 ## 5. Configuration and Confirmation
 
 - `Load & Dimming`: change numeric and enum settings, including linked timing fields.
-- `LED & Notifications`: change a preset, brightness field, and composite control.
+- `LED & Notifications`: switch between On/Off previews, change global color/brightness, and confirm all seven physical segments update in the preview.
+- Open LED 1 (bottom) and LED 7 (top); verify the segment dialog identifies each correctly and remains usable by touch and keyboard.
+- For a segment, test Follow all-LED defaults, a preset, a custom hue, brightness, and the lit/off toggle. Confirm edits remain staged until the main `Apply Changes` action.
+- Confirm synced segments follow staged global changes, mixed color/intensity sync states are represented without data loss, and `Discard` restores the newest device values.
+- Send both all-LED and single-LED notification effects; confirm these remain immediate actions and do not create duplicate generic default controls.
 - `Buttons & Scenes`: change one scene/button parameter.
 - `Power & Device`: verify diagnostics are read-only where appropriate.
 - `Advanced`: verify less common and conditionally relevant settings render without duplicates.
@@ -74,6 +78,7 @@ Last updated: 2026-08-04
 - Confirm cards, tabs, sticky actions, zone inputs, radar, and tables remain usable without accidental horizontal page scrolling.
 - Navigate top-level and nested Presence & Zones tabs by keyboard using Arrow keys, Home, and End.
 - Confirm focus remains visible and nested tab panels retain the correct screen-reader ownership.
+- Confirm LED segment hit targets remain at least 44px, the segment editor becomes a bounded bottom panel on phone layouts, and no hue/brightness drag causes page scrolling.
 - Reload and verify active top-level and nested tab persistence.
 
 ## 8. Exit Criteria

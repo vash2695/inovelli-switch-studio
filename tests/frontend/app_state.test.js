@@ -297,6 +297,30 @@ test('configuration state is isolated by device topic while background updates c
     assert.equal(state.getLatestValue('mmWaveHoldTime', 'zigbee2mqtt/device-a'), 12);
 });
 
+test('current values prefer pending work, then in-flight work, then authoritative state', () => {
+    const document = new MockDocument();
+    const state = initState(document, {
+        topic: 'zigbee2mqtt/device-a',
+        setTimeoutFn: () => 1,
+        clearTimeoutFn: () => {},
+    });
+
+    state.syncConfig('zigbee2mqtt/device-a', { ledColorWhenOn: 170 });
+    assert.equal(state.getLatestValue('ledColorWhenOn', 'zigbee2mqtt/device-a'), 170);
+    assert.equal(state.getCurrentValue('ledColorWhenOn', 'zigbee2mqtt/device-a'), 170);
+
+    state.queueChange('ledColorWhenOn', 85, null);
+    assert.equal(state.getCurrentValue('ledColorWhenOn', 'zigbee2mqtt/device-a'), 85);
+    state.applyPendingChanges();
+    assert.equal(state.getCurrentValue('ledColorWhenOn', 'zigbee2mqtt/device-a'), 85);
+
+    state.queueChange('ledColorWhenOn', 234, null);
+    assert.equal(state.getCurrentValue('ledColorWhenOn', 'zigbee2mqtt/device-a'), 234);
+    state.discardDevice('zigbee2mqtt/device-a', { silent: true });
+    assert.equal(state.getCurrentValue('ledColorWhenOn', 'zigbee2mqtt/device-a'), 85);
+    assert.equal(state.getLatestValue('ledColorWhenOn', 'zigbee2mqtt/device-a'), 170);
+});
+
 test('apply sends one batch and leaves authoritative state unchanged until the device echo', () => {
     const document = new MockDocument();
     const emitted = [];
