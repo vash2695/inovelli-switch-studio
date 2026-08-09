@@ -518,13 +518,11 @@
             refs.brightnessValue.textContent = brightness === null ? '—' : `${brightness}%`;
         }
 
-        const controlState = device.controlStatus === 'sending'
-            ? 'Waiting for confirmation…'
-            : device.controlStatus === 'not-confirmed'
-                ? 'Last control not confirmed'
-                : device.controlStatus === 'error'
-                    ? 'Control failed'
-                    : '';
+        const controlState = device.controlStatus === 'not-confirmed'
+            ? 'Last control not confirmed'
+            : device.controlStatus === 'error'
+                ? 'Control failed'
+                : '';
         refs.feedback.className = `device-card-feedback ${device.controlStatus || ''}`;
         refs.feedback.textContent = controlState;
         refs.footer.hidden = !controlState;

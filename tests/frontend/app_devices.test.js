@@ -455,7 +455,7 @@ test('dashboard preserves an actively adjusted slider while other telemetry keep
     assert.equal(findByClass(card, 'device-card-brightness-value').textContent, '16%');
 });
 
-test('confirmed dashboard controls clear without rendering success feedback', () => {
+test('pending and confirmed dashboard controls render no transient feedback', () => {
     const document = new MockDocument();
     const gridEl = new MockElement('div');
     const statuses = [];
@@ -468,6 +468,11 @@ test('confirmed dashboard controls clear without rendering success feedback', ()
     Array.from(timers.values()).forEach((callback) => callback());
 
     const requestId = devices.sendControl(topic, { state: 'ON' });
+    Array.from(timers.values()).at(-1)();
+    assert.equal(devices.getDevice(topic).controlStatus, 'sending');
+    assert.equal(findByClass(gridEl, 'device-card-footer').hidden, true);
+    assert.equal(findByClass(gridEl, 'device-card-feedback').textContent, '');
+
     devices.handleControlResult({
         action: 'set_basic_control',
         status: 'confirmed',
