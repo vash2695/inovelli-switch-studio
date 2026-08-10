@@ -56,7 +56,8 @@ Last updated: 2026-08-09
 - Open LED 1 (bottom) and LED 7 (top); verify the segment dialog identifies each correctly and remains usable by touch and keyboard.
 - For a segment, test Follow all-LED defaults, a preset, a custom hue, brightness, and the lit/off toggle. Confirm edits remain staged until the main `Apply Changes` action.
 - Confirm synced segments follow staged global changes, mixed color/intensity sync states are represented without data loss, and `Discard` restores the newest device values.
-- Send both all-LED and single-LED notification effects; confirm these remain immediate actions and do not create duplicate generic default controls.
+- Preview and send both all-LED and single-LED notification effects; confirm previews animate the expected physical direction, single-LED effects alter only their selected segment, and both Send actions remain immediate without creating pending defaults or duplicate generic controls.
+- Verify `Clear effect` remains distinct from `Off`, finite local previews stop at their encoded duration, and an indefinite preview continues while the LED tab remains open until stopped; leaving the tab or device clears local previews. Compare device timing on the installed VZM32-SN firmware because the local pacing is based on Inovelli's published simulator and may vary on hardware.
 - `Buttons & Scenes`: change one scene/button parameter.
 - `Power & Device`: verify diagnostics are read-only where appropriate.
 - `Advanced`: verify less common and conditionally relevant settings render without duplicates.

@@ -435,12 +435,50 @@ class SchemaService:
         if field_type == "composite":
             if not isinstance(value, dict):
                 return None, "Composite value must be an object"
+            if field.get("name") in {"led_effect", "individual_led_effect"}:
+                return self._normalize_led_effect(field, value)
             return value, None
         if field_type == "list":
             if not isinstance(value, list):
                 return None, "List value must be an array"
             return value, None
         return value, None
+
+    def _normalize_led_effect(self, field, value):
+        field_name = field.get("name")
+        required = ["effect", "color", "level", "duration"]
+        if field_name == "individual_led_effect":
+            required.insert(0, "led")
+
+        missing = [name for name in required if name not in value]
+        if missing:
+            return None, f"Field '{field_name}' is missing {', '.join(missing)}"
+        unexpected = [name for name in value if name not in required]
+        if unexpected:
+            return None, f"Field '{field_name}' has unexpected keys: {', '.join(unexpected)}"
+
+        features = {
+            feature.get("name"): feature
+            for feature in (field.get("features") or [])
+            if isinstance(feature, dict) and feature.get("name")
+        }
+        normalized = {}
+        for name in required:
+            feature = features.get(name)
+            if not feature:
+                return None, f"Field '{field_name}' schema is missing feature '{name}'"
+            if name in {"color", "level", "duration"}:
+                try:
+                    numeric_value = float(value[name])
+                except (TypeError, ValueError):
+                    return None, f"Field '{field_name}.{name}' requires a whole number"
+                if not numeric_value.is_integer():
+                    return None, f"Field '{field_name}.{name}' requires a whole number"
+            normalized_value, error = self._normalize_value(feature, value[name])
+            if error:
+                return None, error
+            normalized[name] = normalized_value
+        return normalized, None
 
     def _normalize_numeric(self, field, value):
         try:

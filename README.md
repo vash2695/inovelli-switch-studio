@@ -40,10 +40,10 @@ Other discovered Blue Series devices use conservative, expose-derived dashboard 
 - Session-scoped device selection per browser session
 - Live Presence & Zones workflow with radar map editing, zone status, and target telemetry
 - Tabbed configuration for frequent-use and advanced settings
-- Visual VZM32-SN LED defaults editor with On/Off previews, global controls, and seven individually selectable segments
+- Visual VZM32-SN LED editor with blended On/Off defaults, seven individually selectable segments, and integrated all-bar/per-segment notification effects
 - Conditional section support for model-specific parameters (for example, shared fan-related fields)
 - Sticky pending-changes action bar that appears only when changes exist
-- Exact device-echo confirmation for writes, with retry-safe timeout and reconnect behavior
+- Matching reported-state confirmation for staged configuration writes, with retry-safe timeout and reconnect behavior
 
 ## :white_check_mark: Requirements
 
@@ -89,7 +89,7 @@ For live target coordinates and radar updates:
 ### Other Tabs
 
 - `Load & Dimming`: daily dimming/load behavior
-- `LED & Notifications`: interactive LED-bar defaults, custom colors, effects, and notification controls
+- `LED & Notifications`: interactive LED-bar defaults, custom colors, and immediate notification effects with a local animated preview
 - `Buttons & Scenes`: scene and paddle behavior
 - `Power & Device`: device-level power and operational settings
 - `Advanced`: lower-frequency settings plus conditional model-specific sections

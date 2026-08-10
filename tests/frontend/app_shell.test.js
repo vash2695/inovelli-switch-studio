@@ -62,7 +62,7 @@ test('device header percentage input is locked to a three-digit control width', 
     assert.match(rule[1], /font-variant-numeric:\s*tabular-nums;/);
 });
 
-test('LED visual editor integrates without replacing immediate notification controls', () => {
+test('LED visual editor integrates effects while preserving schema-driven fallback', () => {
     assert.match(template, /<div id="ledEditorRoot" class="led-editor-mount"><\/div>/);
     assert.match(template, /<div id="schemaLedFields" class="schema-fields-shell">/);
 
@@ -73,11 +73,15 @@ test('LED visual editor integrates without replacing immediate notification cont
     assert.ok(ledScriptIndex > stateScriptIndex, 'LED editor should load after state');
     assert.ok(ledScriptIndex < inlineBootstrapIndex, 'LED editor should load before bootstrap');
 
-    assert.match(template, /window\.SwitchStudioLed\.init\(\{[\s\S]*?containerEl:\s*ledEditorRoot,[\s\S]*?stateApi:\s*window\.SwitchStudioState/);
+    assert.match(template, /window\.SwitchStudioLed\.init\(\{[\s\S]*?containerEl:\s*ledEditorRoot,[\s\S]*?stateApi:\s*window\.SwitchStudioState[\s\S]*?isCommandReady:[\s\S]*?sendImmediateEffect:/);
     assert.match(template, /window\.SwitchStudioLed\.setSchemaModel\(schemaModel\);/);
     assert.match(template, /window\.SwitchStudioLed\.handlesField\(field\)/);
     assert.match(template, /window\.SwitchStudioLed\.resetForDeviceChange\(\);/);
     assert.match(template, /window\.SwitchStudioLed\.setActiveDevice\(normalizedNext\);/);
+    assert.match(template, /window\.SwitchStudioLed\.setVisible\(/);
+    assert.match(template, /window\.SwitchStudioLed\.syncConfig\(config\);/);
+    assert.match(template, /function sendLedEffectImmediate\(param, payload\)/);
+    assert.match(template, /function validateLedEffectPayload\(param, payload\)/);
 
     assert.match(template, /const ledFields = buckets\.led\.filter/);
     assert.match(template, /renderSchemaFieldCollection\(schemaLedFields, ledFields/);

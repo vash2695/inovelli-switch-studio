@@ -23,6 +23,7 @@
     const FIELD_NAMES = Object.freeze(GLOBAL_FIELD_NAMES.concat(SEGMENT_FIELD_NAMES));
     const OWNED_FIELDS = new Set(FIELD_NAMES);
     const SEGMENTS = Object.freeze([1, 2, 3, 4, 5, 6, 7]);
+    const EFFECT_FIELD_NAMES = Object.freeze(['led_effect', 'individual_led_effect']);
 
     const GLOBAL_PRESETS = Object.freeze([
         Object.freeze({ name: 'White', value: 255 }),
@@ -51,11 +52,121 @@
         Object.freeze({ name: 'Follow', value: 255 }),
     ]);
 
+    // Inovelli's published seven-LED simulator defines each frame from the
+    // physical top of the bar to the bottom. VZM32 public numbering is the
+    // inverse: LED 7 is top and LED 1 is bottom.
+    const EFFECT_FRAMES = Object.freeze({
+        off: Object.freeze([[0, 0, 0, 0, 0, 0, 0]]),
+        clear_effect: Object.freeze([[0, 0, 0, 0, 0, 0, 0]]),
+        solid: Object.freeze([[1, 1, 1, 1, 1, 1, 1]]),
+        blink: Object.freeze([
+            [0, 0, 0, 0, 0, 0, 0],
+            [1, 1, 1, 1, 1, 1, 1],
+        ]),
+        pulse: Object.freeze([
+            [0, 0, 0, 0, 0, 0, 0],
+            [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5],
+            [1, 1, 1, 1, 1, 1, 1],
+            [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5],
+        ]),
+        chase: Object.freeze([
+            [0, 0, 0.5, 1, 0.5, 0, 0],
+            [0, 0.5, 1, 0.5, 0, 0, 0],
+            [0.5, 1, 0.5, 0, 0, 0, 0],
+            [0, 0.5, 1, 0.5, 0, 0, 0],
+            [0, 0, 0.5, 1, 0.5, 0, 0],
+            [0, 0, 0, 0.5, 1, 0.5, 0],
+            [0, 0, 0, 0, 0.5, 1, 0.5],
+            [0, 0, 0, 0.5, 1, 0.5, 0],
+        ]),
+        open_close: Object.freeze([
+            [0, 0, 0, 1, 0, 0, 0],
+            [0, 0, 1, 0, 1, 0, 0],
+            [0, 1, 0, 0, 0, 1, 0],
+            [1, 0, 0, 0, 0, 0, 1],
+            [0, 1, 0, 0, 0, 1, 0],
+            [0, 0, 1, 0, 1, 0, 0],
+            [0, 0, 0, 1, 0, 0, 0],
+        ]),
+        small_to_big: Object.freeze([
+            [0, 0, 0, 1, 0, 0, 0],
+            [0, 0, 1, 1, 1, 0, 0],
+            [0, 1, 1, 1, 1, 1, 0],
+            [1, 1, 1, 1, 1, 1, 1],
+            [0, 1, 1, 1, 1, 1, 0],
+            [0, 0, 1, 1, 1, 0, 0],
+            [0, 0, 0, 1, 0, 0, 0],
+        ]),
+        aurora: Object.freeze([
+            [0, 0.25, 0.25, 0.5, 1, 0.5, 0.25],
+            [0.25, 0, 0.25, 0.25, 0.5, 1, 0.5],
+            [0.25, 0.25, 0, 0.25, 0.25, 0.5, 1],
+            [0.5, 0.25, 0.25, 0, 0.25, 0.25, 0.5],
+            [1, 0.5, 0.25, 0.25, 0, 0.25, 0.25],
+            [0.5, 1, 0.5, 0.25, 0.25, 0, 0.25],
+            [0.25, 0.5, 1, 0.5, 0.25, 0.25, 0],
+            [0.25, 0.25, 0.5, 1, 0.5, 0.25, 0.25],
+        ]),
+        falling: Object.freeze([
+            [1, 0, 0, 0, 1, 0, 0],
+            [0, 1, 0, 0, 0, 1, 0],
+            [0, 0, 1, 0, 0, 0, 1],
+            [0, 0, 0, 1, 0, 0, 0],
+        ]),
+        rising: Object.freeze([
+            [0, 0, 0, 1, 0, 0, 0],
+            [0, 0, 1, 0, 0, 0, 1],
+            [0, 1, 0, 0, 0, 1, 0],
+            [1, 0, 0, 0, 1, 0, 0],
+        ]),
+        siren: Object.freeze([
+            [1, 1, 1, 1, 1, 1, 1],
+            [0, 1, 1, 1, 1, 1, 0],
+        ]),
+    });
+
+    const EFFECT_ANIMATIONS = Object.freeze({
+        off: Object.freeze({ pattern: 'off', frameMs: 0 }),
+        clear_effect: Object.freeze({ pattern: 'clear_effect', frameMs: 0 }),
+        solid: Object.freeze({ pattern: 'solid', frameMs: 0 }),
+        fast_blink: Object.freeze({ pattern: 'blink', frameMs: 400 }),
+        medium_blink: Object.freeze({ pattern: 'blink', frameMs: 600 }),
+        slow_blink: Object.freeze({ pattern: 'blink', frameMs: 800 }),
+        pulse: Object.freeze({ pattern: 'pulse', frameMs: 400 }),
+        chase: Object.freeze({ pattern: 'chase', frameMs: 225 }),
+        slow_chase: Object.freeze({ pattern: 'chase', frameMs: 800 }),
+        fast_chase: Object.freeze({ pattern: 'chase', frameMs: 150 }),
+        open_close: Object.freeze({ pattern: 'open_close', frameMs: 225 }),
+        small_to_big: Object.freeze({ pattern: 'small_to_big', frameMs: 225 }),
+        aurora: Object.freeze({ pattern: 'aurora', frameMs: 400 }),
+        slow_falling: Object.freeze({ pattern: 'falling', frameMs: 800 }),
+        medium_falling: Object.freeze({ pattern: 'falling', frameMs: 600 }),
+        fast_falling: Object.freeze({ pattern: 'falling', frameMs: 400 }),
+        falling: Object.freeze({ pattern: 'falling', frameMs: 600 }),
+        slow_rising: Object.freeze({ pattern: 'rising', frameMs: 800 }),
+        medium_rising: Object.freeze({ pattern: 'rising', frameMs: 600 }),
+        fast_rising: Object.freeze({ pattern: 'rising', frameMs: 400 }),
+        rising: Object.freeze({ pattern: 'rising', frameMs: 600 }),
+        // The public VZM32 contract exposes siren speed names, but Inovelli's
+        // published simulator does not define VZM32-specific timing. Matching
+        // the established fast/slow cadence keeps the preview honest and the
+        // timing isolated for later hardware calibration.
+        fast_siren: Object.freeze({ pattern: 'siren', frameMs: 400, timingApproximate: true }),
+        slow_siren: Object.freeze({ pattern: 'siren', frameMs: 800, timingApproximate: true }),
+    });
+    // Inovelli's published simulator eases each pixel toward its next frame
+    // over 200 ms. Keep that temporal blend separate from the per-effect
+    // cadence so the preview can later be calibrated against VZM32 hardware.
+    const EFFECT_TRANSITION_MS = 200;
+
     let containerEl = null;
     let stateApi = null;
     let isDeviceSelectedFn = null;
+    let isCommandReadyFn = null;
+    let sendImmediateEffectFn = null;
     let activeTopic = null;
     let schemaActive = false;
+    let effectSchemas = {};
     let rawValues = {};
     let interactionDrafts = new Map();
     let syncUnsubscribers = [];
@@ -67,6 +178,12 @@
     let controlRefs = null;
     let documentListenersBound = false;
     let interactionGeneration = 0;
+    let editorVisible = false;
+    let effectDrafts = { all: null, segments: new Map() };
+    let effectPreviews = { all: null, segments: new Map() };
+    let animationFrameHandle = null;
+    let animationNow = 0;
+    let previewTimerHandles = new Set();
 
     function clamp(value, min, max) {
         return Math.max(min, Math.min(max, value));
@@ -151,8 +268,81 @@
         });
     }
 
+    function featureMap(field) {
+        const result = {};
+        const features = field && Array.isArray(field.features) ? field.features : [];
+        features.forEach((feature) => {
+            if (feature && feature.name) result[feature.name] = feature;
+        });
+        return result;
+    }
+
+    function isNumericFeature(feature, min, max) {
+        return !!(
+            feature &&
+            feature.type === 'numeric' &&
+            feature.can_write === true &&
+            Number(feature.value_min) === min &&
+            Number(feature.value_max) === max
+        );
+    }
+
+    function hasEffectSchemaCapability(field, fieldName) {
+        if (!field || field.name !== fieldName || field.type !== 'composite' || field.can_write !== true) return false;
+        const features = featureMap(field);
+        if (!features.effect || features.effect.type !== 'enum' || features.effect.can_write !== true) return false;
+        if (!Array.isArray(features.effect.values) || features.effect.values.length === 0) return false;
+        if (!isNumericFeature(features.color, 0, 255)) return false;
+        if (!isNumericFeature(features.level, 0, 100)) return false;
+        if (!isNumericFeature(features.duration, 0, 255)) return false;
+        if (fieldName === 'individual_led_effect') {
+            return !!(
+                features.led &&
+                features.led.type === 'enum' &&
+                features.led.can_write === true &&
+                SEGMENTS.every((segment) => (features.led.values || []).map(String).includes(String(segment)))
+            );
+        }
+        return true;
+    }
+
+    function getEffectSchemas(schema) {
+        if (!sendImmediateEffectFn || !schema || !Array.isArray(schema.fields)) return {};
+        const next = {};
+        schema.fields.forEach((field) => {
+            if (EFFECT_FIELD_NAMES.includes(field && field.name) && hasEffectSchemaCapability(field, field.name)) {
+                next[field.name] = field;
+            }
+        });
+        return next;
+    }
+
+    function effectSchemaSignature(schemas) {
+        return JSON.stringify(EFFECT_FIELD_NAMES.map((name) => {
+            const field = schemas && schemas[name];
+            if (!field) return [name, null];
+            const features = featureMap(field);
+            return [name, {
+                effects: Array.isArray(features.effect && features.effect.values)
+                    ? features.effect.values.map(String)
+                    : [],
+                leds: Array.isArray(features.led && features.led.values)
+                    ? features.led.values.map(String)
+                    : [],
+                color: [features.color && features.color.value_min, features.color && features.color.value_max],
+                level: [features.level && features.level.value_min, features.level && features.level.value_max],
+                duration: [features.duration && features.duration.value_min, features.duration && features.duration.value_max],
+            }];
+        }));
+    }
+
     function getIsDeviceSelected() {
         return typeof isDeviceSelectedFn === 'function' ? !!isDeviceSelectedFn() : true;
+    }
+
+    function getIsCommandReady() {
+        if (!getIsDeviceSelected()) return false;
+        return typeof isCommandReadyFn === 'function' ? !!isCommandReadyFn() : true;
     }
 
     function isGlobalColorParam(param) {
@@ -234,6 +424,99 @@
         const preset = SEGMENT_PRESETS.find((entry) => entry.value === raw);
         if (preset) return preset.name;
         return `custom hue ${Math.round(segmentRawToHue(raw))} degrees`;
+    }
+
+    function effectColorDescription(rawValue) {
+        return globalColorDescription(rawValue);
+    }
+
+    function effectDefinition(effectName) {
+        return EFFECT_ANIMATIONS[String(effectName || '')] || null;
+    }
+
+    function effectFrame(effectName, elapsedMs, reducedMotion) {
+        const definition = effectDefinition(effectName);
+        if (!definition) return EFFECT_FRAMES.off[0].slice();
+        const frames = EFFECT_FRAMES[definition.pattern] || EFFECT_FRAMES.solid;
+        if (frames.length === 1 || !definition.frameMs) return frames[0].slice();
+        if (reducedMotion) {
+            const representativeIndex = Math.min(frames.length - 1, Math.floor(frames.length / 2));
+            return frames[representativeIndex].slice();
+        }
+        const frameIndex = Math.floor(Math.max(0, Number(elapsedMs) || 0) / definition.frameMs) % frames.length;
+        return frames[frameIndex].slice();
+    }
+
+    function interpolatedEffectFrame(effectName, elapsedMs, reducedMotion) {
+        const definition = effectDefinition(effectName);
+        if (!definition) return EFFECT_FRAMES.off[0].slice();
+        const frames = EFFECT_FRAMES[definition.pattern] || EFFECT_FRAMES.off;
+        if (frames.length === 1 || !definition.frameMs || reducedMotion) {
+            return effectFrame(effectName, elapsedMs, reducedMotion);
+        }
+
+        const elapsed = Math.max(0, Number(elapsedMs) || 0);
+        const absoluteFrame = Math.floor(elapsed / definition.frameMs);
+        const currentIndex = absoluteFrame % frames.length;
+        if (absoluteFrame === 0) return frames[currentIndex].slice();
+        const previousIndex = (currentIndex - 1 + frames.length) % frames.length;
+        // Fast chase advances before the simulator's full 200 ms easing window.
+        // Clipping the blend to one cadence avoids a discontinuity while retaining
+        // the intended continuous motion in this device-agnostic preview.
+        const transitionMs = Math.min(EFFECT_TRANSITION_MS, definition.frameMs);
+        const progress = clamp((elapsed % definition.frameMs) / transitionMs, 0, 1);
+        return frames[currentIndex].map((value, index) => {
+            const previous = Number(frames[previousIndex][index]) || 0;
+            return previous + ((Number(value) - previous) * progress);
+        });
+    }
+
+    function encodeEffectDuration(value, unit) {
+        const normalizedUnit = String(unit || 'seconds');
+        if (normalizedUnit === 'indefinite') return 255;
+        if (normalizedUnit === 'minutes') return 60 + clamp(toInt(value, 1), 1, 60);
+        if (normalizedUnit === 'hours') return 120 + clamp(toInt(value, 1), 1, 134);
+        return clamp(toInt(value, 1), 1, 60);
+    }
+
+    function decodeEffectDuration(rawValue) {
+        const raw = clamp(toInt(rawValue, 10), 0, 255);
+        if (raw === 255) return { value: null, unit: 'indefinite', milliseconds: null, label: 'Indefinitely' };
+        if (raw >= 121) {
+            const value = raw - 120;
+            return { value, unit: 'hours', milliseconds: value * 60 * 60 * 1000, label: `${value} ${value === 1 ? 'hour' : 'hours'}` };
+        }
+        if (raw >= 61) {
+            const value = raw - 60;
+            return { value, unit: 'minutes', milliseconds: value * 60 * 1000, label: `${value} ${value === 1 ? 'minute' : 'minutes'}` };
+        }
+        const value = Math.max(1, raw);
+        return { value, unit: 'seconds', milliseconds: value * 1000, label: `${value} ${value === 1 ? 'second' : 'seconds'}` };
+    }
+
+    function effectDefaultDraft(scope) {
+        const fieldName = scope === 'segment' ? 'individual_led_effect' : 'led_effect';
+        const field = effectSchemas[fieldName];
+        const effects = field ? (featureMap(field).effect.values || []) : [];
+        const defaultEffect = effects.includes('solid') ? 'solid' : (effects[0] || 'solid');
+        return { effect: defaultEffect, color: 170, level: 100, duration: 10 };
+    }
+
+    function getEffectDraft(scope, segment) {
+        if (scope === 'all') {
+            if (!effectDrafts.all) effectDrafts.all = effectDefaultDraft('all');
+            return effectDrafts.all;
+        }
+        const normalizedSegment = clamp(toInt(segment, 1), 1, 7);
+        if (!effectDrafts.segments.has(normalizedSegment)) {
+            effectDrafts.segments.set(normalizedSegment, effectDefaultDraft('segment'));
+        }
+        return effectDrafts.segments.get(normalizedSegment);
+    }
+
+    function resetEffectState() {
+        stopAllEffectPreviews();
+        effectDrafts = { all: null, segments: new Map() };
     }
 
     function getEffectiveSegmentState(segment, context) {
@@ -354,6 +637,20 @@
         renderAll();
     }
 
+    function stageExplicitSegmentChanges(segment, overrides) {
+        const state = getEffectiveSegmentState(segment, activeContext);
+        const changes = {
+            [state.colorParam]: state.followsColor
+                ? globalColorToSegmentRaw(state.globalColorRaw)
+                : state.colorRaw,
+            [state.intensityParam]: state.followsIntensity
+                ? clamp(state.globalIntensityRaw, 0, 100)
+                : clamp(state.intensityRaw, 0, 100),
+            ...(overrides || {}),
+        };
+        stageChanges(changes);
+    }
+
     function commitInteractionDraft(param, generation) {
         if (
             !param ||
@@ -362,7 +659,11 @@
         ) return false;
         const value = interactionDrafts.get(param);
         interactionDrafts.delete(param);
-        stageChanges({ [param]: value });
+        if (selectedSegment && (isSegmentColorParam(param) || /^defaultLed[1-7]IntensityWhen(On|Off)$/.test(param))) {
+            stageExplicitSegmentChanges(selectedSegment, { [param]: value });
+        } else {
+            stageChanges({ [param]: value });
+        }
         return true;
     }
 
@@ -479,30 +780,30 @@
         return { wheel, marker, scope };
     }
 
-    function createPresetGrid(scope) {
-        const group = createElement('div', 'led-preset-grid');
-        group.setAttribute('role', 'group');
-        group.setAttribute('aria-label', scope === 'global' ? 'All LEDs color presets' : 'Segment color presets');
-        const presets = scope === 'global' ? GLOBAL_PRESETS : SEGMENT_PRESETS;
-        const buttons = [];
+    function createColorSelect(scope) {
+        const row = createElement('label', 'led-color-select-row');
+        row.appendChild(createElement('span', 'led-editor-section-label', 'Color'));
+        const control = createElement('span', 'led-color-select-control');
+        const swatch = createElement('span', 'led-color-select-swatch');
+        swatch.setAttribute('aria-hidden', 'true');
+        const select = document.createElement('select');
+        select.className = 'led-color-select';
+        select.setAttribute('aria-label', scope === 'global' ? 'All LEDs color' : 'Segment color');
+        const presets = (scope === 'global' ? GLOBAL_PRESETS : SEGMENT_PRESETS)
+            .filter((preset) => !(scope === 'segment' && preset.value === 255));
         presets.forEach((preset) => {
-            const button = createElement('button', 'led-color-preset', preset.name);
-            button.type = 'button';
-            button.setAttribute('aria-label', preset.name);
-            button.title = preset.name;
-            button.classList.toggle('is-follow-default', scope === 'segment' && preset.value === 255);
-            const css = scope === 'global'
-                ? colorCssFromGlobalRaw(preset.value)
-                : colorCssFromSegmentRaw(preset.value, 0);
-            setStyleProperty(button, '--led-preset-color', css);
-            button.addEventListener('click', () => {
-                const param = getColorParam(scope);
-                if (param) stageChanges({ [param]: preset.value });
-            });
-            group.appendChild(button);
-            buttons.push({ button, preset });
+            const option = document.createElement('option');
+            option.value = String(preset.value);
+            option.textContent = preset.name;
+            select.appendChild(option);
         });
-        return { group, buttons, scope };
+        select.addEventListener('change', () => {
+            selectPreset(scope, toInt(select.value, 0));
+        });
+        control.appendChild(swatch);
+        control.appendChild(select);
+        row.appendChild(control);
+        return { row, select, swatch, presets, customOption: null, scope };
     }
 
     function createBrightnessControl(scope) {
@@ -562,17 +863,261 @@
 
     function createColorControls(scope) {
         const controls = createElement('div', 'led-conditional-controls');
-        controls.appendChild(createElement('div', 'led-editor-section-label', 'Color'));
-        const presets = createPresetGrid(scope);
-        controls.appendChild(presets.group);
+        const colorSelect = createColorSelect(scope);
+        controls.appendChild(colorSelect.row);
         const hueRow = createElement('div', 'led-hue-row');
         const wheel = createHueWheel(scope);
         hueRow.appendChild(wheel.wheel);
-        hueRow.appendChild(createElement('span', 'led-editor-note', 'Drag or use arrow keys for a custom hue.'));
         controls.appendChild(hueRow);
         const brightness = createBrightnessControl(scope);
         controls.appendChild(brightness.row);
-        return { controls, presets, wheel, brightness };
+        return { controls, colorSelect, wheel, brightness };
+    }
+
+    function effectLabel(value) {
+        const labels = {
+            off: 'Off',
+            solid: 'Solid',
+            fast_blink: 'Fast blink',
+            medium_blink: 'Medium blink',
+            slow_blink: 'Slow blink',
+            pulse: 'Pulse',
+            chase: 'Chase',
+            slow_chase: 'Slow chase',
+            fast_chase: 'Fast chase',
+            open_close: 'Open / close',
+            small_to_big: 'Small to big',
+            aurora: 'Aurora',
+            slow_falling: 'Slow falling',
+            medium_falling: 'Medium falling',
+            fast_falling: 'Fast falling',
+            falling: 'Falling',
+            slow_rising: 'Slow rising',
+            medium_rising: 'Medium rising',
+            fast_rising: 'Fast rising',
+            rising: 'Rising',
+            fast_siren: 'Fast siren',
+            slow_siren: 'Slow siren',
+            clear_effect: 'Clear effect',
+        };
+        return labels[value] || String(value || '').replace(/_/g, ' ');
+    }
+
+    function updateEffectDraft(scope, segment, changes) {
+        const draft = getEffectDraft(scope, segment);
+        Object.assign(draft, changes || {});
+        const preview = scope === 'all'
+            ? effectPreviews.all
+            : effectPreviews.segments.get(clamp(toInt(segment, 1), 1, 7));
+        if (preview) startEffectPreview(scope, segment, draft);
+        renderAll();
+    }
+
+    function createEffectHueWheel(scope) {
+        const wheel = createElement('div', 'led-hue-wheel led-effect-hue-wheel');
+        wheel.tabIndex = 0;
+        wheel.setAttribute('role', 'slider');
+        wheel.setAttribute('aria-valuemin', '0');
+        wheel.setAttribute('aria-valuemax', '359');
+        wheel.setAttribute('aria-label', scope === 'all' ? 'All-LED effect hue' : 'Individual effect hue');
+        const marker = createElement('span', 'led-hue-marker');
+        wheel.appendChild(marker);
+        let pointerActive = false;
+
+        function currentSegment() {
+            return scope === 'segment' ? selectedSegment : null;
+        }
+
+        function setHue(hue) {
+            const normalized = normalizeHue(hue);
+            updateEffectDraft(scope, currentSegment(), { color: globalHueToRaw(normalized) });
+        }
+
+        function hueFromPointer(event) {
+            const rect = typeof wheel.getBoundingClientRect === 'function'
+                ? wheel.getBoundingClientRect()
+                : { left: 0, top: 0, width: 100, height: 100 };
+            const centerX = rect.left + (rect.width / 2);
+            const centerY = rect.top + (rect.height / 2);
+            const radians = Math.atan2(Number(event.clientY || 0) - centerY, Number(event.clientX || 0) - centerX);
+            return normalizeHue((radians * 180 / Math.PI) + 90);
+        }
+
+        wheel.addEventListener('pointerdown', (event) => {
+            if (wheel.getAttribute('aria-disabled') === 'true') return;
+            pointerActive = true;
+            if (typeof wheel.setPointerCapture === 'function' && event.pointerId !== undefined) {
+                wheel.setPointerCapture(event.pointerId);
+            }
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            setHue(hueFromPointer(event));
+        });
+        wheel.addEventListener('pointermove', (event) => {
+            if (pointerActive) setHue(hueFromPointer(event));
+        });
+        wheel.addEventListener('pointerup', (event) => {
+            if (!pointerActive) return;
+            pointerActive = false;
+            setHue(hueFromPointer(event));
+        });
+        wheel.addEventListener('pointercancel', () => { pointerActive = false; });
+        wheel.addEventListener('keydown', (event) => {
+            if (wheel.getAttribute('aria-disabled') === 'true') return;
+            const supported = ['ArrowLeft', 'ArrowDown', 'ArrowRight', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End'];
+            if (!supported.includes(event.key)) return;
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            const draft = getEffectDraft(scope, currentSegment());
+            let hue = draft.color === 255 ? 0 : globalRawToHue(draft.color);
+            if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') hue -= 1;
+            if (event.key === 'ArrowRight' || event.key === 'ArrowUp') hue += 1;
+            if (event.key === 'PageDown') hue -= 15;
+            if (event.key === 'PageUp') hue += 15;
+            if (event.key === 'Home') hue = 0;
+            if (event.key === 'End') hue = 359;
+            setHue(hue);
+        });
+        return { wheel, marker };
+    }
+
+    function createEffectColorSelect(scope) {
+        const row = createElement('label', 'led-color-select-row');
+        row.appendChild(createElement('span', 'led-editor-section-label', 'Color'));
+        const control = createElement('span', 'led-color-select-control');
+        const swatch = createElement('span', 'led-color-select-swatch');
+        swatch.setAttribute('aria-hidden', 'true');
+        const select = document.createElement('select');
+        select.className = 'led-color-select';
+        select.setAttribute('aria-label', scope === 'all' ? 'All-LED effect color' : 'Individual effect color');
+        GLOBAL_PRESETS.forEach((preset) => {
+            const option = document.createElement('option');
+            option.value = String(preset.value);
+            option.textContent = preset.name;
+            select.appendChild(option);
+        });
+        select.addEventListener('change', () => {
+            updateEffectDraft(scope, scope === 'segment' ? selectedSegment : null, {
+                color: clamp(toInt(select.value, 0), 0, 255),
+            });
+        });
+        control.appendChild(swatch);
+        control.appendChild(select);
+        row.appendChild(control);
+        return { row, select, swatch, customOption: null, scope, presets: GLOBAL_PRESETS };
+    }
+
+    function createEffectPanel(scope) {
+        const fieldName = scope === 'segment' ? 'individual_led_effect' : 'led_effect';
+        const field = effectSchemas[fieldName];
+        const features = featureMap(field);
+        const panel = createElement('section', 'led-effect-panel');
+        const header = createElement('div', 'led-effect-header');
+        header.appendChild(createElement('h4', 'led-effect-title', scope === 'all' ? 'All-LED effect' : 'LED effect'));
+        const previewNote = createElement('span', 'led-effect-preview-note', 'Local preview');
+        previewNote.title = 'Pattern preview based on Inovelli\'s published seven-LED simulator; device timing can vary by firmware.';
+        header.appendChild(previewNote);
+        panel.appendChild(header);
+
+        const effectLabelEl = createElement('label', 'led-effect-field');
+        effectLabelEl.appendChild(createElement('span', 'led-editor-section-label', 'Effect'));
+        const effectSelect = document.createElement('select');
+        effectSelect.className = 'led-effect-select';
+        effectSelect.setAttribute('aria-label', scope === 'all' ? 'All-LED notification effect' : 'Individual LED notification effect');
+        (features.effect.values || []).forEach((value) => {
+            const option = document.createElement('option');
+            option.value = String(value);
+            option.textContent = effectLabel(value);
+            effectSelect.appendChild(option);
+        });
+        effectSelect.addEventListener('change', () => {
+            updateEffectDraft(scope, scope === 'segment' ? selectedSegment : null, { effect: effectSelect.value });
+        });
+        effectLabelEl.appendChild(effectSelect);
+        panel.appendChild(effectLabelEl);
+
+        const colorSelect = createEffectColorSelect(scope);
+        panel.appendChild(colorSelect.row);
+        const hueWheel = createEffectHueWheel(scope);
+        const hueRow = createElement('div', 'led-hue-row led-effect-hue-row');
+        hueRow.appendChild(hueWheel.wheel);
+        panel.appendChild(hueRow);
+
+        const levelRow = createElement('div', 'led-brightness-row');
+        const levelLabel = createElement('label', 'led-editor-section-label');
+        levelLabel.style.display = 'grid';
+        levelLabel.style.gap = '6px';
+        levelLabel.appendChild(createElement('span', null, 'Brightness'));
+        const level = document.createElement('input');
+        level.type = 'range';
+        level.min = '0';
+        level.max = '100';
+        level.step = '1';
+        level.className = 'led-brightness-slider';
+        level.setAttribute('aria-label', scope === 'all' ? 'All-LED effect brightness' : 'Individual effect brightness');
+        level.addEventListener('input', () => {
+            updateEffectDraft(scope, scope === 'segment' ? selectedSegment : null, {
+                level: clamp(toInt(level.value, 100), 0, 100),
+            });
+        });
+        levelLabel.appendChild(level);
+        const levelValue = createElement('span', 'led-value', '100%');
+        levelRow.appendChild(levelLabel);
+        levelRow.appendChild(levelValue);
+        panel.appendChild(levelRow);
+
+        const duration = createElement('div', 'led-effect-duration');
+        const durationValueLabel = createElement('label', 'led-effect-field');
+        durationValueLabel.appendChild(createElement('span', 'led-editor-section-label', 'Duration'));
+        const durationValue = document.createElement('input');
+        durationValue.type = 'number';
+        durationValue.min = '1';
+        durationValue.max = '60';
+        durationValue.step = '1';
+        durationValue.value = '10';
+        durationValue.className = 'led-effect-duration-value';
+        durationValue.setAttribute('aria-label', 'Effect duration value');
+        durationValueLabel.appendChild(durationValue);
+        const durationUnitLabel = createElement('label', 'led-effect-field');
+        durationUnitLabel.appendChild(createElement('span', 'led-editor-section-label', 'Unit'));
+        const durationUnit = document.createElement('select');
+        durationUnit.className = 'led-effect-duration-unit';
+        durationUnit.setAttribute('aria-label', 'Effect duration unit');
+        [['seconds', 'Seconds'], ['minutes', 'Minutes'], ['hours', 'Hours'], ['indefinite', 'Indefinite']].forEach(([value, label]) => {
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = label;
+            durationUnit.appendChild(option);
+        });
+        durationUnitLabel.appendChild(durationUnit);
+        function commitDuration() {
+            const unit = durationUnit.value || 'seconds';
+            const max = unit === 'hours' ? 134 : 60;
+            durationValue.max = String(max);
+            durationValue.disabled = unit === 'indefinite';
+            const raw = encodeEffectDuration(durationValue.value, unit);
+            updateEffectDraft(scope, scope === 'segment' ? selectedSegment : null, { duration: raw });
+        }
+        durationValue.addEventListener('change', commitDuration);
+        durationUnit.addEventListener('change', commitDuration);
+        duration.appendChild(durationValueLabel);
+        duration.appendChild(durationUnitLabel);
+        panel.appendChild(duration);
+
+        const actions = createElement('div', 'led-effect-actions');
+        const preview = createElement('button', 'led-effect-preview-button', 'Preview');
+        preview.type = 'button';
+        preview.setAttribute('aria-pressed', 'false');
+        preview.addEventListener('click', () => toggleEffectPreview(scope, scope === 'segment' ? selectedSegment : null));
+        const send = createElement('button', 'led-effect-send-button', 'Send effect');
+        send.type = 'button';
+        send.addEventListener('click', () => sendEffect(scope, scope === 'segment' ? selectedSegment : null));
+        actions.appendChild(preview);
+        actions.appendChild(send);
+        panel.appendChild(actions);
+
+        return {
+            panel, scope, fieldName, effectSelect, colorSelect, hueWheel, level, levelValue,
+            durationValue, durationUnit, preview, send,
+        };
     }
 
     function createSwitchArt() {
@@ -586,6 +1131,30 @@
             'aria-hidden': 'true',
             focusable: 'false',
         });
+
+        const defs = createSvgElement('defs');
+        const railGradient = createSvgElement('linearGradient', {
+            id: 'ledRailGradient', x1: '0%', y1: '0%', x2: '0%', y2: '100%',
+        });
+        const glowFilter = createSvgElement('filter', {
+            id: 'ledRailGlow', x: '-160%', y: '-12%', width: '420%', height: '124%',
+        });
+        glowFilter.appendChild(createSvgElement('feGaussianBlur', { stdDeviation: 3.2 }));
+        const glossGradient = createSvgElement('linearGradient', {
+            id: 'ledRailGloss', x1: '0%', y1: '0%', x2: '100%', y2: '0%',
+        });
+        [
+            ['0%', '#ffffff', 0.08],
+            ['42%', '#ffffff', 0.28],
+            ['68%', '#ffffff', 0.04],
+            ['100%', '#000000', 0.22],
+        ].forEach(([offset, color, opacity]) => glossGradient.appendChild(createSvgElement('stop', {
+            offset, 'stop-color': color, 'stop-opacity': opacity,
+        })));
+        defs.appendChild(railGradient);
+        defs.appendChild(glowFilter);
+        defs.appendChild(glossGradient);
+        svg.appendChild(defs);
 
         svg.appendChild(createSvgElement('rect', {
             class: 'led-switch-body', x: 2, y: 4, width: 236, height: 470, rx: 16,
@@ -607,6 +1176,21 @@
             class: 'led-switch-diffuser', x: 212, y: 132, width: 14, height: 321, rx: 2,
             fill: '#10161b', stroke: '#070a0d', 'stroke-width': 1,
         }));
+        const railGlow = createSvgElement('rect', {
+            class: 'led-switch-rail-glow', x: 212, y: 132, width: 14, height: 321, rx: 2,
+            fill: 'url(#ledRailGradient)', filter: 'url(#ledRailGlow)', opacity: 0.72,
+        });
+        const railLight = createSvgElement('rect', {
+            class: 'led-switch-rail-light', x: 212, y: 132, width: 14, height: 321, rx: 2,
+            fill: 'url(#ledRailGradient)',
+        });
+        const railGloss = createSvgElement('rect', {
+            class: 'led-switch-rail-gloss', x: 212, y: 132, width: 14, height: 321, rx: 2,
+            fill: 'url(#ledRailGloss)', opacity: 0.52,
+        });
+        svg.appendChild(railGlow);
+        svg.appendChild(railLight);
+        svg.appendChild(railGloss);
         svg.appendChild(createSvgElement('rect', {
             class: 'led-switch-air-gap', x: 43, y: 450, width: 56, height: 24, rx: 2,
             fill: '#c9c8c2', stroke: '#a9a7a0', 'stroke-width': 1.5,
@@ -633,7 +1217,7 @@
         });
 
         stage.appendChild(art);
-        return { stage, art, svg, segmentButtons };
+        return { stage, art, svg, segmentButtons, railGradient, railGlow, railLight, railGloss };
     }
 
     function createContextSelector() {
@@ -682,7 +1266,9 @@
         panel.appendChild(createElement('p', 'led-editor-note', 'Segments can follow these defaults or use their own settings.'));
         const controls = createColorControls('global');
         panel.appendChild(controls.controls);
-        return { panel, context, lit, ...controls };
+        const effect = effectSchemas.led_effect ? createEffectPanel('all') : null;
+        if (effect) panel.appendChild(effect.panel);
+        return { panel, context, lit, effect, ...controls };
     }
 
     function createSegmentPopover() {
@@ -696,23 +1282,19 @@
         const header = createElement('div', 'led-popover-header');
         const title = createElement('h3', 'led-popover-title', 'LED segment');
         title.id = 'ledSegmentPopoverTitle';
+        const follow = createToggle('led-toggle led-follow-default', 'Follow default');
+        follow.input.addEventListener('click', () => {
+            follow.input.checked = !follow.input.checked;
+            if (selectedSegment) setSegmentCustomized(selectedSegment, !follow.input.checked);
+        });
         const close = createElement('button', 'led-popover-close', '\u00d7');
         close.type = 'button';
         close.setAttribute('aria-label', 'Close segment editor');
         close.addEventListener('click', () => closeEditor());
         header.appendChild(title);
+        header.appendChild(follow.label);
         header.appendChild(close);
         popover.appendChild(header);
-
-        const note = createElement('p', 'led-popover-note');
-        popover.appendChild(note);
-
-        const customize = createToggle('led-toggle led-customize-row', 'Customize for this state');
-        customize.input.addEventListener('click', () => {
-            customize.input.checked = !customize.input.checked;
-            if (selectedSegment) setSegmentCustomized(selectedSegment, customize.input.checked);
-        });
-        popover.appendChild(customize.label);
 
         const lit = createToggle('led-toggle', 'Segment lit');
         lit.input.addEventListener('click', () => {
@@ -721,16 +1303,11 @@
         });
         popover.appendChild(lit.label);
 
-        const followIntensity = createToggle('led-toggle led-follow-intensity', 'Follow all-LED brightness');
-        followIntensity.input.addEventListener('click', () => {
-            followIntensity.input.checked = !followIntensity.input.checked;
-            if (selectedSegment) setSegmentIntensityFollow(selectedSegment, followIntensity.input.checked);
-        });
-        popover.appendChild(followIntensity.label);
-
         const controls = createColorControls('segment');
         popover.appendChild(controls.controls);
-        return { popover, header, title, close, note, customize, lit, followIntensity, ...controls };
+        const effect = effectSchemas.individual_led_effect ? createEffectPanel('segment') : null;
+        if (effect) popover.appendChild(effect.panel);
+        return { popover, header, title, follow, close, lit, effect, ...controls };
     }
 
     function buildEditor() {
@@ -747,9 +1324,9 @@
         const switchArt = createSwitchArt();
         const globalPanel = createGlobalPanel();
         const popover = createSegmentPopover();
-        switchArt.stage.appendChild(popover.popover);
         layout.appendChild(switchArt.stage);
         layout.appendChild(globalPanel.panel);
+        layout.appendChild(popover.popover);
         containerEl.appendChild(layout);
 
         controlRefs = {
@@ -814,17 +1391,16 @@
         const state = getEffectiveSegmentState(segment, activeContext);
         const param = state.intensityParam;
         if (!lit) {
-            if (state.effectiveIntensity > 0) lastNonZeroIntensity[param] = state.intensityRaw;
-            stageChanges({ [param]: 0 });
+            if (state.effectiveIntensity > 0) lastNonZeroIntensity[param] = state.effectiveIntensity;
+            stageExplicitSegmentChanges(segment, { [param]: 0 });
             return;
         }
 
         let restored = lastNonZeroIntensity[param];
         if (!Number.isFinite(Number(restored)) || Number(restored) <= 0) {
-            restored = state.globalIntensityRaw > 0 ? 101 : 100;
+            restored = state.globalIntensityRaw > 0 ? state.globalIntensityRaw : 100;
         }
-        if (Number(restored) === 101 && state.globalIntensityRaw <= 0) restored = 100;
-        stageChanges({ [param]: clamp(toInt(restored, 100), 1, 101) });
+        stageExplicitSegmentChanges(segment, { [param]: clamp(toInt(restored, 100), 1, 100) });
     }
 
     function setSegmentIntensityFollow(segment, followsDefault) {
@@ -842,19 +1418,25 @@
         if (!param) return;
         const normalizedHue = normalizeHue(hue);
         lastHueByParam[param] = normalizedHue;
-        stageChanges({ [param]: hueToRawForScope(scope, normalizedHue) });
+        const value = hueToRawForScope(scope, normalizedHue);
+        if (scope === 'segment' && selectedSegment) stageExplicitSegmentChanges(selectedSegment, { [param]: value });
+        else stageChanges({ [param]: value });
     }
 
     function commitBrightness(scope, value) {
         const param = getIntensityParam(scope);
         if (!param) return;
-        stageChanges({ [param]: clamp(toInt(value, 1), 1, 100) });
+        const normalized = clamp(toInt(value, 1), 1, 100);
+        if (scope === 'segment' && selectedSegment) stageExplicitSegmentChanges(selectedSegment, { [param]: normalized });
+        else stageChanges({ [param]: normalized });
     }
 
     function selectPreset(scope, value) {
         const param = getColorParam(scope);
         if (!param) return;
-        stageChanges({ [param]: clamp(toInt(value, 0), 0, 255) });
+        const normalized = clamp(toInt(value, 0), 0, 255);
+        if (scope === 'segment' && selectedSegment) stageExplicitSegmentChanges(selectedSegment, { [param]: normalized });
+        else stageChanges({ [param]: normalized });
     }
 
     function openSegmentEditor(segment, opener) {
@@ -862,8 +1444,8 @@
         selectedSegment = clamp(toInt(segment, 1), 1, 7);
         popoverOpener = opener || (controlRefs && controlRefs.switchArt.segmentButtons[selectedSegment]);
         renderAll();
-        if (controlRefs && controlRefs.popover && controlRefs.popover.customize.input) {
-            controlRefs.popover.customize.input.focus();
+        if (controlRefs && controlRefs.popover && controlRefs.popover.follow.input) {
+            controlRefs.popover.follow.input.focus();
         }
     }
 
@@ -946,12 +1528,230 @@
         setStyleProperty(ref.marker, '--led-marker-color', `hsl(${hue.toFixed(1)} 100% 50%)`);
     }
 
-    function updatePresetGrid(ref, rawValue, disabled) {
+    function updateColorSelect(ref, rawValue, disabled, colorCss) {
         if (!ref) return;
-        ref.buttons.forEach(({ button, preset }) => {
-            button.setAttribute('aria-pressed', String(Number(rawValue) === Number(preset.value)));
-            setDisabled(button, disabled);
-        });
+        const raw = Number(rawValue);
+        const exactPreset = ref.presets.find((preset) => Number(preset.value) === raw);
+        if (ref.customOption && ref.customOption.parentNode) {
+            ref.customOption.parentNode.removeChild(ref.customOption);
+        }
+        ref.customOption = null;
+        if (!exactPreset) {
+            const option = document.createElement('option');
+            option.value = String(raw);
+            const hue = ref.scope === 'segment' ? segmentRawToHue(raw) : globalRawToHue(raw);
+            option.textContent = `Custom (${Math.round(hue)}\u00b0)`;
+            ref.select.appendChild(option);
+            ref.customOption = option;
+        }
+        ref.select.value = String(raw);
+        setDisabled(ref.select, disabled);
+        setStyleProperty(ref.swatch, '--led-select-color', colorCss || '#ffffff');
+    }
+
+    function isReducedMotion() {
+        return !!(
+            typeof window !== 'undefined' &&
+            typeof window.matchMedia === 'function' &&
+            window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        );
+    }
+
+    function previewFor(scope, segment) {
+        if (scope === 'all') return effectPreviews.all;
+        return effectPreviews.segments.get(clamp(toInt(segment, 1), 1, 7)) || null;
+    }
+
+    function clearPreviewTimer(preview) {
+        if (!preview || preview.timerHandle === null || preview.timerHandle === undefined) return;
+        if (typeof window !== 'undefined' && typeof window.clearTimeout === 'function') {
+            window.clearTimeout(preview.timerHandle);
+        } else if (typeof clearTimeout === 'function') {
+            clearTimeout(preview.timerHandle);
+        }
+        previewTimerHandles.delete(preview.timerHandle);
+        preview.timerHandle = null;
+    }
+
+    function stopEffectPreview(scope, segment) {
+        const existing = previewFor(scope, segment);
+        clearPreviewTimer(existing);
+        if (scope === 'all') effectPreviews.all = null;
+        else effectPreviews.segments.delete(clamp(toInt(segment, 1), 1, 7));
+        animationNow = Date.now();
+        syncAnimationLoop();
+        renderAll();
+    }
+
+    function stopAllEffectPreviews() {
+        clearPreviewTimer(effectPreviews.all);
+        effectPreviews.segments.forEach((preview) => clearPreviewTimer(preview));
+        effectPreviews = { all: null, segments: new Map() };
+        previewTimerHandles.clear();
+        if (animationFrameHandle !== null && typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
+            window.cancelAnimationFrame(animationFrameHandle);
+        }
+        animationFrameHandle = null;
+        animationNow = Date.now();
+        renderAll();
+    }
+
+    function previewNeedsAnimation(preview) {
+        if (!preview) return false;
+        const definition = effectDefinition(preview.payload.effect);
+        const frames = definition ? EFFECT_FRAMES[definition.pattern] : null;
+        return !!(definition && definition.frameMs && frames && frames.length > 1);
+    }
+
+    function hasMovingPreview() {
+        if (previewNeedsAnimation(effectPreviews.all)) return true;
+        return Array.from(effectPreviews.segments.values()).some(previewNeedsAnimation);
+    }
+
+    function animationTick() {
+        animationFrameHandle = null;
+        animationNow = Date.now();
+        renderSegments();
+        syncAnimationLoop();
+    }
+
+    function syncAnimationLoop() {
+        const shouldRun = editorVisible && !isReducedMotion() && hasMovingPreview();
+        if (!shouldRun) {
+            if (animationFrameHandle !== null && typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
+                window.cancelAnimationFrame(animationFrameHandle);
+            }
+            animationFrameHandle = null;
+            return;
+        }
+        if (animationFrameHandle === null && typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+            animationFrameHandle = window.requestAnimationFrame(animationTick);
+        }
+    }
+
+    function startEffectPreview(scope, segment, draft) {
+        const payload = { ...(draft || getEffectDraft(scope, segment)) };
+        if (payload.effect === 'clear_effect' || !effectDefinition(payload.effect)) {
+            stopEffectPreview(scope, segment);
+            return null;
+        }
+        const normalizedSegment = scope === 'segment' ? clamp(toInt(segment, 1), 1, 7) : null;
+        const prior = previewFor(scope, normalizedSegment);
+        clearPreviewTimer(prior);
+        const preview = {
+            payload,
+            segment: normalizedSegment,
+            startedAt: Date.now(),
+            timerHandle: null,
+        };
+        if (scope === 'all') effectPreviews.all = preview;
+        else effectPreviews.segments.set(normalizedSegment, preview);
+        const decoded = decodeEffectDuration(payload.duration);
+        if (decoded.milliseconds !== null) {
+            const timerFn = () => {
+                if (previewFor(scope, normalizedSegment) === preview) stopEffectPreview(scope, normalizedSegment);
+            };
+            if (typeof window !== 'undefined' && typeof window.setTimeout === 'function') {
+                preview.timerHandle = window.setTimeout(timerFn, decoded.milliseconds);
+            } else if (typeof setTimeout === 'function') {
+                preview.timerHandle = setTimeout(timerFn, decoded.milliseconds);
+            }
+            if (preview.timerHandle !== null) previewTimerHandles.add(preview.timerHandle);
+        }
+        animationNow = preview.startedAt;
+        syncAnimationLoop();
+        renderAll();
+        return preview;
+    }
+
+    function toggleEffectPreview(scope, segment) {
+        if (previewFor(scope, segment)) stopEffectPreview(scope, segment);
+        else startEffectPreview(scope, segment, getEffectDraft(scope, segment));
+    }
+
+    function sendEffect(scope, segment) {
+        if (!getIsCommandReady() || typeof sendImmediateEffectFn !== 'function') return false;
+        const fieldName = scope === 'segment' ? 'individual_led_effect' : 'led_effect';
+        if (!effectSchemas[fieldName]) return false;
+        const draft = getEffectDraft(scope, segment);
+        const payload = {
+            effect: String(draft.effect),
+            color: clamp(toInt(draft.color, 170), 0, 255),
+            level: clamp(toInt(draft.level, 100), 0, 100),
+            // Raw duration 0 is exposed upstream but has no documented meaning.
+            // The editor intentionally authors only 1..254 or 255 (indefinite).
+            duration: clamp(toInt(draft.duration, 10), 1, 255),
+        };
+        if (scope === 'segment') payload.led = String(clamp(toInt(segment, 1), 1, 7));
+        const sent = sendImmediateEffectFn(fieldName, payload);
+        if (sent === false) return false;
+        if (payload.effect === 'clear_effect' || !effectDefinition(payload.effect)) stopEffectPreview(scope, segment);
+        else startEffectPreview(scope, segment, payload);
+        return true;
+    }
+
+    function getDisplayedSegmentState(segment, baseState) {
+        const normalizedSegment = clamp(toInt(segment, 1), 1, 7);
+        const segmentPreview = effectPreviews.segments.get(normalizedSegment) || null;
+        const allPreview = effectPreviews.all;
+        const preview = segmentPreview && (!allPreview || segmentPreview.startedAt >= allPreview.startedAt)
+            ? segmentPreview
+            : allPreview;
+        if (!preview) {
+            return {
+                colorCss: baseState.colorCss,
+                displayOpacity: baseState.lit ? clamp(baseState.effectiveIntensity / 100, 0, 1) : 0,
+            };
+        }
+        const visualIndex = 7 - normalizedSegment;
+        const frame = interpolatedEffectFrame(
+            preview.payload.effect,
+            Math.max(0, (animationNow || Date.now()) - preview.startedAt),
+            isReducedMotion()
+        );
+        const weight = clamp(Number(frame[visualIndex]) || 0, 0, 1);
+        return {
+            colorCss: colorCssFromGlobalRaw(preview.payload.color),
+            displayOpacity: clamp((clamp(toInt(preview.payload.level, 100), 0, 100) / 100) * weight, 0, 1),
+        };
+    }
+
+    function updateEffectColorSelect(ref, rawValue, disabled) {
+        updateColorSelect(ref, rawValue, disabled, colorCssFromGlobalRaw(rawValue));
+    }
+
+    function renderEffectPanel(refs, scope, segment) {
+        if (!refs) return;
+        const draft = getEffectDraft(scope, segment);
+        const disabled = !getIsDeviceSelected();
+        refs.effectSelect.value = String(draft.effect);
+        setDisabled(refs.effectSelect, disabled);
+        updateEffectColorSelect(refs.colorSelect, draft.color, disabled);
+        updateHueWheel(
+            { ...refs.hueWheel, scope: 'global' },
+            draft.color,
+            null,
+            disabled
+        );
+        refs.level.value = String(clamp(toInt(draft.level, 100), 0, 100));
+        refs.levelValue.textContent = `${clamp(toInt(draft.level, 100), 0, 100)}%`;
+        setDisabled(refs.level, disabled);
+        const decoded = decodeEffectDuration(draft.duration);
+        refs.durationUnit.value = decoded.unit;
+        refs.durationValue.value = String(decoded.value === null ? 1 : decoded.value);
+        refs.durationValue.max = decoded.unit === 'hours' ? '134' : '60';
+        refs.durationValue.disabled = disabled || decoded.unit === 'indefinite';
+        setDisabled(refs.durationUnit, disabled);
+        const previewActive = !!previewFor(scope, segment);
+        const previewAvailable = draft.effect !== 'clear_effect' && !!effectDefinition(draft.effect);
+        refs.preview.textContent = previewActive ? 'Stop preview' : 'Preview';
+        refs.preview.setAttribute('aria-pressed', String(previewActive));
+        setDisabled(refs.preview, disabled || (!previewActive && !previewAvailable));
+        refs.preview.title = previewAvailable
+            ? 'Preview this effect locally'
+            : 'A local animation is not available for this effect';
+        setDisabled(refs.send, !getIsCommandReady());
+        refs.send.textContent = draft.effect === 'clear_effect' ? 'Clear effect' : 'Send effect';
     }
 
     function renderGlobalPanel() {
@@ -966,12 +1766,13 @@
         refs.lit.input.checked = lit;
         refs.lit.label.setAttribute('aria-checked', String(lit));
         setDisabled(refs.lit.input, disabled);
-        refs.controls.hidden = !lit;
-        updatePresetGrid(refs.presets, colorRaw, disabled || !lit);
-        updateHueWheel(refs.wheel, colorRaw, fields.color, disabled || !lit);
+        refs.controls.hidden = false;
+        updateColorSelect(refs.colorSelect, colorRaw, disabled, colorCssFromGlobalRaw(colorRaw));
+        updateHueWheel(refs.wheel, colorRaw, fields.color, disabled);
         refs.brightness.slider.value = String(Math.max(1, intensityRaw));
         refs.brightness.value.textContent = `${intensityRaw}%`;
-        setDisabled(refs.brightness.slider, disabled || !lit);
+        setDisabled(refs.brightness.slider, disabled);
+        if (refs.effect) renderEffectPanel(refs.effect, 'all', null);
     }
 
     function segmentPending(segment) {
@@ -982,15 +1783,40 @@
         });
     }
 
+    function replaceRailGradient(statesTopToBottom) {
+        if (!controlRefs || !controlRefs.switchArt || !controlRefs.switchArt.railGradient) return;
+        const gradient = controlRefs.switchArt.railGradient;
+        const states = Array.isArray(statesTopToBottom) ? statesTopToBottom : [];
+        const blend = 0.012;
+        const points = states.length > 0 ? [{ offset: 0, state: states[0] }] : [];
+        for (let index = 1; index < states.length; index += 1) {
+            const boundary = index / 7;
+            points.push({ offset: boundary - blend, state: states[index - 1] });
+            points.push({ offset: boundary + blend, state: states[index] });
+        }
+        if (states.length > 0) points.push({ offset: 1, state: states[states.length - 1] });
+        while (gradient.children.length < points.length) {
+            gradient.appendChild(createSvgElement('stop'));
+        }
+        while (gradient.children.length > points.length) {
+            gradient.removeChild(gradient.children[gradient.children.length - 1]);
+        }
+        points.forEach(({ offset, state }, index) => {
+            const stop = gradient.children[index];
+            stop.setAttribute('offset', `${(offset * 100).toFixed(3)}%`);
+            stop.setAttribute('stop-color', state.colorCss);
+            stop.setAttribute('stop-opacity', clamp(Number(state.displayOpacity) || 0, 0, 1).toFixed(3));
+        });
+    }
+
     function renderSegments() {
         if (!controlRefs) return;
+        const renderedStates = {};
         SEGMENTS.forEach((segment) => {
             const button = controlRefs.switchArt.segmentButtons[segment];
             const state = getEffectiveSegmentState(segment, activeContext);
-            const opacity = state.lit ? clamp(state.effectiveIntensity / 100, 0.08, 1) : 0.08;
-            setStyleProperty(button, '--led-color', state.colorCss);
-            setStyleProperty(button, '--led-opacity', String(opacity));
-            setStyleProperty(button, '--led-glow', state.lit ? `${4 + Math.round(state.effectiveIntensity / 10)}px` : '0px');
+            const displayed = getDisplayedSegmentState(segment, state);
+            renderedStates[segment] = displayed;
             button.classList.toggle('is-dim', !state.lit);
             button.classList.toggle('is-selected', segment === selectedSegment);
             button.classList.toggle('is-pending', segmentPending(segment));
@@ -1003,6 +1829,7 @@
             );
             setDisabled(button, !getIsDeviceSelected());
         });
+        replaceRailGradient([7, 6, 5, 4, 3, 2, 1].map((segment) => renderedStates[segment]));
     }
 
     function renderPopover() {
@@ -1010,35 +1837,34 @@
         const refs = controlRefs.popover;
         if (!selectedSegment) {
             refs.popover.hidden = true;
+            controlRefs.layout.classList.remove('has-segment-editor');
             return;
         }
 
         const state = getEffectiveSegmentState(selectedSegment, activeContext);
         const disabled = !getIsDeviceSelected();
         refs.popover.hidden = false;
-        refs.title.textContent = `LED ${selectedSegment} - ${segmentPositionLabel(selectedSegment)}`;
-        refs.note.textContent = `${activeContext === 'on' ? 'On' : 'Off'} state - ` +
-            (state.customized ? 'Custom settings' : 'Following all-LED defaults');
-        refs.customize.input.checked = state.customized;
-        refs.customize.label.setAttribute('aria-checked', String(state.customized));
-        setDisabled(refs.customize.input, disabled);
+        controlRefs.layout.classList.add('has-segment-editor');
+        refs.title.textContent = `LED ${selectedSegment}`;
+        refs.title.setAttribute('aria-label', `LED ${selectedSegment}, ${segmentPositionLabel(selectedSegment)} segment`);
+        const followsDefault = state.followsColor && state.followsIntensity;
+        refs.follow.input.checked = followsDefault;
+        refs.follow.label.setAttribute('aria-checked', String(followsDefault));
+        setDisabled(refs.follow.input, disabled);
         refs.lit.input.checked = state.lit;
         refs.lit.label.setAttribute('aria-checked', String(state.lit));
         setDisabled(refs.lit.input, disabled);
-        refs.followIntensity.input.checked = state.followsIntensity;
-        refs.followIntensity.label.setAttribute('aria-checked', String(state.followsIntensity));
-        setDisabled(refs.followIntensity.input, disabled || !state.customized);
-        refs.followIntensity.label.hidden = !state.customized;
-        refs.controls.hidden = !state.customized || !state.lit;
+        refs.controls.hidden = false;
 
-        const controlsDisabled = disabled || !state.customized || !state.lit;
-        updatePresetGrid(refs.presets, state.colorRaw, controlsDisabled);
-        updateHueWheel(refs.wheel, state.colorRaw, state.colorParam, controlsDisabled);
+        const displayColorRaw = state.followsColor
+            ? globalColorToSegmentRaw(state.globalColorRaw)
+            : state.colorRaw;
+        updateColorSelect(refs.colorSelect, displayColorRaw, disabled, state.colorCss);
+        updateHueWheel(refs.wheel, displayColorRaw, state.colorParam, disabled);
         refs.brightness.slider.value = String(Math.max(1, state.effectiveIntensity));
-        refs.brightness.value.textContent = state.followsIntensity
-            ? `Default: ${state.effectiveIntensity}%`
-            : `${state.effectiveIntensity}%`;
-        setDisabled(refs.brightness.slider, controlsDisabled || state.followsIntensity);
+        refs.brightness.value.textContent = `${state.effectiveIntensity}%`;
+        setDisabled(refs.brightness.slider, disabled);
+        if (refs.effect) renderEffectPanel(refs.effect, 'segment', selectedSegment);
     }
 
     function renderContext() {
@@ -1098,15 +1924,25 @@
 
     function setSchemaModel(schema) {
         const nextActive = hasFullSchemaCapability(schema);
+        const nextEffectSchemas = nextActive ? getEffectSchemas(schema) : {};
+        const priorEffectSignature = effectSchemaSignature(effectSchemas);
+        const nextEffectSignature = effectSchemaSignature(nextEffectSchemas);
 
         if (!nextActive) {
             schemaActive = false;
+            effectSchemas = {};
             clearSyncHandlers();
+            resetEffectState();
             removeEditorDom();
             return false;
         }
 
+        if (priorEffectSignature !== nextEffectSignature) {
+            if (controlRefs) removeEditorDom();
+            resetEffectState();
+        }
         schemaActive = true;
+        effectSchemas = nextEffectSchemas;
         hydrateFromState();
         buildEditor();
         registerSyncHandlers();
@@ -1116,7 +1952,8 @@
 
     function handlesField(name) {
         const fieldName = name && typeof name === 'object' ? name.name : name;
-        return schemaActive && OWNED_FIELDS.has(String(fieldName || ''));
+        const normalized = String(fieldName || '');
+        return schemaActive && (OWNED_FIELDS.has(normalized) || !!effectSchemas[normalized]);
     }
 
     function setActiveDevice(topic) {
@@ -1125,6 +1962,7 @@
             closeEditor({ restoreFocus: false });
             rawValues = {};
             cancelInteractionDrafts();
+            resetEffectState();
             lastNonZeroIntensity = {};
             lastHueByParam = {};
             activeContext = 'on';
@@ -1139,10 +1977,35 @@
         activeTopic = null;
         rawValues = {};
         cancelInteractionDrafts();
+        resetEffectState();
         lastNonZeroIntensity = {};
         lastHueByParam = {};
         activeContext = 'on';
         renderAll();
+    }
+
+    function setVisible(visible) {
+        editorVisible = !!visible;
+        if (!editorVisible) {
+            closeEditor({ restoreFocus: false });
+            stopAllEffectPreviews();
+        } else {
+            animationNow = Date.now();
+            syncAnimationLoop();
+            renderAll();
+        }
+    }
+
+    function refreshReadiness() {
+        renderAll();
+    }
+
+    function syncConfig(config) {
+        if (!config || typeof config !== 'object') return;
+        // notificationComplete identifies a target, but carries no command or
+        // generation id. It may describe an interrupted, older notification.
+        // The explicitly local preview therefore follows its own duration/manual
+        // stop lifecycle instead of letting an uncorrelated event clear newer UI.
     }
 
     function init(options) {
@@ -1150,6 +2013,9 @@
         containerEl = opts.containerEl || null;
         stateApi = opts.stateApi || null;
         isDeviceSelectedFn = typeof opts.isDeviceSelected === 'function' ? opts.isDeviceSelected : null;
+        isCommandReadyFn = typeof opts.isCommandReady === 'function' ? opts.isCommandReady : null;
+        sendImmediateEffectFn = typeof opts.sendImmediateEffect === 'function' ? opts.sendImmediateEffect : null;
+        editorVisible = opts.visible === true;
         if (opts.schemaModel) setSchemaModel(opts.schemaModel);
     }
 
@@ -1160,12 +2026,19 @@
         setActiveDevice,
         resetForDeviceChange,
         closeEditor,
+        setVisible,
+        refreshReadiness,
+        syncConfig,
         __test__: {
             FIELD_NAMES: FIELD_NAMES.slice(),
             GLOBAL_PRESETS: GLOBAL_PRESETS.map((preset) => ({ ...preset })),
             SEGMENT_PRESETS: SEGMENT_PRESETS.map((preset) => ({ ...preset })),
+            EFFECT_FIELD_NAMES: EFFECT_FIELD_NAMES.slice(),
+            EFFECT_FRAMES,
+            EFFECT_ANIMATIONS,
             segmentFields,
             hasFullSchemaCapability,
+            hasEffectSchemaCapability,
             globalHueToRaw,
             segmentHueToRaw,
             globalRawToHue,
@@ -1173,6 +2046,11 @@
             globalColorToSegmentRaw,
             colorCssFromGlobalRaw,
             colorCssFromSegmentRaw,
+            effectFrame,
+            interpolatedEffectFrame,
+            effectSchemaSignature,
+            encodeEffectDuration,
+            decodeEffectDuration,
             getEffectiveSegmentState,
             setRawValuesForTest: (values) => {
                 Object.entries(values || {}).forEach(([param, value]) => {
@@ -1185,6 +2063,7 @@
             setSegmentCustomized,
             setGlobalLit,
             setSegmentLit,
+            stageExplicitSegmentChanges,
             commitHue,
             commitBrightness,
             selectPreset,
@@ -1193,6 +2072,16 @@
             commitInteractionDraft,
             getInteractionDraftCount: () => interactionDrafts.size,
             getSelectedSegment: () => selectedSegment,
+            getEffectDraft: (scope, segment) => ({ ...getEffectDraft(scope, segment) }),
+            updateEffectDraft,
+            startEffectPreview,
+            stopEffectPreview,
+            sendEffect,
+            getEffectPreview: (scope, segment) => {
+                const preview = previewFor(scope, segment);
+                return preview ? { ...preview, payload: { ...preview.payload } } : null;
+            },
+            getDisplayedSegmentState,
             getControlRefs: () => controlRefs,
             isSchemaActive: () => schemaActive,
         },
