@@ -293,6 +293,9 @@ function loadLedModule(options) {
     const source = fs.readFileSync(scriptPath, 'utf8');
     const document = new MockDocument();
     const context = { window: {}, document, console, Math, Number, Object, Array, Map, Set, String, Date };
+    if (opts.reducedMotion !== undefined) {
+        context.window.matchMedia = () => ({ matches: opts.reducedMotion === true });
+    }
     context.global = context;
     vm.createContext(context);
     vm.runInContext(source, context, { filename: scriptPath });
@@ -883,6 +886,86 @@ test('effect preview eases between published frames and never invents unknown mo
         Array.from(api.interpolatedEffectFrame('future_wave', 500, false)),
         [0, 0, 0, 0, 0, 0, 0],
     );
+});
+
+test('effect dropdowns preview locally without sending or staging persistent settings', () => {
+    const { module, api, state, sentEffects } = loadLedModule({ effectsEnabled: true });
+    module.setSchemaModel(createCompleteSchemaWithEffects(api.FIELD_NAMES));
+
+    const allEffect = api.getControlRefs().global.effect;
+    allEffect.effectSelect.value = 'chase';
+    allEffect.effectSelect.dispatch('change');
+    assert.equal(api.getEffectDraft('all', null).effect, 'chase');
+    assert.equal(api.getEffectPreview('all', null).payload.effect, 'chase');
+    assert.equal(allEffect.preview.textContent, 'Stop preview');
+
+    api.openSegmentEditor(7);
+    const segmentEffect = api.getControlRefs().popover.effect;
+    segmentEffect.effectSelect.value = 'rising';
+    segmentEffect.effectSelect.dispatch('change');
+    assert.equal(api.getEffectDraft('segment', 7).effect, 'rising');
+    assert.equal(api.getEffectPreview('segment', 7).payload.effect, 'rising');
+    assert.equal(segmentEffect.preview.textContent, 'Stop preview');
+
+    assert.deepEqual(JSON.parse(JSON.stringify(sentEffects)), []);
+    assert.equal(state.queued.length, 0);
+
+    segmentEffect.preview.dispatch('click');
+    assert.equal(api.getEffectPreview('segment', 7), null);
+    assert.equal(segmentEffect.preview.textContent, 'Preview');
+});
+
+test('effect selection can preview locally while physical commands are unavailable', () => {
+    const { module, api, state, sentEffects } = loadLedModule({ effectsEnabled: true, commandReady: false });
+    module.setSchemaModel(createCompleteSchemaWithEffects(api.FIELD_NAMES));
+
+    const effect = api.getControlRefs().global.effect;
+    effect.effectSelect.value = 'pulse';
+    effect.effectSelect.dispatch('change');
+
+    assert.equal(api.getEffectPreview('all', null).payload.effect, 'pulse');
+    assert.equal(effect.preview.textContent, 'Stop preview');
+    assert.equal(effect.send.disabled, true);
+    assert.deepEqual(JSON.parse(JSON.stringify(sentEffects)), []);
+    assert.equal(state.queued.length, 0);
+});
+
+test('automatic dropdown preview preserves off, clear, unknown, and reduced-motion semantics', () => {
+    const reduced = loadLedModule({ effectsEnabled: true, reducedMotion: true });
+    const schema = createCompleteSchema(reduced.api.FIELD_NAMES);
+    schema.fields.push(createEffectField('led_effect', ['solid', 'fast_blink', 'off', 'clear_effect', 'future_wave']));
+    reduced.module.setSchemaModel(schema);
+    reduced.api.setRawValuesForTest({
+        ledColorWhenOn: 170,
+        ledIntensityWhenOn: 50,
+        defaultLed7ColorWhenOn: 255,
+        defaultLed7IntensityWhenOn: 101,
+    });
+
+    const refs = reduced.api.getControlRefs().global.effect;
+    const topBase = reduced.api.getEffectiveSegmentState(7, 'on');
+
+    refs.effectSelect.value = 'fast_blink';
+    refs.effectSelect.dispatch('change');
+    assert.equal(reduced.api.getEffectPreview('all', null).payload.effect, 'fast_blink');
+    assert.equal(reduced.api.getDisplayedSegmentState(7, topBase).displayOpacity, 1);
+
+    refs.effectSelect.value = 'off';
+    refs.effectSelect.dispatch('change');
+    assert.equal(reduced.api.getEffectPreview('all', null).payload.effect, 'off');
+    assert.equal(reduced.api.getDisplayedSegmentState(7, topBase).displayOpacity, 0);
+
+    refs.effectSelect.value = 'clear_effect';
+    refs.effectSelect.dispatch('change');
+    assert.equal(reduced.api.getEffectPreview('all', null), null);
+    assert.equal(reduced.api.getDisplayedSegmentState(7, topBase).displayOpacity, 0.5);
+
+    refs.effectSelect.value = 'future_wave';
+    refs.effectSelect.dispatch('change');
+    assert.equal(reduced.api.getEffectPreview('all', null), null);
+    assert.equal(refs.preview.disabled, true);
+    assert.deepEqual(JSON.parse(JSON.stringify(reduced.sentEffects)), []);
+    assert.equal(reduced.state.queued.length, 0);
 });
 
 test('unknown schema effects remain sendable but do not claim a local animation', () => {

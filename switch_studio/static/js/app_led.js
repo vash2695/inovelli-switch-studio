@@ -1029,7 +1029,14 @@
             effectSelect.appendChild(option);
         });
         effectSelect.addEventListener('change', () => {
-            updateEffectDraft(scope, scope === 'segment' ? selectedSegment : null, { effect: effectSelect.value });
+            const segment = scope === 'segment' ? selectedSegment : null;
+            const wasPreviewing = !!previewFor(scope, segment);
+            updateEffectDraft(scope, segment, { effect: effectSelect.value });
+            // Changing the selected pattern is itself a preview action. Existing
+            // previews are restarted by updateEffectDraft; otherwise start one
+            // now. startEffectPreview remains the single source of truth for
+            // clear, unknown, static, and reduced-motion behavior.
+            if (!wasPreviewing) startEffectPreview(scope, segment, getEffectDraft(scope, segment));
         });
         effectLabelEl.appendChild(effectSelect);
         panel.appendChild(effectLabelEl);

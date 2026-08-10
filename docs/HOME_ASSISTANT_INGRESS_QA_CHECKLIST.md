@@ -56,7 +56,7 @@ Last updated: 2026-08-09
 - Open LED 1 (bottom) and LED 7 (top); verify the segment dialog identifies each correctly and remains usable by touch and keyboard.
 - For a segment, test Follow all-LED defaults, a preset, a custom hue, brightness, and the lit/off toggle. Confirm edits remain staged until the main `Apply Changes` action.
 - Confirm synced segments follow staged global changes, mixed color/intensity sync states are represented without data loss, and `Discard` restores the newest device values.
-- Preview and send both all-LED and single-LED notification effects; confirm previews animate the expected physical direction, single-LED effects alter only their selected segment, and both Send actions remain immediate without creating pending defaults or duplicate generic controls.
+- Select effects for both the all-LED bar and a single segment; confirm each dropdown starts its local preview immediately without sending a device command or creating pending defaults. Then use Send and confirm both commands remain immediate, animate in the expected physical direction, and avoid duplicate generic controls.
 - Verify `Clear effect` remains distinct from `Off`, finite local previews stop at their encoded duration, and an indefinite preview continues while the LED tab remains open until stopped; leaving the tab or device clears local previews. Compare device timing on the installed VZM32-SN firmware because the local pacing is based on Inovelli's published simulator and may vary on hardware.
 - `Buttons & Scenes`: change one scene/button parameter.
 - `Power & Device`: verify diagnostics are read-only where appropriate.
@@ -76,6 +76,8 @@ Last updated: 2026-08-09
 ## 7. Responsive and Accessibility Pass
 
 - Validate phone, foldable/tablet, and desktop layouts with both portrait and landscape where applicable.
+- On phone and tablet widths, confirm the device selector shares the header row with the Inovelli anchor, quick controls use the next row, and long device names do not cause horizontal overflow.
+- Open the compact section menu from the current-page header; confirm all six sections remain one accessible tab set, selecting a section closes the menu, Escape returns focus to the menu button, and widening past the mobile breakpoint restores the desktop tab bar.
 - Confirm cards, tabs, sticky actions, zone inputs, radar, and tables remain usable without accidental horizontal page scrolling.
 - Navigate top-level and nested Presence & Zones tabs by keyboard using Arrow keys, Home, and End.
 - Confirm focus remains visible and nested tab panels retain the correct screen-reader ownership.

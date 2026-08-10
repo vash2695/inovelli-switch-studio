@@ -37,6 +37,8 @@ class MockElement {
         this.style = { display: '' };
         this.listeners = {};
         this.focused = false;
+        this.textContent = '';
+        this.children = [];
     }
 
     getAttribute(name) {
@@ -60,6 +62,10 @@ class MockElement {
     focus() {
         this.focused = true;
     }
+
+    contains(target) {
+        return target === this || this.children.includes(target);
+    }
 }
 
 function loadTabsModule(options) {
@@ -82,6 +88,9 @@ function loadTabsModule(options) {
         new MockElement({ 'data-tab-target': 'led' }),
         new MockElement({ 'data-tab-target': 'advanced' }),
     ];
+    ['Presence & Zones', 'Load & Dimming', 'LED & Notifications', 'Advanced'].forEach((label, index) => {
+        buttons[index].textContent = label;
+    });
     const panels = [
         new MockElement({ 'data-tab-panels': 'zones', 'data-tab-panel-primary': '' }),
         new MockElement({ 'data-tab-panels': 'load', 'data-tab-panel-primary': '' }),
@@ -114,6 +123,25 @@ function loadTabsModule(options) {
         },
     };
 
+    const mobileNav = new MockElement();
+    const mobileTitle = new MockElement();
+    const mobileToggle = new MockElement({ 'aria-expanded': 'false' });
+    mobileNav.children = [mobileToggle, ...buttons];
+    const ownerDocument = {
+        listeners: {},
+        addEventListener(type, callback) {
+            this.listeners[type] = callback;
+        },
+    };
+    const mobileMediaQuery = {
+        matches: true,
+        listeners: {},
+        addEventListener(type, callback) {
+            this.listeners[type] = callback;
+        },
+    };
+    const mobileOptions = { mobileNav, mobileTitle, mobileToggle, ownerDocument, mobileMediaQuery };
+
     const context = {
         window: {},
         document: {},
@@ -133,6 +161,12 @@ function loadTabsModule(options) {
         nestedTabList,
         storageMap,
         root,
+        mobileNav,
+        mobileTitle,
+        mobileToggle,
+        ownerDocument,
+        mobileMediaQuery,
+        mobileOptions,
     };
 }
 
@@ -221,4 +255,92 @@ test('top-level tab ARIA preserves nested zone tablist and tabpanel ownership', 
     assert.equal(nestedPanel.style.display, 'none');
     assert.equal(nestedTabList.getAttribute('role'), 'tablist');
     assert.equal(nestedPanel.getAttribute('aria-labelledby'), 'zonesPaneTabControls');
+});
+
+test('mobile section header tracks the active tab and closes after tab selection', () => {
+    const { tabs, buttons, root, mobileNav, mobileTitle, mobileToggle, mobileOptions } = loadTabsModule();
+    tabs.init({ root, defaultTab: 'zones', ...mobileOptions });
+
+    assert.equal(mobileTitle.textContent, 'Presence & Zones');
+    assert.equal(mobileToggle.getAttribute('aria-expanded'), 'false');
+
+    mobileToggle.click();
+    assert.equal(tabs.isMobileMenuOpen(), true);
+    assert.equal(mobileNav.classList.contains('mobile-menu-open'), true);
+    assert.equal(mobileToggle.getAttribute('aria-expanded'), 'true');
+    assert.equal(buttons[0].focused, true);
+
+    mobileToggle.focused = false;
+    buttons[1].click();
+    assert.equal(tabs.getActiveTab(), 'load');
+    assert.equal(mobileTitle.textContent, 'Load & Dimming');
+    assert.equal(tabs.isMobileMenuOpen(), false);
+    assert.equal(mobileToggle.getAttribute('aria-expanded'), 'false');
+    assert.equal(mobileToggle.focused, true);
+});
+
+test('mobile section disclosure closes on active-tab click and Escape', () => {
+    const { tabs, buttons, root, mobileToggle, mobileOptions } = loadTabsModule();
+    tabs.init({ root, defaultTab: 'zones', ...mobileOptions });
+
+    mobileToggle.click();
+    mobileToggle.focused = false;
+    buttons[0].click();
+    assert.equal(tabs.getActiveTab(), 'zones');
+    assert.equal(tabs.isMobileMenuOpen(), false);
+    assert.equal(mobileToggle.focused, true);
+
+    mobileToggle.focused = false;
+    mobileToggle.click();
+    let prevented = false;
+    buttons[0].listeners.keydown({ key: 'Escape', preventDefault: () => { prevented = true; } });
+    assert.equal(prevented, true);
+    assert.equal(tabs.isMobileMenuOpen(), false);
+    assert.equal(mobileToggle.focused, true);
+});
+
+test('mobile section arrow navigation stays open while updating the page title', () => {
+    const { tabs, buttons, root, mobileTitle, mobileToggle, mobileOptions } = loadTabsModule();
+    tabs.init({ root, defaultTab: 'zones', ...mobileOptions });
+    mobileToggle.click();
+
+    buttons[0].listeners.keydown({ key: 'ArrowRight', preventDefault() {} });
+
+    assert.equal(tabs.isMobileMenuOpen(), true);
+    assert.equal(tabs.getActiveTab(), 'load');
+    assert.equal(mobileTitle.textContent, 'Load & Dimming');
+    assert.equal(buttons[1].focused, true);
+    assert.equal(mobileToggle.getAttribute('aria-expanded'), 'true');
+});
+
+test('outside pointer and desktop transition dismiss the mobile disclosure without stealing focus', () => {
+    const {
+        tabs, root, mobileToggle, ownerDocument, mobileMediaQuery, mobileOptions,
+    } = loadTabsModule();
+    tabs.init({ root, defaultTab: 'zones', ...mobileOptions });
+
+    mobileToggle.click();
+    mobileToggle.focused = false;
+    ownerDocument.listeners.pointerdown({ target: {} });
+    assert.equal(tabs.isMobileMenuOpen(), false);
+    assert.equal(mobileToggle.focused, false);
+
+    mobileToggle.click();
+    mobileToggle.focused = false;
+    mobileMediaQuery.listeners.change({ matches: false });
+    assert.equal(tabs.isMobileMenuOpen(), false);
+    assert.equal(mobileToggle.focused, false);
+});
+
+test('programmatic mobile tab changes update the header and quietly close navigation', () => {
+    const { tabs, root, mobileTitle, mobileToggle, mobileOptions } = loadTabsModule({ storedTab: 'maintenance' });
+    tabs.init({ root, defaultTab: 'zones', ...mobileOptions });
+    assert.equal(mobileTitle.textContent, 'Advanced');
+
+    mobileToggle.click();
+    mobileToggle.focused = false;
+    tabs.setActiveTab('led');
+    assert.equal(mobileTitle.textContent, 'LED & Notifications');
+    assert.equal(tabs.isMobileMenuOpen(), false);
+    assert.equal(mobileToggle.focused, false);
 });

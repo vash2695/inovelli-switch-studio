@@ -45,11 +45,29 @@ test('back button and All Devices route through the same guarded device selectio
 
 test('device-only header controls stay available without redundant status actions', () => {
     assert.match(template, /<select id="deviceSelect"/);
-    assert.match(template, /grid-template-areas:\s*"device"\s*"quick";/);
+    assert.equal((template.match(/id="deviceSelect"/g) || []).length, 1, 'device selector should not be duplicated');
+    assert.match(template, /grid-template-areas:\s*"brand device"\s*"quick quick";/);
+    assert.match(template, /@media \(max-width: 900px\)[\s\S]*?\.header-controls\s*\{\s*display:\s*contents;/);
+    assert.match(template, /@media \(max-width: 900px\)[\s\S]*?\.header-quick-controls\s*\{[\s\S]*?grid-area:\s*quick;/);
     assert.doesNotMatch(template, /id="connectionChip"/);
     assert.doesNotMatch(template, /id="connectionText"/);
     assert.doesNotMatch(template, /id="btnForceSync"/);
     assert.doesNotMatch(template, /Quick control confirmed/);
+});
+
+test('mobile workspace navigation uses one accessible tab disclosure instead of duplicate chips', () => {
+    assert.match(
+        template,
+        /<nav class="workspace-nav" id="workspaceNav" aria-label="Device configuration sections" hidden>[\s\S]*?<h2 class="mobile-tab-title" id="mobileTabTitle">Presence & Zones<\/h2>[\s\S]*?<button class="mobile-tab-menu-button" id="mobileTabMenuButton" type="button" aria-label="Open section menu" aria-controls="tabBar" aria-expanded="false">/
+    );
+    assert.equal((template.match(/data-tab-target=/g) || []).length, 6, 'top-level tabs should have one button each');
+    assert.match(template, /\.mobile-tab-menu-button\s*\{[\s\S]*?width:\s*44px;[\s\S]*?height:\s*44px;/);
+    assert.match(template, /@media \(max-width: 900px\)[\s\S]*?\.tab-bar\s*\{[\s\S]*?display:\s*none;[\s\S]*?position:\s*absolute;/);
+    assert.match(template, /\.workspace-nav\.mobile-menu-open \.tab-bar\s*\{\s*display:\s*grid;/);
+    assert.match(template, /mobileNav:\s*workspaceNav,[\s\S]*?mobileTitle:\s*mobileTabTitle,[\s\S]*?mobileToggle:\s*mobileTabMenuButton/);
+    assert.match(template, /window\.SwitchStudioTabs\.closeMobileMenu\(\{ restoreFocus: false \}\);/);
+    assert.match(template, /if \(workspaceNav\) workspaceNav\.hidden = true;/);
+    assert.match(template, /if \(workspaceNav\) workspaceNav\.hidden = !SWITCH_STUDIO_UI_ENABLED;/);
 });
 
 test('device header percentage input is locked to a three-digit control width', () => {

@@ -325,6 +325,49 @@
         #packetAge { color: var(--text-muted); font-size: 0.85em; font-family: monospace; min-width: 60px; text-align: left; }
 
         /* Tabs + Dirty State */
+        .workspace-nav {
+            position: relative;
+            min-width: 0;
+            z-index: 16;
+        }
+        .mobile-tab-header {
+            display: none;
+        }
+        .mobile-tab-title {
+            margin: 0;
+            min-width: 0;
+            color: var(--text-primary);
+            font-size: 0.9rem;
+            font-weight: 650;
+            line-height: 1.2;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .mobile-tab-menu-button {
+            width: 44px;
+            height: 44px;
+            flex: 0 0 44px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
+            background: var(--bg-elev-3);
+            color: var(--text-secondary);
+            cursor: pointer;
+        }
+        .mobile-tab-menu-button:hover,
+        .mobile-tab-menu-button[aria-expanded="true"] {
+            border-color: rgba(13, 212, 192, 0.55);
+            background: rgba(13, 212, 192, 0.14);
+            color: var(--text-primary);
+        }
+        .mobile-tab-menu-button svg {
+            width: 20px;
+            height: 20px;
+        }
         .tab-bar {
             display: flex;
             align-items: stretch;
@@ -1357,11 +1400,13 @@
 
         .dashboard-view,
         .app-container,
+        .workspace-nav,
         .tab-bar {
             min-width: 0;
         }
         .dashboard-view[hidden],
         .app-container[hidden],
+        .workspace-nav[hidden],
         .tab-bar[hidden] {
             display: none !important;
         }
@@ -2219,19 +2264,20 @@
                 top: 0;
                 z-index: 18;
                 padding: 7px 9px;
-                flex-wrap: wrap;
+                display: grid;
+                grid-template-columns: auto minmax(0, 1fr);
+                grid-template-areas:
+                    "brand device"
+                    "quick quick";
                 gap: 7px;
+            }
+            .header-brand {
+                grid-area: brand;
+                max-width: 100%;
             }
             .header-back { width: 40px; height: 40px; flex-basis: 40px; }
             .header-controls {
-                width: 100%;
-                display: grid;
-                grid-template-columns: minmax(0, 1fr);
-                grid-template-areas:
-                    "device"
-                    "quick";
-                align-items: center;
-                gap: 8px;
+                display: contents;
             }
             .header-device-wrap {
                 grid-area: device;
@@ -2247,25 +2293,56 @@
             }
             select#deviceSelect {
                 max-width: unset;
+                min-width: 0;
                 width: 100%;
                 margin-right: 0;
+                text-overflow: ellipsis;
             }
             .quick-label {
                 font-size: 0.64rem;
             }
 
+            .workspace-nav {
+                padding: 5px 8px;
+                background: var(--bg-elev-2);
+                border-bottom: 1px solid var(--border-subtle);
+            }
+            .mobile-tab-header {
+                min-height: 44px;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 10px;
+            }
             .tab-bar {
-                gap: 6px;
-                padding: 7px 8px;
-                flex-wrap: wrap;
-                overflow-x: visible;
+                display: none;
+                position: absolute;
+                top: calc(100% - 2px);
+                left: 8px;
+                right: 8px;
+                z-index: 24;
+                grid-template-columns: minmax(0, 1fr);
+                gap: 4px;
+                max-height: min(420px, calc(100dvh - 132px));
+                padding: 6px;
+                overflow-x: hidden;
+                overflow-y: auto;
+                background: rgba(18, 23, 35, 0.98);
+                border: 1px solid var(--border-strong);
+                border-radius: var(--radius-md);
+                box-shadow: 0 14px 34px rgba(0, 0, 0, 0.42);
+            }
+            .workspace-nav.mobile-menu-open .tab-bar {
+                display: grid;
             }
             .tab-btn {
-                padding: 8px 10px;
-                font-size: 0.73rem;
-                min-width: 116px;
-                flex: 1 1 auto;
-                text-align: center;
+                width: 100%;
+                min-width: 0;
+                min-height: 44px;
+                padding: 10px 12px;
+                font-size: 0.76rem;
+                justify-content: flex-start;
+                text-align: left;
             }
 
             .app-container {
@@ -2460,12 +2537,7 @@
                 padding: 6px 8px;
             }
 
-            .tab-btn {
-                padding: 7px 8px;
-                font-size: 0.68rem;
-                min-width: 0;
-                flex: 1 1 calc(50% - 3px);
-            }
+            .mobile-tab-title { font-size: 0.86rem; }
 
             .zones-live-meta {
                 justify-content: flex-start;
@@ -2623,14 +2695,24 @@
         </div>
     </main>
 
-    <div class="tab-bar" id="tabBar" role="tablist" aria-label="Inovelli Switch Studio tabs" hidden>
-        <button class="tab-btn" type="button" data-tab-target="zones" role="tab" aria-selected="true">Presence & Zones</button>
-        <button class="tab-btn" type="button" data-tab-target="load" role="tab" aria-selected="false">Load & Dimming</button>
-        <button class="tab-btn" type="button" data-tab-target="led" role="tab" aria-selected="false">LED & Notifications</button>
-        <button class="tab-btn" type="button" data-tab-target="buttons" role="tab" aria-selected="false">Buttons & Scenes</button>
-        <button class="tab-btn" type="button" data-tab-target="power" role="tab" aria-selected="false">Power & Device</button>
-        <button class="tab-btn" type="button" data-tab-target="advanced" role="tab" aria-selected="false">Advanced</button>
-    </div>
+    <nav class="workspace-nav" id="workspaceNav" aria-label="Device configuration sections" hidden>
+        <div class="mobile-tab-header">
+            <h2 class="mobile-tab-title" id="mobileTabTitle">Presence & Zones</h2>
+            <button class="mobile-tab-menu-button" id="mobileTabMenuButton" type="button" aria-label="Open section menu" aria-controls="tabBar" aria-expanded="false">
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+                </svg>
+            </button>
+        </div>
+        <div class="tab-bar" id="tabBar" role="tablist" aria-label="Inovelli Switch Studio tabs">
+            <button class="tab-btn" type="button" data-tab-target="zones" role="tab" aria-selected="true">Presence & Zones</button>
+            <button class="tab-btn" type="button" data-tab-target="load" role="tab" aria-selected="false">Load & Dimming</button>
+            <button class="tab-btn" type="button" data-tab-target="led" role="tab" aria-selected="false">LED & Notifications</button>
+            <button class="tab-btn" type="button" data-tab-target="buttons" role="tab" aria-selected="false">Buttons & Scenes</button>
+            <button class="tab-btn" type="button" data-tab-target="power" role="tab" aria-selected="false">Power & Device</button>
+            <button class="tab-btn" type="button" data-tab-target="advanced" role="tab" aria-selected="false">Advanced</button>
+        </div>
+    </nav>
 
     <div id="zoneStatus"></div>
     <div id="toastContainer" role="status" aria-live="polite" aria-atomic="true"></div>
@@ -3026,7 +3108,10 @@
         const packetAgeSpan = document.getElementById('packetAge');
         const deviceSelect = document.getElementById('deviceSelect');
         const dataTableBody = document.getElementById('dataTableBody');
+        const workspaceNav = document.getElementById('workspaceNav');
         const tabBar = document.getElementById('tabBar');
+        const mobileTabTitle = document.getElementById('mobileTabTitle');
+        const mobileTabMenuButton = document.getElementById('mobileTabMenuButton');
         const appContainer = document.getElementById('appContainer');
         const dashboardView = document.getElementById('dashboardView');
         const deviceGrid = document.getElementById('deviceGrid');
@@ -4010,7 +4095,10 @@
             }
             if (dashboardView) dashboardView.hidden = false;
             if (appContainer) appContainer.hidden = true;
-            if (tabBar) tabBar.hidden = true;
+            if (workspaceNav) workspaceNav.hidden = true;
+            if (window.SwitchStudioTabs && typeof window.SwitchStudioTabs.closeMobileMenu === 'function') {
+                window.SwitchStudioTabs.closeMobileMenu({ restoreFocus: false });
+            }
             document.body.classList.add('dashboard-active');
             if (deviceSelect) deviceSelect.value = '';
             if (window.SwitchStudioDevices && typeof window.SwitchStudioDevices.setSelectedTopic === 'function') {
@@ -4026,7 +4114,7 @@
         function showWorkspaceView(topic) {
             if (dashboardView) dashboardView.hidden = true;
             if (appContainer) appContainer.hidden = false;
-            if (tabBar) tabBar.hidden = !SWITCH_STUDIO_UI_ENABLED;
+            if (workspaceNav) workspaceNav.hidden = !SWITCH_STUDIO_UI_ENABLED;
             if (devicePageTitle) devicePageTitle.textContent = getDeviceDisplayName(topic);
             document.body.classList.remove('dashboard-active');
             if (deviceSelect) deviceSelect.value = topic || '';
@@ -4179,8 +4267,8 @@
         }
 
         function applyLegacyLayout() {
-            if (tabBar) {
-                tabBar.style.display = 'none';
+            if (workspaceNav) {
+                workspaceNav.style.display = 'none';
             }
 
             try {
@@ -4201,6 +4289,9 @@
         if (SWITCH_STUDIO_UI_ENABLED && window.SwitchStudioTabs && typeof window.SwitchStudioTabs.init === 'function') {
             window.SwitchStudioTabs.init({
                 defaultTab: 'zones',
+                mobileNav: workspaceNav,
+                mobileTitle: mobileTabTitle,
+                mobileToggle: mobileTabMenuButton,
                 onTabChange: (activeTab) => {
                     applyLayoutMode(activeTab);
                     if (window.SwitchStudioLed && typeof window.SwitchStudioLed.setVisible === 'function') {
