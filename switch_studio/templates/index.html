@@ -1189,6 +1189,14 @@
         /* Grid for Raw Zone Data */
         .zone-data-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
         .radar-display-range-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .radar-display-range-actions { display: grid; gap: 6px; margin-top: 5px; }
+        .radar-display-range-actions .cmd-btn { margin-top: 0; }
+        .radar-display-range-apply-all {
+            background: rgba(13, 212, 192, 0.08);
+            border-color: rgba(13, 212, 192, 0.38);
+            color: var(--accent);
+        }
+        .radar-display-range-help { margin-top: 6px; }
         .zone-input-group { display: flex; flex-direction: column; gap: 2px; }
         .zone-input-group label { font-size: 0.75em; color: var(--text-muted); }
         .zone-input-group input { width: 100%; box-sizing: border-box; font-family: monospace; color: var(--accent); font-weight: bold;}
@@ -2890,7 +2898,7 @@
                 min-height: 44px;
                 font-size: 16px;
             }
-            .radar-display-range-apply {
+            .radar-display-range-actions .cmd-btn {
                 min-height: 44px;
             }
             .device-grid {
@@ -2910,7 +2918,7 @@
                 min-height: 44px;
                 font-size: 16px;
             }
-            .radar-display-range-apply {
+            .radar-display-range-actions .cmd-btn {
                 min-height: 44px;
             }
         }
@@ -3244,7 +3252,11 @@
                         <div class="zone-input-group"><label for="vizZMin">Height min (Z)</label><input type="number" id="vizZMin" min="-600" max="600" step="1" value="-600"></div>
                         <div class="zone-input-group"><label for="vizZMax">Height max (Z)</label><input type="number" id="vizZMax" min="-600" max="600" step="1" value="600"></div>
                     </div>
-                    <button class="cmd-btn btn-full radar-display-range-apply" onclick="updateRadarScale()" style="margin-top:5px; background: #00bcd4; color: #1a1a1a;">Apply Display Range</button>
+                    <div class="radar-display-range-actions">
+                        <button class="cmd-btn btn-full radar-display-range-apply" id="btnApplyRadarDisplayRange" type="button" onclick="updateRadarScale()" style="background: #00bcd4; color: #1a1a1a;">Apply Display Range</button>
+                        <button class="cmd-btn btn-full radar-display-range-apply-all" id="btnApplyRadarHeightToAll" type="button" aria-describedby="radarHeightApplyAllHelp" onclick="applyRadarHeightToAllDevices()">Apply Height to All Switches</button>
+                    </div>
+                    <div class="panel-lede radar-display-range-help" id="radarHeightApplyAllHelp">Copies only Height min/max to every currently discovered switch with a 3D radar view in this browser. Switches discovered later keep their own range.</div>
                 </div>
             </section>
             </div>
@@ -6361,6 +6373,77 @@
             return loaded;
         }
 
+        function getRequestedRadarDisplayHeightBounds() {
+            return radar3dModule && typeof radar3dModule.normalizeDisplayHeightBounds === 'function'
+                ? radar3dModule.normalizeDisplayHeightBounds(vizZMin.value, vizZMax.value)
+                : null;
+        }
+
+        function showRadarDisplayHeightError() {
+            if (window.SwitchStudioState && typeof window.SwitchStudioState.showToast === 'function') {
+                window.SwitchStudioState.showToast('error', '3D height bounds must be between -600 and 600 cm with at least 20 cm between them.', 3200);
+            }
+            setRadarDisplayHeightInputs();
+        }
+
+        function getRadarDisplayHeightTargetTopics() {
+            const devices = window.SwitchStudioDevices && typeof window.SwitchStudioDevices.getDevices === 'function'
+                ? window.SwitchStudioDevices.getDevices()
+                : [];
+            const topics = (Array.isArray(devices) ? devices : [])
+                .filter((device) => device && device.topic && (!device.capabilities || device.capabilities.full_editor !== false))
+                .map((device) => String(device.topic).trim())
+                .filter(Boolean);
+            return Array.from(new Set(topics.filter(Boolean)));
+        }
+
+        function applyRadarHeightToAllDevices() {
+            const nextHeightBounds = getRequestedRadarDisplayHeightBounds();
+            if (!nextHeightBounds) {
+                showRadarDisplayHeightError();
+                return false;
+            }
+            const topics = getRadarDisplayHeightTargetTopics();
+            if (!topics.length) {
+                if (window.SwitchStudioState && typeof window.SwitchStudioState.showToast === 'function') {
+                    window.SwitchStudioState.showToast('error', 'No compatible switches are currently available.', 2600);
+                }
+                return false;
+            }
+            const saved = radar3dModule && typeof radar3dModule.saveDisplayHeightBoundsForDevices === 'function'
+                ? radar3dModule.saveDisplayHeightBoundsForDevices(topics, nextHeightBounds.zMin, nextHeightBounds.zMax)
+                : null;
+            if (!saved || !saved.deviceKeys.length) {
+                if (window.SwitchStudioState && typeof window.SwitchStudioState.showToast === 'function') {
+                    window.SwitchStudioState.showToast('error', 'This browser could not save the height range. No switches were changed.', 3200);
+                }
+                setRadarDisplayHeightInputs();
+                return false;
+            }
+            const activeWasSaved = saved.deviceKeys.includes(String(activeDeviceTopic || '').trim());
+            if (activeWasSaved) {
+                chartZMin = saved.bounds.zMin;
+                chartZMax = saved.bounds.zMax;
+                setRadarDisplayHeightInputs();
+                refreshRadar3dScene();
+            } else {
+                setRadarDisplayHeightInputs();
+            }
+            if (window.SwitchStudioState && typeof window.SwitchStudioState.showToast === 'function') {
+                const noun = saved.deviceKeys.length === 1 ? 'switch' : 'switches';
+                if (saved.failedDeviceKeys && saved.failedDeviceKeys.length) {
+                    window.SwitchStudioState.showToast(
+                        'error',
+                        `Height range saved for ${saved.deviceKeys.length} ${noun}; ${saved.failedDeviceKeys.length} could not be saved.`,
+                        3600,
+                    );
+                } else {
+                    window.SwitchStudioState.showToast('success', `Height range applied to ${saved.deviceKeys.length} ${noun}.`, 2600);
+                }
+            }
+            return true;
+        }
+
         function applyVizSettings() {
             // Set checkboxes
             if (vizToggleInterference) vizToggleInterference.checked = showInterference;
@@ -6424,18 +6507,13 @@
                 setRadarDisplayHeightInputs();
                 return false;
             }
-            const nextHeightBounds = radar3dModule && typeof radar3dModule.normalizeDisplayHeightBounds === 'function'
-                ? radar3dModule.normalizeDisplayHeightBounds(vizZMin.value, vizZMax.value)
-                : null;
+            const nextHeightBounds = getRequestedRadarDisplayHeightBounds();
             if (!nextHeightBounds) {
-                if (window.SwitchStudioState && typeof window.SwitchStudioState.showToast === 'function') {
-                    window.SwitchStudioState.showToast('error', '3D height bounds must be between -600 and 600 cm with at least 20 cm between them.', 3200);
-                }
+                showRadarDisplayHeightError();
                 vizXMin.value = chartXMin;
                 vizXMax.value = chartXMax;
                 vizYMin.value = chartYMin;
                 vizYMax.value = chartYMax;
-                setRadarDisplayHeightInputs();
                 return false;
             }
             chartXMin = nextXMin;

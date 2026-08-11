@@ -99,12 +99,21 @@ function createClock() {
     };
 }
 
-function createStorage(initial) {
+function createStorage(initial, options) {
+    const opts = options || {};
     const values = new Map(Object.entries(initial || {}));
+    const writes = [];
     return {
         getItem: (key) => values.has(key) ? values.get(key) : null,
-        setItem: (key, value) => values.set(key, String(value)),
+        setItem(key, value) {
+            writes.push({ key, value: String(value) });
+            if (typeof opts.failSet === 'function' && opts.failSet(key, value)) {
+                throw new Error(`Storage write rejected for ${key}`);
+            }
+            values.set(key, String(value));
+        },
         value: (key) => values.get(key),
+        writes,
     };
 }
 
@@ -889,6 +898,97 @@ test('display height bounds validate and persist atomically for each device', ()
     );
 });
 
+test('bulk display height persistence normalizes reversed bounds, dedupes topics, and does not become a future-device default', () => {
+    const offlineKey = 'switchStudio.radarDisplayHeight:zigbee2mqtt%2Foffline%20switch';
+    const storage = createStorage({
+        'switchStudio.radarViewMode': '3d',
+        [offlineKey]: '{"zMin":-90,"zMax":210}',
+    });
+    const setup = loadController({ storage, activeDevice: 'zigbee2mqtt/office switch' });
+    const api = setup.controller;
+    const officeKey = 'switchStudio.radarDisplayHeight:zigbee2mqtt%2Foffice%20switch';
+    const bedroomKey = 'switchStudio.radarDisplayHeight:zigbee2mqtt%2Fbedroom%20switch';
+    const writesBefore = storage.writes.length;
+
+    const result = api.saveDisplayHeightBoundsForDevices([
+        ' zigbee2mqtt/office switch ',
+        'zigbee2mqtt/bedroom switch',
+        'zigbee2mqtt/office switch',
+        '',
+        null,
+    ], 420, -180);
+
+    assert.deepEqual(plain(result), {
+        bounds: { zMin: -180, zMax: 420 },
+        deviceKeys: ['zigbee2mqtt/office switch', 'zigbee2mqtt/bedroom switch'],
+        failedDeviceKeys: [],
+    });
+    assert.deepEqual(storage.writes.slice(writesBefore), [
+        { key: officeKey, value: '{"zMin":-180,"zMax":420}' },
+        { key: bedroomKey, value: '{"zMin":-180,"zMax":420}' },
+    ]);
+    assert.equal(storage.value(officeKey), '{"zMin":-180,"zMax":420}');
+    assert.equal(storage.value(bedroomKey), '{"zMin":-180,"zMax":420}');
+    assert.equal(storage.value(offlineKey), '{"zMin":-90,"zMax":210}', 'topics outside the supplied inventory snapshot stay untouched');
+
+    const writesAfterValidSave = storage.writes.length;
+    assert.equal(api.saveDisplayHeightBoundsForDevices(['zigbee2mqtt/office switch'], 0, 10), null);
+    assert.equal(api.saveDisplayHeightBoundsForDevices(['', null], -180, 420), null);
+    assert.equal(storage.writes.length, writesAfterValidSave, 'invalid bounds or an empty topic set must not partially write');
+    assert.equal(storage.value(officeKey), '{"zMin":-180,"zMax":420}');
+
+    assert.deepEqual(
+        plain(api.loadDisplayHeightBounds('zigbee2mqtt/future switch')),
+        { zMin: -600, zMax: 600 },
+        'a switch discovered after the one-shot bulk action keeps the normal per-device fallback',
+    );
+    assert.equal(storage.value('switchStudio.radarDisplayHeight:'), undefined, 'bulk persistence must not create a shared default key');
+    assert.equal(storage.value('switchStudio.radarViewMode'), '3d', 'bulk height persistence must not disturb the global view mode');
+    assert.equal(setup.controller.getMode(), '3d');
+});
+
+test('bulk display height persistence reports partial and total local-storage failures without counting rejected topics', () => {
+    const topics = [
+        'zigbee2mqtt/office switch',
+        'zigbee2mqtt/bedroom switch',
+        'zigbee2mqtt/den switch',
+    ];
+    const keys = topics.map((topic) => `switchStudio.radarDisplayHeight:${encodeURIComponent(topic)}`);
+    const partialStorage = createStorage(
+        { 'switchStudio.radarViewMode': '2d' },
+        { failSet: (key) => key === keys[1] },
+    );
+    const partialSetup = loadController({ storage: partialStorage });
+
+    const partialResult = partialSetup.controller.saveDisplayHeightBoundsForDevices(topics, -240, 360);
+    assert.deepEqual(plain(partialResult), {
+        bounds: { zMin: -240, zMax: 360 },
+        deviceKeys: [topics[0], topics[2]],
+        failedDeviceKeys: [topics[1]],
+    });
+    assert.equal(partialStorage.value(keys[0]), '{"zMin":-240,"zMax":360}');
+    assert.equal(partialStorage.value(keys[1]), undefined);
+    assert.equal(partialStorage.value(keys[2]), '{"zMin":-240,"zMax":360}');
+    assert.deepEqual(partialStorage.writes.map((write) => write.key), keys, 'every deduped topic should receive one write attempt');
+    assert.equal(partialStorage.value('switchStudio.radarViewMode'), '2d');
+
+    const allFailedStorage = createStorage(
+        { 'switchStudio.radarViewMode': '3d' },
+        { failSet: (key) => key.startsWith('switchStudio.radarDisplayHeight:') },
+    );
+    const allFailedSetup = loadController({ storage: allFailedStorage });
+    const allFailedResult = allFailedSetup.controller.saveDisplayHeightBoundsForDevices(topics.slice(0, 2), -240, 360);
+    assert.deepEqual(plain(allFailedResult), {
+        bounds: { zMin: -240, zMax: 360 },
+        deviceKeys: [],
+        failedDeviceKeys: topics.slice(0, 2),
+    });
+    assert.equal(allFailedStorage.value(keys[0]), undefined);
+    assert.equal(allFailedStorage.value(keys[1]), undefined);
+    assert.equal(allFailedStorage.value('switchStudio.radarViewMode'), '3d');
+    assert.equal(allFailedSetup.controller.getMode(), '3d');
+});
+
 test('display-only height changes stay dormant in native 2D and preserve physical FOV bounds', () => {
     const storage = createStorage({ 'switchStudio.radarViewMode': '2d' });
     const initial = scene({
@@ -925,6 +1025,45 @@ test('scene assembly uses exact XYZ bounds, one primary cuboid, slot visibility,
     assert.equal(newPlot.config.scrollZoom, false);
     assertCameraClose(plain(newPlot.layout.scene.camera), DEFAULT_PERSPECTIVE_CAMERA);
 
+    ['xaxis', 'yaxis'].forEach((axisName) => {
+        const axis = newPlot.layout.scene[axisName];
+        assert.equal(axis.showgrid, true);
+        assert.equal(axis.zeroline, true);
+        assert.equal(axis.showbackground, true);
+        assert.equal(axis.showspikes, false);
+        assert.equal(axis.spikesides, false);
+        assert.equal(axis.gridcolor, 'rgb(45, 64, 76)');
+        assert.equal(axis.zerolinecolor, 'rgb(61, 82, 94)');
+        assert.equal(axis.linecolor, 'rgb(52, 72, 84)');
+        assert.equal(axis.backgroundcolor, 'rgb(12, 20, 28)');
+    });
+    assert.equal(newPlot.layout.scene.zaxis.showgrid, false, 'height must not add a third grid plane');
+    assert.equal(newPlot.layout.scene.zaxis.zeroline, false);
+    assert.equal(newPlot.layout.scene.zaxis.showbackground, false);
+    assert.equal(newPlot.layout.scene.zaxis.showspikes, false);
+    assert.equal(newPlot.layout.scene.zaxis.spikesides, false);
+
+    const floorGrids = newPlot.traces.filter((trace) => trace.name === 'Floor grid');
+    assert.equal(floorGrids.length, 1, 'grid visibility should add one explicit floor-only trace');
+    const floorGrid = floorGrids[0];
+    assert.equal(floorGrid.type, 'scatter3d');
+    assert.equal(floorGrid.mode, 'lines');
+    assert.equal(floorGrid.line.color, 'rgb(42, 61, 72)');
+    assert.equal(floorGrid.line.width, 1);
+    assert.equal(floorGrid.hoverinfo, 'skip');
+    assert.equal(floorGrid.showlegend, false);
+    assert.equal(floorGrid.connectgaps, false);
+    assert.ok(Array.from(floorGrid.z).some((value) => value === null), 'floor segments should be null-separated');
+    Array.from(floorGrid.z).forEach((value, index) => {
+        if (value === null) {
+            assert.equal(floorGrid.x[index], null);
+            assert.equal(floorGrid.y[index], null);
+            return;
+        }
+        assert.equal(value, -250, 'every finite floor-grid point must use bounds.zMin');
+        assert.notEqual(value, 250, 'the floor grid must never mirror onto bounds.zMax');
+    });
+
     assert.equal(setup.zonesApi.calls.fov.length, 1);
     assert.equal(setup.zonesApi.calls.fov[0].innerHalfAngleDegrees, 60);
     assert.equal(setup.zonesApi.calls.fov[0].outerHalfAngleDegrees, 75);
@@ -946,15 +1085,11 @@ test('scene assembly uses exact XYZ bounds, one primary cuboid, slot visibility,
         'passive zone volumes must not create hover labels over the scene',
     );
 
-    const sensorHeight = newPlot.traces.find((trace) => trace.name === 'Sensor height reference');
+    const sensorHeightTraces = newPlot.traces.filter((trace) => trace.name === 'Sensor height reference');
+    const sensorOrigins = newPlot.traces.filter((trace) => trace.name === 'Sensor');
     const sensorOrigin = newPlot.traces.find((trace) => trace.name === 'Sensor');
-    assert.ok(sensorHeight);
-    assert.equal(sensorHeight.type, 'scatter3d');
-    assert.equal(sensorHeight.mode, 'lines');
-    assert.deepEqual(Array.from(sensorHeight.x), [0, 0]);
-    assert.deepEqual(Array.from(sensorHeight.y), [0, 0]);
-    assert.deepEqual(Array.from(sensorHeight.z), [-250, 250]);
-    assert.equal(sensorHeight.hoverinfo, 'skip');
+    assert.equal(sensorHeightTraces.length, 0, 'the sensor must not draw a misleading full-height line');
+    assert.equal(sensorOrigins.length, 1, 'the switch should have one distinct origin marker');
     assert.ok(sensorOrigin);
     assert.equal(sensorOrigin.mode, 'markers+text');
     assert.deepEqual(Array.from(sensorOrigin.x), [0]);
@@ -969,6 +1104,25 @@ test('scene assembly uses exact XYZ bounds, one primary cuboid, slot visibility,
     );
 });
 
+test('turning grid visibility off omits the custom floor trace while native Z planes stay disabled', () => {
+    const model = scene();
+    model.visibility.grid = false;
+    const setup = loadController({ sceneModel: model, initialMode: '3d' });
+    const newPlot = setup.plotly.calls.find((call) => call.kind === 'newPlot');
+
+    assert.equal(newPlot.traces.some((trace) => trace.name === 'Floor grid'), false);
+    assert.equal(newPlot.layout.scene.xaxis.showgrid, false);
+    assert.equal(newPlot.layout.scene.yaxis.showgrid, false);
+    assert.equal(newPlot.layout.scene.zaxis.showgrid, false);
+    assert.equal(newPlot.layout.scene.zaxis.zeroline, false);
+    assert.equal(newPlot.layout.scene.zaxis.showbackground, false);
+    assert.deepEqual(
+        Array.from(newPlot.traces.slice(-2), (trace) => trace.name),
+        ['Live targets', 'Target trails'],
+        'removing the floor grid must leave live-target traces at the stable final indices',
+    );
+});
+
 test('FOV remains capped at the supported six metre depth while axes can extend farther', () => {
     const model = scene();
     model.bounds.yMax = 900;
@@ -979,7 +1133,7 @@ test('FOV remains capped at the supported six metre depth while axes can extend 
     assert.equal(setup.zonesApi.calls.fov[0].yMax, 600);
 });
 
-test('FOV height stays authoritative while the scene axis can include other volumes', () => {
+test('FOV height stays authoritative while the scene axis changes and the sensor remains only at the origin', () => {
     const model = scene();
     model.bounds.zMin = -420;
     model.bounds.zMax = 510;
@@ -990,13 +1144,12 @@ test('FOV height stays authoritative while the scene axis can include other volu
     assert.deepEqual(Array.from(newPlot.layout.scene.zaxis.range), [-420, 510]);
     assert.equal(setup.zonesApi.calls.fov[0].zMin, -120);
     assert.equal(setup.zonesApi.calls.fov[0].zMax, 180);
-    const sensorHeight = newPlot.traces.find((trace) => trace.name === 'Sensor height reference');
     const sensorOrigin = newPlot.traces.find((trace) => trace.name === 'Sensor');
-    assert.deepEqual(Array.from(sensorHeight.z), [-420, 510], 'sensor height follows the complete scene, not the narrower FOV');
+    assert.equal(newPlot.traces.some((trace) => trace.name === 'Sensor height reference'), false);
     assert.deepEqual(Array.from(sensorOrigin.z), [0]);
 });
 
-test('per-device display height updates the 3D axis and sensor span without changing FOV, mode, or camera', () => {
+test('per-device display height updates the 3D axis without adding a sensor span or changing FOV, mode, or camera', () => {
     const storage = createStorage({ 'switchStudio.radarViewMode': '3d' });
     const initialModel = scene({
         bounds: { xMin: -500, xMax: 500, yMin: 0, yMax: 600, zMin: -600, zMax: 600 },
@@ -1042,10 +1195,8 @@ test('per-device display height updates the 3D axis and sensor span without chan
     assert.equal(setup.elements.chart2d.hidden, true);
     assert.equal(setup.elements.chart3d.hidden, false);
 
-    const sensorHeight = render.traces.find((trace) => trace.name === 'Sensor height reference');
     const sensorOrigin = render.traces.find((trace) => trace.name === 'Sensor');
-    assert.deepEqual(Array.from(sensorHeight.z), [-180, 420], 'the full-height visual reference follows the display range');
-    assert.equal(sensorHeight.hoverinfo, 'skip');
+    assert.equal(render.traces.some((trace) => trace.name === 'Sensor height reference'), false);
     assert.deepEqual(Array.from(sensorOrigin.z), [0]);
     assert.equal(setup.zonesApi.calls.fov.at(-1).zMin, -120, 'physical FOV height remains device-authored');
     assert.equal(setup.zonesApi.calls.fov.at(-1).zMax, 180);
@@ -1090,7 +1241,8 @@ test('target packets coalesce to at most 8Hz and do not rebuild static geometry'
     const restyles = setup.plotly.calls.filter((call) => call.kind === 'restyle');
     assert.equal(restyles.length, initialRestyleCalls + 1);
     assert.equal(restyles.at(-1).update.x[0][0], 12);
-    assert.equal(restyles.at(-1).indices[0], setup.plotly.calls.find((call) => call.kind === 'newPlot').traces.length - 2);
+    const initialTraceCount = setup.plotly.calls.find((call) => call.kind === 'newPlot').traces.length;
+    assert.deepEqual(Array.from(restyles.at(-1).indices), [initialTraceCount - 2, initialTraceCount - 1]);
     assert.equal(setup.plotly.calls.filter((call) => call.kind === 'react').length, initialReactCalls);
     assert.equal(setup.zonesApi.calls.zones.length, initialZoneBuilds);
     assert.equal(setup.zonesApi.calls.fov.length, initialFovBuilds);
@@ -1464,13 +1616,28 @@ test('perspective gesture guards block pan and roll while vertical wheel zoom ke
         ));
 });
 
-test('plotly camera relayouts are sanitized to fixed center, z-up, perspective, and safe elevation', () => {
+test('plotly accepts safe negative cameras and clamps near-pole views without an azimuth snap', () => {
     const setup = loadController({ initialMode: '3d' });
     const before = cameraRelayouts(setup).length;
+    const safeNegativeEye = { x: 1.2, y: -1.6, z: -1.1 };
 
     setup.elements.chart3d.emit('plotly_relayout', {
         'scene.camera': {
-            eye: { x: 9, y: 0, z: -4 },
+            eye: safeNegativeEye,
+            center: { x: 0, y: 0, z: 0 },
+            up: { x: 0, y: 0, z: 1 },
+            projection: { type: 'perspective' },
+        },
+    });
+    assert.equal(
+        cameraRelayouts(setup).length,
+        before,
+        'an in-range below-plane view with the fixed room frame should not receive a correction relayout',
+    );
+
+    setup.elements.chart3d.emit('plotly_relayout', {
+        'scene.camera': {
+            eye: safeNegativeEye,
             center: { x: 4, y: -3, z: 2 },
             up: { x: 1, y: 0, z: 0 },
             projection: { type: 'orthographic' },
@@ -1486,11 +1653,80 @@ test('plotly camera relayouts are sanitized to fixed center, z-up, perspective, 
     assert.equal(correction.update['scene.camera'], undefined);
     assert.equal(correction.update['scene.camera.projection.type'], undefined);
     assert.equal(projectionRelayouts(setup).length, 0);
-    const radius = Math.hypot(corrected.eye.x, corrected.eye.y, corrected.eye.z);
-    const elevation = Math.asin(corrected.eye.z / radius);
-    assert.ok(radius <= 4.6 + 1e-9);
-    assert.ok(elevation >= 0.18 - 1e-9);
-    assert.ok(elevation <= 1.34 + 1e-9);
+    assertVectorClose(corrected.eye, safeNegativeEye, 1e-9);
+    assert.ok(corrected.eye.z < 0, 'sanitizing center/up must not snap a safe camera above the floor');
+
+    setup.clock.advance(0);
+    setup.elements.chart3d.emit('plotly_relayout', {
+        'scene.camera': {
+            eye: { x: -1e-8, y: 1e-8, z: -2 },
+            center: { x: 0, y: 0, z: 0 },
+            up: { x: 0, y: 0, z: 1 },
+            projection: { type: 'perspective' },
+        },
+    });
+
+    assert.equal(cameraRelayouts(setup).length, before + 2);
+    const poleCorrection = cameraFromRelayout(cameraRelayouts(setup).at(-1));
+    const poleRadius = Math.hypot(poleCorrection.eye.x, poleCorrection.eye.y, poleCorrection.eye.z);
+    const poleElevation = Math.asin(poleCorrection.eye.z / poleRadius);
+    const safeAzimuth = Math.atan2(safeNegativeEye.y, safeNegativeEye.x);
+    const poleAzimuth = Math.atan2(poleCorrection.eye.y, poleCorrection.eye.x);
+    const azimuthDelta = Math.abs(Math.atan2(
+        Math.sin(poleAzimuth - safeAzimuth),
+        Math.cos(poleAzimuth - safeAzimuth),
+    ));
+    assert.ok(Math.abs(poleElevation - ((-Math.PI / 2) + 0.015)) < 1e-9);
+    assert.ok(azimuthDelta < 1e-9, `near-pole correction changed azimuth by ${azimuthDelta}`);
+    assert.deepEqual(plain(poleCorrection.center), { x: 0, y: 0, z: 0 });
+    assert.deepEqual(plain(poleCorrection.up), { x: 0, y: 0, z: 1 });
+    assert.equal(poleCorrection.projection, undefined);
+    assert.equal(projectionRelayouts(setup).length, 0);
+});
+
+test('back-to-back unsafe Plotly cameras do not drop the latest rendered-state correction in one tick', () => {
+    const setup = loadController({ initialMode: '3d' });
+    const before = cameraRelayouts(setup).length;
+    const unsafeCameras = [
+        {
+            eye: { x: 1.2, y: -1.6, z: -1.1 },
+            center: { x: 4, y: -3, z: 2 },
+            up: { x: 1, y: 0, z: 0 },
+            projection: { type: 'orthographic' },
+        },
+        {
+            eye: { x: -1.5, y: -0.5, z: 1.3 },
+            center: { x: -2, y: 5, z: 1 },
+            up: { x: 0, y: 1, z: 0 },
+            projection: { type: 'orthographic' },
+        },
+    ];
+
+    setup.elements.chart3d.emit('plotly_relayout', { 'scene.camera': unsafeCameras[0] });
+    assert.equal(cameraRelayouts(setup).length, before + 1, 'the first unsafe camera should be corrected immediately');
+    setup.elements.chart3d.emit('plotly_relayout', { 'scene.camera': unsafeCameras[1] });
+    setup.clock.advance(0);
+
+    const corrections = cameraRelayouts(setup).slice(before);
+    assert.equal(corrections.length, 2, 'the second unsafe rendered camera must not be dropped while the correction guard is active');
+    corrections.forEach((call, index) => {
+        const corrected = cameraFromRelayout(call);
+        const radius = Math.hypot(corrected.eye.x, corrected.eye.y, corrected.eye.z);
+        const elevation = Math.asin(corrected.eye.z / radius);
+        assertVectorClose(corrected.eye, unsafeCameras[index].eye, 1e-9);
+        assert.deepEqual(plain(corrected.center), { x: 0, y: 0, z: 0 });
+        assert.deepEqual(plain(corrected.up), { x: 0, y: 0, z: 1 });
+        assert.equal(corrected.projection, undefined);
+        assert.ok(radius >= 0.82 - 1e-9 && radius <= 4.6 + 1e-9);
+        assert.ok(elevation >= ((-Math.PI / 2) + 0.015) - 1e-9);
+        assert.ok(elevation <= ((Math.PI / 2) - 0.015) + 1e-9);
+    });
+    assert.notDeepEqual(
+        plain(cameraFromRelayout(corrections[0]).eye),
+        plain(cameraFromRelayout(corrections[1]).eye),
+        'the queued correction must target the latest observed eye rather than replaying the first one',
+    );
+    assert.equal(projectionRelayouts(setup).length, 0);
 });
 
 test('target rendering safely falls back to react when Plotly restyle is unavailable', () => {
@@ -1870,8 +2106,10 @@ test('WebGL loss restores 3D and rebinds camera sanitation after Plotly purges l
     const radius = Math.hypot(corrected.eye.x, corrected.eye.y, corrected.eye.z);
     const elevation = Math.asin(corrected.eye.z / radius);
     assert.ok(radius <= 4.6 + 1e-9);
-    assert.ok(elevation >= 0.18 - 1e-9);
-    assert.ok(elevation <= 1.34 + 1e-9);
+    assert.ok(radius >= 0.82 - 1e-9);
+    assert.ok(elevation >= ((-Math.PI / 2) + 0.015) - 1e-9);
+    assert.ok(elevation <= ((Math.PI / 2) - 0.015) + 1e-9);
+    assert.ok(elevation < 0, 'restored sanitation should preserve a safe below-plane camera');
 });
 
 test('a stale pre-loss chart creation cannot tear down the restored 3D view', async () => {

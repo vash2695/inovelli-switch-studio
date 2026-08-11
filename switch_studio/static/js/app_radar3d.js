@@ -15,8 +15,9 @@
     const TOP_DOWN_ORBIT_AZIMUTH = -Math.PI / 2;
     const MIN_CAMERA_RADIUS = 0.82;
     const MAX_CAMERA_RADIUS = 4.6;
-    const MIN_CAMERA_ELEVATION = 0.18;
-    const MAX_CAMERA_ELEVATION = 1.34;
+    const CAMERA_POLE_MARGIN = 0.015;
+    const MIN_CAMERA_ELEVATION = (-Math.PI / 2) + CAMERA_POLE_MARGIN;
+    const MAX_CAMERA_ELEVATION = (Math.PI / 2) - CAMERA_POLE_MARGIN;
     const DEFAULT_BOUNDS = Object.freeze({
         xMin: -650,
         xMax: 650,
@@ -127,7 +128,6 @@
     let lastModePathProgressValid = true;
     let lastIssuedCameraSignature = '';
     let lastIssuedCamera = null;
-    let cameraCorrectionInProgress = false;
     let plotlyRelayoutBinding = null;
     let gestureBindings = [];
     let surfaceTransitionTimer = null;
@@ -256,8 +256,13 @@
             z = fallback.eye.z;
             radius = Math.hypot(x, y, z);
         }
-        const azimuth = Math.atan2(y, x);
-        const elevation = clamp(Math.asin(clamp(z / radius, -1, 1)), MIN_CAMERA_ELEVATION, MAX_CAMERA_ELEVATION);
+        const rawElevation = Math.asin(clamp(z / radius, -1, 1));
+        const elevation = clamp(rawElevation, MIN_CAMERA_ELEVATION, MAX_CAMERA_ELEVATION);
+        const horizontalRadiusRaw = Math.hypot(x, y);
+        const fallbackAzimuth = Math.atan2(fallback.eye.y, fallback.eye.x);
+        const azimuth = (horizontalRadiusRaw / radius) <= Math.cos(MAX_CAMERA_ELEVATION)
+            ? fallbackAzimuth
+            : Math.atan2(y, x);
         radius = clamp(radius, MIN_CAMERA_RADIUS, MAX_CAMERA_RADIUS);
         const horizontalRadius = radius * Math.cos(elevation);
         return {
@@ -368,11 +373,13 @@
     }
 
     function safeStorageSet(key, value) {
-        if (!storage || typeof storage.setItem !== 'function') return;
+        if (!storage || typeof storage.setItem !== 'function') return false;
         try {
             storage.setItem(key, value);
+            return true;
         } catch (error) {
             // Private browsing and embedded WebViews can deny local storage.
+            return false;
         }
     }
 
@@ -417,6 +424,30 @@
         if (!key || !normalized) return null;
         safeStorageSet(key, JSON.stringify(normalized));
         return normalized;
+    }
+
+    function saveDisplayHeightBoundsForDevices(deviceKeys, rawMin, rawMax) {
+        const bounds = normalizeDisplayHeightBounds(rawMin, rawMax);
+        if (!bounds) return null;
+        const normalizedKeys = Array.from(new Set(
+            (Array.isArray(deviceKeys) ? deviceKeys : [])
+                .map((deviceKey) => String(deviceKey || '').trim())
+                .filter(Boolean),
+        ));
+        if (!normalizedKeys.length) return null;
+        const serialized = JSON.stringify(bounds);
+        const savedDeviceKeys = [];
+        const failedDeviceKeys = [];
+        normalizedKeys.forEach((deviceKey) => {
+            const key = displayHeightStorageKey(deviceKey);
+            if (key && safeStorageSet(key, serialized)) savedDeviceKeys.push(deviceKey);
+            else failedDeviceKeys.push(deviceKey);
+        });
+        return {
+            bounds: { ...bounds },
+            deviceKeys: savedDeviceKeys,
+            failedDeviceKeys,
+        };
     }
 
     function normalizeMode(mode) {
@@ -1471,27 +1502,7 @@
         return traces;
     }
 
-    function buildSensorTraces(bounds) {
-        const rawZMin = Number(bounds?.zMin);
-        const rawZMax = Number(bounds?.zMax);
-        const zMin = Number.isFinite(rawZMin) ? rawZMin : -600;
-        const zMax = Number.isFinite(rawZMax) ? rawZMax : 600;
-        const low = Math.min(zMin, zMax);
-        const high = Math.max(zMin, zMax);
-        const heightReference = {
-            type: 'scatter3d',
-            mode: 'lines',
-            x: [0, 0],
-            y: [0, 0],
-            z: [low, high],
-            line: {
-                color: 'rgba(255, 111, 125, 0.42)',
-                width: 4,
-            },
-            hoverinfo: 'skip',
-            showlegend: false,
-            name: 'Sensor height reference',
-        };
+    function buildSensorTraces() {
         const origin = {
             type: 'scatter3d',
             mode: 'markers+text',
@@ -1511,12 +1522,46 @@
             showlegend: false,
             name: 'Sensor',
         };
-        return [heightReference, origin];
+        return [origin];
+    }
+
+    function buildFloorGridTrace(bounds) {
+        const divisions = 5;
+        const x = [];
+        const y = [];
+        const z = [];
+        const appendLine = (x1, y1, x2, y2) => {
+            x.push(x1, x2, null);
+            y.push(y1, y2, null);
+            z.push(bounds.zMin, bounds.zMin, null);
+        };
+        for (let index = 0; index <= divisions; index += 1) {
+            const ratio = index / divisions;
+            const xValue = bounds.xMin + ((bounds.xMax - bounds.xMin) * ratio);
+            const yValue = bounds.yMin + ((bounds.yMax - bounds.yMin) * ratio);
+            appendLine(xValue, bounds.yMin, xValue, bounds.yMax);
+            appendLine(bounds.xMin, yValue, bounds.xMax, yValue);
+        }
+        return {
+            type: 'scatter3d',
+            mode: 'lines',
+            x,
+            y,
+            z,
+            // GL3D line shaders emphasize RGB luminance even at tiny alpha
+            // values, so use a deliberately dark slate for a quiet floor cue.
+            line: { color: 'rgb(42, 61, 72)', width: 1 },
+            hoverinfo: 'skip',
+            showlegend: false,
+            connectgaps: false,
+            name: 'Floor grid',
+        };
     }
 
     function buildStaticTraces(model) {
         const traces = [];
         const { zones, visibility, bounds, fovBounds } = model;
+        if (visibility.grid) traces.push(buildFloorGridTrace(bounds));
         if (visibility.fov && zonesApi && typeof zonesApi.buildFov3DTraces === 'function') {
             traces.push(...(zonesApi.buildFov3DTraces({
                 xMin: bounds.xMin,
@@ -1539,7 +1584,7 @@
         traces.push(...(structured
             ? buildStructuredZoneTraces(zones, visibility)
             : buildFlatZoneTraces(zones, visibility)));
-        traces.push(...buildSensorTraces(bounds));
+        traces.push(...buildSensorTraces());
         return traces;
     }
 
@@ -1585,21 +1630,27 @@
         };
     }
 
-    function axisLayout(title, range, showGrid) {
+    function axisLayout(title, range, showGrid, options) {
+        const opts = options || {};
+        const showPlane = opts.showPlane !== false;
         return {
             title: { text: title, font: { color: '#a8bac8', size: 11 } },
             range: range.slice(),
-            showgrid: showGrid,
+            showgrid: showGrid && showPlane,
             showline: true,
-            zeroline: showGrid,
-            gridcolor: 'rgba(176, 214, 224, 0.018)',
-            zerolinecolor: 'rgba(139, 185, 202, 0.07)',
-            linecolor: 'rgba(124, 157, 177, 0.045)',
+            zeroline: showGrid && showPlane,
+            // Plotly's GL3D axes flatten translucent colors differently across
+            // GPUs. Low-luminance opaque colors stay consistently subdued.
+            gridcolor: 'rgb(45, 64, 76)',
+            zerolinecolor: 'rgb(61, 82, 94)',
+            linecolor: 'rgb(52, 72, 84)',
             tickfont: { color: '#8ea4b4', size: 9 },
             nticks: mobileFn() ? 5 : 7,
             ticksuffix: ' cm',
-            showbackground: true,
-            backgroundcolor: 'rgba(7, 18, 28, 0.025)',
+            showbackground: showGrid && showPlane,
+            backgroundcolor: 'rgb(12, 20, 28)',
+            showspikes: false,
+            spikesides: false,
         };
     }
 
@@ -1608,7 +1659,9 @@
         const { bounds, visibility } = sceneModel;
         const revision = getUiRevision();
         const mobile = mobileFn();
-        const zAxis = axisLayout('Height (cm)', [bounds.zMin, bounds.zMax], visibility.grid);
+        const zAxis = axisLayout('Height (cm)', [bounds.zMin, bounds.zMax], visibility.grid, {
+            showPlane: false,
+        });
         return {
             autosize: true,
             paper_bgcolor: 'rgba(0, 0, 0, 0)',
@@ -2075,13 +2128,12 @@
             lastModePathProgress = 1;
             lastModePathProgressValid = true;
         }
-        if (cameraNearlyEqual(observed, corrected) || cameraCorrectionInProgress) return;
+        if (cameraNearlyEqual(observed, corrected)) return;
 
-        cameraCorrectionInProgress = true;
+        // Each raw relayout describes what Plotly has already rendered. Never
+        // drop a newer unsafe camera while an earlier correction is settling;
+        // issued-camera signatures and the near-equality check prevent loops.
         issueCameraRelayout(corrected, null, { fatal: false });
-        setTimeoutFn(() => {
-            cameraCorrectionInProgress = false;
-        }, 0);
     }
 
     function bindPlotlyRelayout() {
@@ -2320,7 +2372,6 @@
         pendingCameraTarget = null;
         lastIssuedCameraSignature = '';
         lastIssuedCamera = null;
-        cameraCorrectionInProgress = false;
         plotlyRelayoutBinding = null;
         gestureBindings = [];
         nowFn = typeof opts.now === 'function' ? opts.now : () => Date.now();
@@ -2363,6 +2414,7 @@
             normalizeDisplayHeightBounds,
             loadDisplayHeightBounds,
             saveDisplayHeightBounds,
+            saveDisplayHeightBoundsForDevices,
             setVisible,
             setActiveDevice,
             setEditing,
