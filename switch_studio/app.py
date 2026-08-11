@@ -271,6 +271,23 @@ mqtt_state = {
 mqtt_state_lock = threading.Lock()
 _MQTT_STATE_UNSET = object()
 
+DEFAULT_GLOBAL_ZONE_CONFIG = {
+    'x_min': -400,
+    'x_max': 400,
+    'y_min': 0,
+    'y_max': 600,
+    'z_min': -600,
+    'z_max': 600,
+}
+GLOBAL_ZONE_ATTRIBUTE_MAP = {
+    'mmWaveWidthMin': 'x_min',
+    'mmWaveWidthMax': 'x_max',
+    'mmWaveDepthMin': 'y_min',
+    'mmWaveDepthMax': 'y_max',
+    'mmWaveHeightMin': 'z_min',
+    'mmWaveHeightMax': 'z_max',
+}
+
 
 def get_device_snapshot():
     with device_list_lock:
@@ -442,7 +459,7 @@ def upsert_discovered_device(
                 'interference_zones': [],
                 'detection_zones': [],
                 'stay_zones': [],
-                'zone_config': {'x_min': -400, 'x_max': 400, 'y_min': 0, 'y_max': 600},
+                'zone_config': dict(DEFAULT_GLOBAL_ZONE_CONFIG),
                 'last_config': {},
                 'ota_status': default_ota_status(),
                 'last_update': 0,
@@ -1409,7 +1426,7 @@ def on_message(client, userdata, msg):
                     offset = 6  
                     num_zones = payload.get("5", 0) 
                     
-                    for _ in range(num_zones):
+                    for area_offset in range(num_zones):
                         if str(offset+11) not in payload: break
                         
                         def parse_bytes(idx):
@@ -1429,6 +1446,12 @@ def on_message(client, userdata, msg):
                         # but typically 0,0,0,0,0,0 is an empty zone.
                         if (x_max != 0 or x_min != 0 or y_max != 0 or y_min != 0):
                             zones.append({
+                                # Empty raw slots are omitted to preserve the
+                                # existing active-zone count contract. Carry the
+                                # physical slot identity explicitly so later
+                                # consumers do not renumber area3 as area2.
+                                "area_id": f"area{area_offset + 1}",
+                                "area_index": area_offset + 1,
                                 "x_min": x_min, "x_max": x_max, 
                                 "y_min": y_min, "y_max": y_max,
                                 "z_min": z_min, "z_max": z_max
@@ -1493,27 +1516,17 @@ def on_message(client, userdata, msg):
                     if 'brightness' in config_payload and 'brightness' not in capabilities:
                         capabilities['brightness'] = True
 
-                    current_zone = dict(device_data.get('zone_config', {"x_min": -400, "x_max": 400, "y_min": 0, "y_max": 600}))
+                    current_zone = dict(DEFAULT_GLOBAL_ZONE_CONFIG)
+                    cached_zone = device_data.get('zone_config')
+                    if isinstance(cached_zone, dict):
+                        current_zone.update(cached_zone)
 
-                    if "mmWaveWidthMin" in config_payload:
-                        parsed = _as_int_or_none(config_payload.get("mmWaveWidthMin"))
+                    for attribute_name, coordinate_name in GLOBAL_ZONE_ATTRIBUTE_MAP.items():
+                        if attribute_name not in config_payload:
+                            continue
+                        parsed = _as_int_or_none(config_payload.get(attribute_name))
                         if parsed is not None:
-                            current_zone["x_min"] = parsed
-                            needs_emit = True
-                    if "mmWaveWidthMax" in config_payload:
-                        parsed = _as_int_or_none(config_payload.get("mmWaveWidthMax"))
-                        if parsed is not None:
-                            current_zone["x_max"] = parsed
-                            needs_emit = True
-                    if "mmWaveDepthMin" in config_payload:
-                        parsed = _as_int_or_none(config_payload.get("mmWaveDepthMin"))
-                        if parsed is not None:
-                            current_zone["y_min"] = parsed
-                            needs_emit = True
-                    if "mmWaveDepthMax" in config_payload:
-                        parsed = _as_int_or_none(config_payload.get("mmWaveDepthMax"))
-                        if parsed is not None:
-                            current_zone["y_max"] = parsed
+                            current_zone[coordinate_name] = parsed
                             needs_emit = True
 
                     if needs_emit:

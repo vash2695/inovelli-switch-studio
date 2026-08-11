@@ -4,8 +4,8 @@
         xMax: 900,
         yMin: -200,
         yMax: 1400,
-        zMin: -500,
-        zMax: 500,
+        zMin: -600,
+        zMax: 600,
         minSpan: 20
     };
 
@@ -19,9 +19,12 @@
     let getIsEditingFn = null;
     let getIsInteractingFn = null;
     let shouldRenderTargetsFn = null;
+    let shouldRender2dFn = null;
+    let targetSnapshotListener = null;
     let limits = { ...DEFAULT_LIMITS };
 
     let targetHistory = {};
+    let latestTargets = [];
     let historyLength = 15;
     let lastCommandId = null;
     let hideZoneStatusTimer = null;
@@ -31,6 +34,12 @@
         const parsed = Number(value);
         if (!Number.isFinite(parsed)) return fallback;
         return Math.round(parsed);
+    }
+
+    function toFiniteNumber(value) {
+        if (value === null || value === undefined || value === '') return null;
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : null;
     }
 
     function clamp(value, min, max) {
@@ -312,23 +321,80 @@
         return [0, 1];
     }
 
+    function cloneTargetHistory() {
+        const cloned = {};
+        Object.entries(targetHistory).forEach(([id, points]) => {
+            cloned[id] = Array.isArray(points)
+                ? points.map((point) => ({ ...point }))
+                : [];
+        });
+        return cloned;
+    }
+
+    function getTargetSnapshot(reason) {
+        return {
+            reason: reason || 'snapshot',
+            targets: latestTargets.map((target) => ({ ...target })),
+            history: cloneTargetHistory(),
+        };
+    }
+
+    function emitTargetSnapshot(reason) {
+        if (typeof targetSnapshotListener !== 'function') return;
+        try {
+            targetSnapshotListener(getTargetSnapshot(reason));
+        } catch (err) {
+            // A secondary visualization must never interrupt canonical 2D updates.
+            if (typeof console !== 'undefined' && typeof console.warn === 'function') {
+                console.warn('Target snapshot listener failed', err);
+            }
+        }
+    }
+
+    function setTargetSnapshotListener(listener, options) {
+        targetSnapshotListener = typeof listener === 'function' ? listener : null;
+        if (targetSnapshotListener && (!options || options.emitCurrent !== false)) {
+            emitTargetSnapshot('subscribe');
+        }
+        const subscribed = targetSnapshotListener;
+        return () => {
+            if (targetSnapshotListener === subscribed) targetSnapshotListener = null;
+        };
+    }
+
     function resetHistory() {
         targetHistory = {};
+        latestTargets = [];
         targetsSuppressedByGate = false;
         if (dataTableBodyEl) {
             dataTableBodyEl.innerHTML = '<tr><td colspan="5" class="no-data">No targets detected</td></tr>';
         }
+        emitTargetSnapshot('reset');
+    }
+
+    function canRender2d() {
+        if (!chartEl || !window.Plotly) return false;
+        return typeof shouldRender2dFn !== 'function' || !!shouldRender2dFn();
+    }
+
+    function ignoreTransientRenderFailure(result) {
+        if (result && typeof result.catch === 'function') result.catch(() => {});
     }
 
     function clearTargetVisualization(message) {
         targetHistory = {};
+        latestTargets = [];
         const notice = message || 'No targets detected';
 
-        if (chartEl && window.Plotly) {
+        if (canRender2d()) {
             try {
                 const [targetTraceIndex, historyTraceIndex] = getTargetTraceIndices();
-                window.Plotly.restyle(chartEl, { x: [[]], y: [[]], text: [[]] }, [targetTraceIndex]);
-                window.Plotly.restyle(chartEl, { x: [[]], y: [[]] }, [historyTraceIndex]);
+                ignoreTransientRenderFailure(
+                    window.Plotly.restyle(chartEl, { x: [[]], y: [[]], text: [[]] }, [targetTraceIndex]),
+                );
+                ignoreTransientRenderFailure(
+                    window.Plotly.restyle(chartEl, { x: [[]], y: [[]] }, [historyTraceIndex]),
+                );
             } catch (err) {
                 // Ignore render failures during transient chart states.
             }
@@ -337,14 +403,20 @@
         if (dataTableBodyEl) {
             dataTableBodyEl.innerHTML = `<tr><td colspan="5" class="no-data">${notice}</td></tr>`;
         }
+        emitTargetSnapshot('clear');
     }
 
     function normalizeTarget(target) {
+        const parsedZ = toFiniteNumber(target?.z);
+        const hasZ = typeof target?.hasZ === 'boolean'
+            ? target.hasZ && parsedZ !== null
+            : parsedZ !== null;
         return {
             id: toRoundedInt(target?.id, 0),
             x: toRoundedInt(target?.x, 0),
             y: toRoundedInt(target?.y, 0),
-            z: toRoundedInt(target?.z, 0),
+            z: hasZ ? Math.round(parsedZ) : 0,
+            hasZ: hasZ,
             dop: toRoundedInt(target?.dop, 0)
         };
     }
@@ -362,10 +434,413 @@
         return `${prefix} (Secondary)`;
     }
 
+    function normalizeHistoryPoint(point) {
+        const parsedZ = toFiniteNumber(point?.z);
+        const hasZ = typeof point?.hasZ === 'boolean'
+            ? point.hasZ && parsedZ !== null
+            : parsedZ !== null;
+        return {
+            x: toRoundedInt(point?.x, 0),
+            y: toRoundedInt(point?.y, 0),
+            z: hasZ ? Math.round(parsedZ) : 0,
+            hasZ: hasZ,
+        };
+    }
+
+    function mapRawZonesByAreaId(rawZones) {
+        const mapped = { area1: null, area2: null, area3: null, area4: null };
+        const zones = Array.isArray(rawZones) ? rawZones : [];
+        zones.forEach((zone, compactIndex) => {
+            if (!zone || typeof zone !== 'object') return;
+            const declaredId = /^area[1-4]$/.test(String(zone.area_id || ''))
+                ? String(zone.area_id)
+                : null;
+            const declaredIndex = Number(zone.area_index);
+            const areaKey = declaredId || (
+                Number.isInteger(declaredIndex) && declaredIndex >= 1 && declaredIndex <= 4
+                    ? `area${declaredIndex}`
+                    : `area${compactIndex + 1}`
+            );
+            if (Object.prototype.hasOwnProperty.call(mapped, areaKey)) mapped[areaKey] = zone;
+        });
+        return mapped;
+    }
+
+    function orderedHistoryEntries(history) {
+        return Object.entries(history && typeof history === 'object' ? history : {})
+            .sort(([left], [right]) => {
+                const numericDifference = Number(left) - Number(right);
+                if (Number.isFinite(numericDifference) && numericDifference !== 0) return numericDifference;
+                return String(left).localeCompare(String(right));
+            });
+    }
+
+    function buildTarget3DTraces(targets, history, options) {
+        const opts = options || {};
+        const normalizedTargets = Array.isArray(targets) ? targets.map(normalizeTarget) : [];
+        const visible = opts.visible !== false;
+        const showLabels = opts.showLabels !== false;
+        const targetColor = opts.targetColor || '#1bd2dc';
+        const trailColor = opts.trailColor || '#2e93bc';
+
+        const targetTrace = {
+            type: 'scatter3d',
+            mode: showLabels ? 'markers+text' : 'markers',
+            x: normalizedTargets.map((target) => target.x),
+            y: normalizedTargets.map((target) => target.y),
+            z: normalizedTargets.map((target) => target.hasZ ? target.z : null),
+            text: normalizedTargets.map((target) => getFriendlyTargetLabel(target.id)),
+            textposition: 'top center',
+            textfont: { color: '#bde8ef', size: 10, family: 'DM Sans, sans-serif' },
+            customdata: normalizedTargets.map((target) => [
+                getFriendlyTargetLabel(target.id),
+                target.x,
+                target.y,
+                target.hasZ ? target.z : 'Unavailable',
+                getMotionLabelFromDoppler(target.dop),
+            ]),
+            hovertemplate: '<b>%{customdata[0]}</b><br>X: %{customdata[1]} cm<br>Y: %{customdata[2]} cm<br>Z: %{customdata[3]} cm<br>%{customdata[4]}<extra></extra>',
+            marker: {
+                size: Number.isFinite(Number(opts.markerSize)) ? Number(opts.markerSize) : 5,
+                color: targetColor,
+                line: { color: opts.targetOutlineColor || '#dcfaff', width: 1.2 },
+            },
+            name: opts.targetName || 'Live targets',
+            showlegend: false,
+            visible: visible,
+        };
+
+        const trailX = [];
+        const trailY = [];
+        const trailZ = [];
+        orderedHistoryEntries(history).forEach(([, rawPoints]) => {
+            const points = Array.isArray(rawPoints) ? rawPoints.map(normalizeHistoryPoint) : [];
+            points.forEach((point) => {
+                trailX.push(point.x);
+                trailY.push(point.y);
+                trailZ.push(point.hasZ ? point.z : null);
+            });
+            if (points.length > 0) {
+                trailX.push(null);
+                trailY.push(null);
+                trailZ.push(null);
+            }
+        });
+
+        const trailTrace = {
+            type: 'scatter3d',
+            mode: 'lines',
+            x: trailX,
+            y: trailY,
+            z: trailZ,
+            line: {
+                color: trailColor,
+                width: Number.isFinite(Number(opts.trailWidth)) ? Number(opts.trailWidth) : 3,
+            },
+            opacity: Number.isFinite(Number(opts.trailOpacity)) ? Number(opts.trailOpacity) : 0.28,
+            connectgaps: false,
+            hoverinfo: 'skip',
+            name: opts.trailName || 'Target trails',
+            showlegend: false,
+            visible: visible && opts.showTrails !== false,
+        };
+
+        return [targetTrace, trailTrace];
+    }
+
+    function readCoordinate(source, names) {
+        for (const name of names) {
+            const value = toFiniteNumber(source?.[name]);
+            if (value !== null) return value;
+        }
+        return null;
+    }
+
+    function buildPrismGeometry(polygon, zMin, zMax) {
+        if (!Array.isArray(polygon) || polygon.length < 3) return null;
+        const sortedZ = sortPair(zMin, zMax);
+        if (!Number.isFinite(sortedZ[0]) || !Number.isFinite(sortedZ[1]) || sortedZ[0] === sortedZ[1]) return null;
+
+        const vertices = [];
+        polygon.forEach((point) => vertices.push({ x: point.x, y: point.y, z: sortedZ[0] }));
+        polygon.forEach((point) => vertices.push({ x: point.x, y: point.y, z: sortedZ[1] }));
+
+        const count = polygon.length;
+        const triangles = [];
+        for (let index = 1; index < count - 1; index += 1) {
+            triangles.push([0, index + 1, index]);
+            triangles.push([count, count + index, count + index + 1]);
+        }
+        for (let index = 0; index < count; index += 1) {
+            const next = (index + 1) % count;
+            triangles.push([index, next, count + next]);
+            triangles.push([index, count + next, count + index]);
+        }
+
+        const edges = [];
+        for (let index = 0; index < count; index += 1) {
+            const next = (index + 1) % count;
+            edges.push([index, next]);
+            edges.push([count + index, count + next]);
+            edges.push([index, count + index]);
+        }
+
+        return {
+            polygon: polygon.map((point) => ({ ...point })),
+            vertices: vertices,
+            triangles: triangles,
+            edges: edges,
+            x: vertices.map((vertex) => vertex.x),
+            y: vertices.map((vertex) => vertex.y),
+            z: vertices.map((vertex) => vertex.z),
+            i: triangles.map((triangle) => triangle[0]),
+            j: triangles.map((triangle) => triangle[1]),
+            k: triangles.map((triangle) => triangle[2]),
+            zMin: sortedZ[0],
+            zMax: sortedZ[1],
+        };
+    }
+
+    function buildEdgeCoordinates(geometry) {
+        const x = [];
+        const y = [];
+        const z = [];
+        geometry.edges.forEach(([startIndex, endIndex]) => {
+            const start = geometry.vertices[startIndex];
+            const end = geometry.vertices[endIndex];
+            x.push(start.x, end.x, null);
+            y.push(start.y, end.y, null);
+            z.push(start.z, end.z, null);
+        });
+        return { x, y, z };
+    }
+
+    function buildVolumeEdgeTraces(geometry, options) {
+        if (!geometry) return [];
+        const opts = options || {};
+        const visible = opts.visible !== false;
+        const name = opts.name || 'Volume';
+        const color = opts.color || '#0dd4c0';
+        const edgeColor = opts.edgeColor || color;
+        const edgeCoordinates = buildEdgeCoordinates(geometry);
+        return [
+            {
+                type: 'mesh3d',
+                x: geometry.x.slice(),
+                y: geometry.y.slice(),
+                z: geometry.z.slice(),
+                i: geometry.i.slice(),
+                j: geometry.j.slice(),
+                k: geometry.k.slice(),
+                color: color,
+                opacity: Number.isFinite(Number(opts.opacity)) ? Number(opts.opacity) : 0.16,
+                flatshading: true,
+                hoverinfo: opts.hoverinfo || 'name',
+                name: name,
+                legendgroup: opts.legendgroup || name,
+                showlegend: false,
+                visible: visible,
+            },
+            {
+                type: 'scatter3d',
+                mode: 'lines',
+                x: edgeCoordinates.x,
+                y: edgeCoordinates.y,
+                z: edgeCoordinates.z,
+                line: {
+                    color: edgeColor,
+                    width: Number.isFinite(Number(opts.edgeWidth)) ? Number(opts.edgeWidth) : 2,
+                    dash: opts.edgeDash || 'solid',
+                },
+                hoverinfo: 'skip',
+                name: `${name} edges`,
+                legendgroup: opts.legendgroup || name,
+                showlegend: false,
+                visible: visible && opts.showEdges !== false,
+            },
+        ];
+    }
+
+    function buildZoneCuboidGeometry(zone) {
+        if (!zone || typeof zone !== 'object') return null;
+        const rawXMin = readCoordinate(zone, ['x_min', 'width_min']);
+        const rawXMax = readCoordinate(zone, ['x_max', 'width_max']);
+        const rawYMin = readCoordinate(zone, ['y_min', 'depth_min']);
+        const rawYMax = readCoordinate(zone, ['y_max', 'depth_max']);
+        const rawZMin = readCoordinate(zone, ['z_min', 'height_min']);
+        const rawZMax = readCoordinate(zone, ['z_max', 'height_max']);
+        if ([rawXMin, rawXMax, rawYMin, rawYMax, rawZMin, rawZMax].some((value) => value === null)) return null;
+
+        const [xMin, xMax] = sortPair(rawXMin, rawXMax);
+        const [yMin, yMax] = sortPair(rawYMin, rawYMax);
+        const [zMin, zMax] = sortPair(rawZMin, rawZMax);
+        if (xMin === xMax || yMin === yMax || zMin === zMax) return null;
+
+        const geometry = buildPrismGeometry([
+            { x: xMin, y: yMin },
+            { x: xMax, y: yMin },
+            { x: xMax, y: yMax },
+            { x: xMin, y: yMax },
+        ], zMin, zMax);
+        if (!geometry) return null;
+        geometry.bounds = { xMin, xMax, yMin, yMax, zMin, zMax };
+        return geometry;
+    }
+
+    function buildZoneCuboidTraces(zone, options) {
+        return buildVolumeEdgeTraces(buildZoneCuboidGeometry(zone), options);
+    }
+
+    function appendDistinctPoint(points, point) {
+        const prior = points[points.length - 1];
+        if (prior && Math.abs(prior.x - point.x) < 1e-9 && Math.abs(prior.y - point.y) < 1e-9) return;
+        points.push(point);
+    }
+
+    function getFovBoundaryPoint(options, direction) {
+        const halfAngleDegrees = Number(options.halfAngleDegrees);
+        const halfAngleRadians = (Math.PI / 180) * halfAngleDegrees;
+        const tangent = Math.tan(halfAngleRadians);
+        if (!Number.isFinite(tangent) || tangent <= 0) return { x: 0, y: 0 };
+
+        const yCeiling = Math.max(0, Number(options.yMax));
+        const isRight = direction >= 0;
+        const xLimit = isRight ? Math.max(0, Number(options.xMax)) : Math.min(0, Number(options.xMin));
+        const xAtTop = (isRight ? 1 : -1) * yCeiling * tangent;
+        if ((isRight && xAtTop <= xLimit) || (!isRight && xAtTop >= xLimit)) {
+            return { x: xAtTop, y: yCeiling };
+        }
+        return { x: xLimit, y: Math.min(yCeiling, Math.abs(xLimit) / tangent) };
+    }
+
+    function buildFovVolumeGeometry(options) {
+        const opts = options || {};
+        const halfAngleDegrees = toFiniteNumber(opts.halfAngleDegrees) ?? 60;
+        if (halfAngleDegrees <= 0 || halfAngleDegrees >= 90) return null;
+        const rawXMin = toFiniteNumber(opts.xMin) ?? -650;
+        const rawXMax = toFiniteNumber(opts.xMax) ?? 650;
+        const xMin = Math.min(rawXMin, rawXMax);
+        const xMax = Math.max(rawXMin, rawXMax);
+        const yMax = Math.min(600, Math.max(0, toFiniteNumber(opts.yMax) ?? 600));
+        const rawZMin = toFiniteNumber(opts.zMin) ?? -300;
+        const rawZMax = toFiniteNumber(opts.zMax) ?? 300;
+        const [zMin, zMax] = sortPair(rawZMin, rawZMax);
+        if (yMax <= 0 || zMin === zMax) return null;
+
+        const boundaryOptions = { halfAngleDegrees, xMin, xMax, yMax };
+        const right = getFovBoundaryPoint(boundaryOptions, 1);
+        const left = getFovBoundaryPoint(boundaryOptions, -1);
+        const rightTouchesTop = Math.abs(right.y - yMax) < 0.5;
+        const leftTouchesTop = Math.abs(left.y - yMax) < 0.5;
+        const polygon = [];
+        appendDistinctPoint(polygon, { x: 0, y: 0 });
+        appendDistinctPoint(polygon, right);
+        if (!rightTouchesTop) appendDistinctPoint(polygon, { x: Math.max(0, xMax), y: yMax });
+        if (!leftTouchesTop) appendDistinctPoint(polygon, { x: Math.min(0, xMin), y: yMax });
+        appendDistinctPoint(polygon, left);
+        if (polygon.length < 3) return null;
+
+        const geometry = buildPrismGeometry(polygon, zMin, zMax);
+        if (!geometry) return null;
+        geometry.bounds = { xMin, xMax, yMin: 0, yMax, zMin, zMax };
+        geometry.halfAngleDegrees = halfAngleDegrees;
+        geometry.fullAngleDegrees = halfAngleDegrees * 2;
+        return geometry;
+    }
+
+    function buildFov3DTraces(options) {
+        const opts = options || {};
+        const common = {
+            xMin: opts.xMin,
+            xMax: opts.xMax,
+            yMax: opts.yMax,
+            zMin: opts.zMin,
+            zMax: opts.zMax,
+        };
+        const outerGeometry = buildFovVolumeGeometry({
+            ...common,
+            halfAngleDegrees: toFiniteNumber(opts.outerHalfAngleDegrees) ?? 75,
+        });
+        const innerGeometry = buildFovVolumeGeometry({
+            ...common,
+            halfAngleDegrees: toFiniteNumber(opts.innerHalfAngleDegrees) ?? 60,
+        });
+        const visible = opts.visible !== false;
+        const outerTraces = buildVolumeEdgeTraces(outerGeometry, {
+            name: opts.outerName || '150 degree field of view',
+            color: opts.outerColor || '#0dd4c0',
+            edgeColor: opts.outerEdgeColor || 'rgba(13, 212, 192, 0.35)',
+            opacity: toFiniteNumber(opts.outerOpacity) ?? 0.035,
+            edgeWidth: toFiniteNumber(opts.outerEdgeWidth) ?? 1.2,
+            edgeDash: 'dot',
+            visible: visible && opts.showOuter !== false,
+        });
+        const innerTraces = buildVolumeEdgeTraces(innerGeometry, {
+            name: opts.innerName || '120 degree field of view',
+            color: opts.innerColor || '#0dd4c0',
+            edgeColor: opts.innerEdgeColor || 'rgba(13, 212, 192, 0.58)',
+            opacity: toFiniteNumber(opts.innerOpacity) ?? 0.065,
+            edgeWidth: toFiniteNumber(opts.innerEdgeWidth) ?? 1.6,
+            visible: visible && opts.showInner !== false,
+        });
+        return [...outerTraces, ...innerTraces];
+    }
+
+    function buildHistory2dCoordinates() {
+        const x = [];
+        const y = [];
+        Object.values(targetHistory).forEach((points) => {
+            points.forEach((point) => {
+                x.push(point.x);
+                y.push(point.y);
+            });
+            x.push(null);
+            y.push(null);
+        });
+        return { x, y };
+    }
+
+    function renderTargetVisualization2d() {
+        if (!canRender2d()) return false;
+
+        const data = { targets: latestTargets.map((target) => ({ ...target })) };
+        const history = buildHistory2dCoordinates();
+        const sizes = data.targets.map((target) => Math.max(8, Math.min(40, 10 + (target.z / 5))));
+        const isEditing = typeof getIsEditingFn === 'function' ? !!getIsEditingFn() : false;
+        const isInteracting = typeof getIsInteractingFn === 'function' ? !!getIsInteractingFn() : false;
+
+        if (isEditing) {
+            if (isInteracting) return false;
+            const [targetTraceIndex, historyTraceIndex] = getTargetTraceIndices();
+            ignoreTransientRenderFailure(window.Plotly.restyle(chartEl, {
+                x: [data.targets.map((target) => target.x), history.x],
+                y: [data.targets.map((target) => target.y), history.y],
+                text: [data.targets.map((target) => `${getFriendlyTargetLabel(target.id)}<br>${getMotionLabelFromDoppler(target.dop)}`), null],
+                'marker.size': [sizes, null]
+            }, [targetTraceIndex, historyTraceIndex]));
+            return true;
+        }
+
+        const layout = typeof getLayoutFn === 'function' ? getLayoutFn() : undefined;
+        ignoreTransientRenderFailure(window.Plotly.react(chartEl, [
+            {
+                x: data.targets.map((target) => target.x),
+                y: data.targets.map((target) => target.y),
+                text: data.targets.map((target) => `${getFriendlyTargetLabel(target.id)}<br>${getMotionLabelFromDoppler(target.dop)}`),
+                mode: 'markers+text',
+                textposition: 'top center',
+                marker: { size: sizes, color: '#1bd2dc', line: { color: '#dcfaff', width: 1.2 } },
+                textfont: { color: '#bde8ef', size: 10, family: 'DM Sans, sans-serif' },
+                type: 'scatter'
+            },
+            { x: history.x, y: history.y, mode: 'lines', line: { color: '#2e93bc', width: 1.6 }, opacity: 0.2, type: 'scatter' }
+        ], layout));
+        return true;
+    }
+
     function handleNewData(msg, currentTopic) {
         if (!msg || !msg.topic || !msg.payload) return false;
         if (!currentTopic || msg.topic !== currentTopic) return false;
-        if (!chartEl || !window.Plotly) return false;
 
         const shouldRenderTargets = typeof shouldRenderTargetsFn === 'function'
             ? !!shouldRenderTargetsFn()
@@ -383,6 +858,7 @@
         const payload = msg.payload;
         const targets = Array.isArray(payload.targets) ? payload.targets.map(normalizeTarget) : [];
         const data = { targets: targets };
+        latestTargets = data.targets.map((target) => ({ ...target }));
 
         if (typeof updateTimestampFn === 'function') {
             updateTimestampFn();
@@ -396,50 +872,18 @@
 
         data.targets.forEach((target) => {
             if (!targetHistory[target.id]) targetHistory[target.id] = [];
-            targetHistory[target.id].push({ x: target.x, y: target.y });
+            targetHistory[target.id].push({
+                x: target.x,
+                y: target.y,
+                z: target.z,
+                hasZ: target.hasZ,
+            });
             if (targetHistory[target.id].length > historyLength) targetHistory[target.id].shift();
         });
 
-        const historyX = [];
-        const historyY = [];
-        Object.values(targetHistory).forEach((points) => {
-            points.forEach((point) => {
-                historyX.push(point.x);
-                historyY.push(point.y);
-            });
-            historyX.push(null);
-            historyY.push(null);
-        });
+        emitTargetSnapshot('live');
 
-        const sizes = data.targets.map((target) => Math.max(8, Math.min(40, 10 + (target.z / 5))));
-        const isEditing = typeof getIsEditingFn === 'function' ? !!getIsEditingFn() : false;
-        const isInteracting = typeof getIsInteractingFn === 'function' ? !!getIsInteractingFn() : false;
-
-        if (isEditing) {
-            if (isInteracting) return true;
-            const [targetTraceIndex, historyTraceIndex] = getTargetTraceIndices();
-            window.Plotly.restyle(chartEl, {
-                x: [data.targets.map((t) => t.x), historyX],
-                y: [data.targets.map((t) => t.y), historyY],
-                text: [data.targets.map((t) => `${getFriendlyTargetLabel(t.id)}<br>${getMotionLabelFromDoppler(t.dop)}`), null],
-                'marker.size': [sizes, null]
-            }, [targetTraceIndex, historyTraceIndex]);
-        } else {
-            const layout = typeof getLayoutFn === 'function' ? getLayoutFn() : undefined;
-            window.Plotly.react(chartEl, [
-                {
-                    x: data.targets.map((t) => t.x),
-                    y: data.targets.map((t) => t.y),
-                    text: data.targets.map((t) => `${getFriendlyTargetLabel(t.id)}<br>${getMotionLabelFromDoppler(t.dop)}`),
-                    mode: 'markers+text',
-                    textposition: 'top center',
-                    marker: { size: sizes, color: '#1bd2dc', line: { color: '#dcfaff', width: 1.2 } },
-                    textfont: { color: '#bde8ef', size: 10, family: 'DM Sans, sans-serif' },
-                    type: 'scatter'
-                },
-                { x: historyX, y: historyY, mode: 'lines', line: { color: '#2e93bc', width: 1.6 }, opacity: 0.2, type: 'scatter' }
-            ], layout);
-        }
+        renderTargetVisualization2d();
 
         if (!dataTableBodyEl) return true;
         if (data.targets.length === 0) {
@@ -460,7 +904,8 @@
             }
             const targetLabel = getFriendlyTargetLabel(target.id);
             const targetClass = Number(target.id) === 1 ? 'target-primary' : 'target-secondary';
-            dataTableBodyEl.innerHTML += `<tr><td class="target-id-cell"><span class="target-id-tag ${targetClass}"><span class="target-id-dot"></span>${targetLabel}</span></td><td class="target-num">${target.x}</td><td class="target-num">${target.y}</td><td class="target-num">${target.z}</td><td class="doppler-cell"><span class="doppler-badge ${dopClass}">${dopStatus}</span></td></tr>`;
+            const heightDisplay = target.hasZ ? target.z : '<span aria-label="Unavailable">&mdash;</span>';
+            dataTableBodyEl.innerHTML += `<tr><td class="target-id-cell"><span class="target-id-tag ${targetClass}"><span class="target-id-dot"></span>${targetLabel}</span></td><td class="target-num">${target.x}</td><td class="target-num">${target.y}</td><td class="target-num">${heightDisplay}</td><td class="doppler-cell"><span class="doppler-badge ${dopClass}">${dopStatus}</span></td></tr>`;
         });
 
         return true;
@@ -468,6 +913,10 @@
 
     function init(options) {
         const opts = options || {};
+        targetHistory = {};
+        latestTargets = [];
+        targetsSuppressedByGate = false;
+        targetSnapshotListener = typeof opts.onTargetSnapshot === 'function' ? opts.onTargetSnapshot : null;
         chartEl = opts.chartEl || document.getElementById(opts.chartId || 'chart');
         dataTableBodyEl = opts.dataTableBodyEl || document.getElementById(opts.dataTableBodyId || 'dataTableBody');
         zoneStatusEl = opts.zoneStatusEl || document.getElementById(opts.zoneStatusId || 'zoneStatus');
@@ -478,6 +927,7 @@
         getIsEditingFn = opts.getIsEditing || null;
         getIsInteractingFn = opts.getIsInteracting || null;
         shouldRenderTargetsFn = opts.shouldRenderTargets || null;
+        shouldRender2dFn = opts.shouldRender2d || null;
         historyLength = Number.isFinite(opts.historyLength) ? opts.historyLength : 15;
         limits = {
             xMin: Number.isFinite(opts.limits?.xMin) ? opts.limits.xMin : DEFAULT_LIMITS.xMin,
@@ -488,6 +938,7 @@
             zMax: Number.isFinite(opts.limits?.zMax) ? opts.limits.zMax : DEFAULT_LIMITS.zMax,
             minSpan: Number.isFinite(opts.limits?.minSpan) ? opts.limits.minSpan : DEFAULT_LIMITS.minSpan
         };
+        emitTargetSnapshot('init');
         return window.SwitchStudioZones;
     }
 
@@ -503,6 +954,16 @@
         getPendingCommandId,
         resetHistory,
         clearTargetVisualization,
+        normalizeTarget,
+        mapRawZonesByAreaId,
+        getTargetSnapshot,
+        setTargetSnapshotListener,
+        buildTarget3DTraces,
+        buildZoneCuboidGeometry,
+        buildZoneCuboidTraces,
+        buildFovVolumeGeometry,
+        buildFov3DTraces,
+        refreshTargetVisualization: renderTargetVisualization2d,
         handleNewData,
         appendCommandLog
     };

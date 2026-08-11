@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Inovelli Switch Studio</title>
+    <link rel="icon" type="image/png" href="{{ ingress_path }}/static/favicon.png">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
     <style>
@@ -42,6 +43,19 @@
 
         * {
             box-sizing: border-box;
+        }
+
+        .visually-hidden {
+            position: absolute !important;
+            width: 1px !important;
+            height: 1px !important;
+            padding: 0 !important;
+            margin: -1px !important;
+            overflow: hidden !important;
+            clip: rect(0, 0, 0, 0) !important;
+            clip-path: inset(50%) !important;
+            white-space: nowrap !important;
+            border: 0 !important;
         }
 
         body {
@@ -791,11 +805,107 @@
             border-radius: var(--radius-md);
             overflow: hidden;
             box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+            flex: 0 0 auto;
         }
-        #chartContainer .chart-panel-title {
-            display: none;
+        .radar-panel-header {
+            min-height: 56px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 6px 8px 6px 12px;
+            border-bottom: 1px solid var(--border-subtle);
+            background: rgba(18, 23, 34, 0.94);
         }
-        #chart {
+        .radar-panel-heading {
+            min-width: 0;
+        }
+        .radar-panel-heading h2 {
+            margin: 0;
+            color: #e7eef8;
+            font-size: 0.82rem;
+            font-weight: 650;
+            letter-spacing: 0.01em;
+        }
+        .radar-view-status {
+            display: block;
+            margin-top: 2px;
+            color: var(--text-secondary);
+            font-size: 0.68rem;
+            line-height: 1.25;
+        }
+        .radar-view-actions {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 7px;
+            flex: 0 0 auto;
+        }
+        .radar-view-switch {
+            display: inline-grid;
+            grid-template-columns: repeat(2, minmax(44px, auto));
+            gap: 2px;
+            min-width: 0;
+            margin: 0;
+            padding: 2px;
+            border: 1px solid var(--border-strong);
+            border-radius: var(--radius-md);
+            background: rgba(9, 14, 23, 0.82);
+        }
+        .radar-view-switch input {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            overflow: hidden;
+            clip: rect(0 0 0 0);
+            clip-path: inset(50%);
+            white-space: nowrap;
+        }
+        .radar-view-switch label {
+            min-width: 44px;
+            min-height: 44px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 10px;
+            border-radius: calc(var(--radius-md) - 3px);
+            color: #8f9db2;
+            cursor: pointer;
+            font-size: 0.7rem;
+            font-weight: 700;
+            user-select: none;
+        }
+        .radar-view-switch input:checked + label {
+            color: #08161b;
+            background: var(--accent);
+            box-shadow: 0 0 0 1px rgba(13, 212, 192, 0.22), 0 3px 12px rgba(13, 212, 192, 0.16);
+        }
+        .radar-view-switch input:focus-visible + label {
+            outline: 2px solid #ffffff;
+            outline-offset: 2px;
+        }
+        .radar-view-switch input:disabled + label {
+            opacity: 0.42;
+            cursor: not-allowed;
+        }
+        .radar-reset-view {
+            min-height: 44px;
+            padding: 0 12px;
+            border: 1px solid var(--border-strong);
+            border-radius: var(--radius-md);
+            background: rgba(25, 34, 49, 0.9);
+            color: #cbd5e4;
+            font: inherit;
+            font-size: 0.7rem;
+            font-weight: 650;
+            cursor: pointer;
+        }
+        .radar-reset-view:hover {
+            border-color: rgba(13, 212, 192, 0.55);
+            color: #ecfffd;
+        }
+        #chart,
+        #chart3d {
             position: absolute;
             inset: 0;
             width: 100%;
@@ -805,10 +915,55 @@
             border: 1px solid rgba(34, 42, 58, 0.9);
             box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
         }
+        #chart[hidden],
+        #chart3d[hidden] {
+            display: none !important;
+        }
+        #chart3d[data-interaction-locked="true"] {
+            pointer-events: none;
+        }
+        .radar-interaction-toggle {
+            display: none;
+        }
         .chart-canvas-wrap {
             position: relative;
             width: 100%;
             aspect-ratio: 13 / 7;
+        }
+        .radar-legend {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 6px 12px;
+            min-height: 30px;
+            padding: 5px 10px;
+            border-top: 1px solid var(--border-subtle);
+            color: #9daabd;
+            background: rgba(12, 16, 25, 0.96);
+            font-size: 0.64rem;
+        }
+        .radar-legend[hidden] {
+            display: none !important;
+        }
+        .radar-legend-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            white-space: nowrap;
+        }
+        .radar-legend-swatch {
+            width: 9px;
+            height: 9px;
+            border-radius: 3px;
+            background: var(--legend-color);
+            box-shadow: 0 0 6px color-mix(in srgb, var(--legend-color), transparent 45%);
+        }
+        .radar-axis-key {
+            flex: 1 0 100%;
+            text-align: center;
+            color: var(--text-secondary);
+            font-variant-numeric: tabular-nums;
         }
         
         .table-container {
@@ -2366,7 +2521,8 @@
                 padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
             }
 
-            #chart { border-radius: var(--radius-md); }
+            #chart,
+            #chart3d { border-radius: var(--radius-md); }
 
             .zones-live-strip {
                 padding: 7px 8px;
@@ -2634,7 +2790,59 @@
             .dashboard-summary-row { justify-content: flex-start; }
         }
 
+        @media (max-width: 700px), (hover: none) and (pointer: coarse) {
+            .radar-interaction-toggle:not([hidden]) {
+                position: absolute;
+                right: 10px;
+                bottom: 10px;
+                z-index: 8;
+                min-height: 44px;
+                padding: 0 14px;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                border: 1px solid rgba(13, 212, 192, 0.55);
+                border-radius: var(--radius-md);
+                background: rgba(13, 22, 33, 0.94);
+                color: #d9fffb;
+                box-shadow: 0 6px 18px rgba(0, 0, 0, 0.34);
+                font: inherit;
+                font-size: 0.7rem;
+                font-weight: 700;
+                cursor: pointer;
+            }
+        }
+
         @media (max-width: 640px) {
+            .radar-panel-header {
+                align-items: stretch;
+                flex-direction: column;
+                gap: 6px;
+                padding: 8px;
+            }
+            .radar-panel-heading {
+                padding-inline: 2px;
+            }
+            .radar-view-actions {
+                justify-content: space-between;
+            }
+            .radar-view-switch {
+                flex: 1 1 auto;
+            }
+            .radar-view-switch label {
+                width: 100%;
+            }
+            .radar-reset-view {
+                flex: 0 0 auto;
+            }
+            .chart-canvas-wrap.radar-view-3d {
+                height: clamp(280px, 62dvh, 440px);
+                aspect-ratio: auto;
+            }
+            .radar-legend {
+                justify-content: flex-start;
+                padding-inline: 8px;
+            }
             .device-grid {
                 grid-template-columns: minmax(0, 1fr);
             }
@@ -2737,10 +2945,37 @@
             </div>
             
             <section id="chartContainer" data-tab-panels="zones" data-tab-panel-primary>
-                <div class="chart-panel-title">Live Radar Map</div>
+                <div class="radar-panel-header">
+                    <div class="radar-panel-heading">
+                        <h2>Live Radar</h2>
+                        <span class="radar-view-status" id="radarViewStatus">2D view · Zone editing available</span>
+                    </div>
+                    <div class="radar-view-actions">
+                        <fieldset class="radar-view-switch" aria-label="Radar view" aria-describedby="radarViewDescription">
+                            <legend class="visually-hidden">Radar view</legend>
+                            <input type="radio" id="radarView2d" name="radarView" value="2d" checked>
+                            <label for="radarView2d">2D</label>
+                            <input type="radio" id="radarView3d" name="radarView" value="3d">
+                            <label for="radarView3d">3D</label>
+                        </fieldset>
+                        <button class="radar-reset-view" id="radarResetView" type="button" hidden>Reset view</button>
+                    </div>
+                </div>
+                <p class="visually-hidden" id="radarViewDescription">The 3D view is a live visualization. Zone drawing and editing use the 2D view. Sensor field-of-view height follows the primary detection range when available; otherwise the full supported height range is shown. On phones, choose Explore 3D before orbiting the scene, then choose Done to resume page scrolling.</p>
                 <div class="config-content">
                     <div class="chart-canvas-wrap">
-                        <div id="chart"></div>
+                        <div id="chart" role="img" aria-label="Two-dimensional live presence radar map. Exact target coordinates are listed in the table below."></div>
+                        <div id="chart3d" role="img" aria-label="Three-dimensional live presence radar map with targets, zone volumes, and sensor field of view. Exact target coordinates are listed in the table below." hidden></div>
+                        <button class="radar-interaction-toggle" id="radar3dInteractionToggle" type="button" aria-controls="chart3d" aria-pressed="false" hidden>Explore 3D</button>
+                    </div>
+                    <div class="radar-legend" id="radar3dLegend" aria-label="Three-dimensional radar legend" hidden>
+                        <span class="radar-legend-item"><span class="radar-legend-swatch" style="--legend-color:#1bd2dc"></span>Targets</span>
+                        <span class="radar-legend-item"><span class="radar-legend-swatch" style="--legend-color:#18a8d8"></span>Primary detection</span>
+                        <span class="radar-legend-item"><span class="radar-legend-swatch" style="--legend-color:#4ac56d"></span>Detection</span>
+                        <span class="radar-legend-item"><span class="radar-legend-swatch" style="--legend-color:#f0aa52"></span>Stay</span>
+                        <span class="radar-legend-item"><span class="radar-legend-swatch" style="--legend-color:#ff6262"></span>Interference</span>
+                        <span class="radar-legend-item"><span class="radar-legend-swatch" style="--legend-color:#0dd4c0"></span>Sensor FOV</span>
+                        <span class="radar-axis-key">Axes: X width · Y depth · Z height (cm)</span>
                     </div>
                 </div>
             </section>
@@ -2894,7 +3129,7 @@
                     <div style="margin-top:10px; padding-top:5px;">
                         <div style="font-size:0.9em; font-weight:bold; color:#00bcd4; margin-bottom:5px;">Map Visibility</div>
                         <div class="input-row">
-                            <label for="vizToggleGrid">Show Radar Grid:</label>
+                            <label for="vizToggleGrid">Show Sensor FOV &amp; Grid:</label>
                             <input type="checkbox" id="vizToggleGrid" checked>
                         </div>
                         <div class="input-row">
@@ -3098,6 +3333,7 @@
     <script src="{{ ingress_path }}/static/js/app_firmware.js"></script>
     <script src="{{ ingress_path }}/static/js/app_load_dimming.js"></script>
     <script src="{{ ingress_path }}/static/js/app_zones.js"></script>
+    <script src="{{ ingress_path }}/static/js/app_radar3d.js"></script>
     <script>
         const INGRESS_PATH = "{{ ingress_path }}";
         const SWITCH_STUDIO_UI_ENABLED = {{ 'true' if switch_studio_ui else 'false' }};
@@ -3166,6 +3402,14 @@
         const vizXMax = document.getElementById('vizXMax');
         const vizYMin = document.getElementById('vizYMin');
         const vizYMax = document.getElementById('vizYMax');
+        const chart3dElement = document.getElementById('chart3d');
+        const chartCanvasWrap = document.querySelector('#chartContainer .chart-canvas-wrap');
+        const radarView2d = document.getElementById('radarView2d');
+        const radarView3d = document.getElementById('radarView3d');
+        const radarResetView = document.getElementById('radarResetView');
+        const radarViewStatus = document.getElementById('radarViewStatus');
+        const radar3dLegend = document.getElementById('radar3dLegend');
+        const radar3dInteractionToggle = document.getElementById('radar3dInteractionToggle');
 
         let targetHistory = {}; 
         const HISTORY_LENGTH = 15; 
@@ -3217,6 +3461,7 @@
         
         // Zone Management State
         let deviceZones = {
+            global: null,
             // Unify: Area1 is now the Primary zone
             mmwave_detection_areas: { area1: null, area2: null, area3: null, area4: null },
             mmwave_interference_areas: { area1: null, area2: null, area3: null, area4: null },
@@ -3261,6 +3506,7 @@
         let schemaCompositeMap = {};
         let schemaBindingUnsubscribers = [];
         let zoneModule = null;
+        let radar3dModule = null;
 
         function parsePanelTargets(raw) {
             if (!raw) return [];
@@ -3319,10 +3565,18 @@
             }
             targetHistory = {};
             const chartDiv = document.getElementById('chart');
-            if (chartDiv && chartDiv.data && window.Plotly) {
+            if (chartDiv && chartDiv.data && window.Plotly && isRadar2dSurfaceVisible()) {
                 const [targetTraceIndex, historyTraceIndex] = getTargetTraceIndices(chartDiv);
-                Plotly.restyle('chart', { x: [[]], y: [[]], text: [[]] }, [targetTraceIndex]);
-                Plotly.restyle('chart', { x: [[]], y: [[]] }, [historyTraceIndex]);
+                runRadarPlotlyUpdate(() => Plotly.restyle(
+                    chartDiv,
+                    { x: [[]], y: [[]], text: [[]] },
+                    [targetTraceIndex]
+                ));
+                runRadarPlotlyUpdate(() => Plotly.restyle(
+                    chartDiv,
+                    { x: [[]], y: [[]] },
+                    [historyTraceIndex]
+                ));
             }
             dataTableBody.innerHTML = '<tr><td colspan="5" class="no-data">No targets detected</td></tr>';
         }
@@ -3822,6 +4076,9 @@
             if (window.SwitchStudioDevices && typeof window.SwitchStudioDevices.setTransportState === 'function') {
                 window.SwitchStudioDevices.setTransportState(socketTransportConnected, mqttTransportConnected && mqttInventoryReady);
             }
+            if ((!socketTransportConnected || !mqttTransportConnected) && zoneModule && typeof zoneModule.clearTargetVisualization === 'function') {
+                zoneModule.clearTargetVisualization('Connection unavailable');
+            }
             updateDeviceSelectState();
         }
 
@@ -4085,8 +4342,177 @@
             return String(topic || '').split('/').pop() || 'device';
         }
 
+        function getFiniteRadarValue(value) {
+            if (value === null || value === undefined) return null;
+            if (typeof value === 'string' && !value.trim()) return null;
+            const parsed = Number(value);
+            return Number.isFinite(parsed) ? parsed : null;
+        }
+
+        function getConfiguredRadarHeightBounds() {
+            const preferredSources = [
+                deviceZones && deviceZones.global,
+                deviceZones && deviceZones.mmwave_detection_areas && deviceZones.mmwave_detection_areas.area1
+            ];
+            for (const source of preferredSources) {
+                const zMin = getFiniteRadarValue(source && source.z_min);
+                const zMax = getFiniteRadarValue(source && source.z_max);
+                if (zMin !== null && zMax !== null && zMin !== zMax) {
+                    return { zMin: Math.min(zMin, zMax), zMax: Math.max(zMin, zMax) };
+                }
+            }
+
+            // Until the primary range is reported, show the device's full
+            // supported height span. Never infer the FOV from live targets or
+            // subordinate zones; that would imply a beam shape the device did
+            // not report.
+            return { zMin: -600, zMax: 600 };
+        }
+
+        function getRadar3dAxisHeightBounds(fovBounds) {
+            const values = [fovBounds.zMin, fovBounds.zMax];
+            ['mmwave_detection_areas', 'mmwave_interference_areas', 'mmwave_stay_areas'].forEach((category) => {
+                const areas = deviceZones && deviceZones[category];
+                if (!areas) return;
+                Object.values(areas).forEach((area) => {
+                    const zMin = getFiniteRadarValue(area && area.z_min);
+                    const zMax = getFiniteRadarValue(area && area.z_max);
+                    if (zMin !== null) values.push(zMin);
+                    if (zMax !== null) values.push(zMax);
+                });
+            });
+            const min = Math.min(...values);
+            const max = Math.max(...values);
+            const padding = Math.max(20, Math.round((max - min) * 0.06));
+            return { zMin: min - padding, zMax: max + padding };
+        }
+
+        function buildRadar3dSceneModel() {
+            const xMin = Math.min(chartXMin, chartXMax);
+            const xMax = Math.max(chartXMin, chartXMax);
+            const yMin = Math.min(chartYMin, chartYMax);
+            const yMax = Math.max(chartYMin, chartYMax);
+            const fovHeightBounds = getConfiguredRadarHeightBounds();
+            const axisHeightBounds = getRadar3dAxisHeightBounds(fovHeightBounds);
+            return {
+                zones: deviceZones,
+                visibility: {
+                    detection: showDetection,
+                    detectionAreas: [showDetection1, showDetection2, showDetection3, showDetection4],
+                    stay: showStay,
+                    interference: showInterference,
+                    fov: showGrid,
+                    grid: showGrid,
+                    labels: showLabels
+                },
+                bounds: {
+                    xMin,
+                    xMax,
+                    yMin,
+                    yMax,
+                    zMin: axisHeightBounds.zMin,
+                    zMax: axisHeightBounds.zMax
+                },
+                fovBounds: fovHeightBounds
+            };
+        }
+
+        function refreshRadar3dScene() {
+            if (!radar3dModule || typeof radar3dModule.setSceneModel !== 'function') return;
+            radar3dModule.setSceneModel(buildRadar3dSceneModel());
+        }
+
+        function isRadar2dSurfaceVisible() {
+            return !!(
+                chartElement &&
+                !chartElement.hidden &&
+                chartElement.getClientRects().length > 0
+            );
+        }
+
+        function runRadarPlotlyUpdate(operation) {
+            if (typeof operation !== 'function') return false;
+            try {
+                const result = operation();
+                if (result && typeof result.catch === 'function') result.catch(() => {});
+                return true;
+            } catch (error) {
+                return false;
+            }
+        }
+
+        function refreshRadar2dZoneLayoutIfVisible() {
+            if (isEditingZone || !isRadar2dSurfaceVisible() || typeof Plotly === 'undefined') return false;
+            return runRadarPlotlyUpdate(() => Plotly.relayout(chartElement, {
+                shapes: getChartShapes(),
+                annotations: getChartAnnotations()
+            }));
+        }
+
+        function syncRadarShellForMode(mode, details) {
+            const is3d = mode === '3d';
+            if (chartCanvasWrap) chartCanvasWrap.classList.toggle('radar-view-3d', is3d);
+            if (radar3dLegend) radar3dLegend.hidden = !is3d;
+            if (radarResetView) radarResetView.hidden = !is3d;
+            if (radarViewStatus) {
+                radarViewStatus.textContent = details && details.forced
+                    ? '2D view · Zone editing in progress'
+                    : is3d
+                        ? '3D visualization · FOV height uses the primary or full supported range'
+                        : '2D view · Zone editing available';
+            }
+            if (!is3d && isRadar2dSurfaceVisible()) {
+                // The hidden 2D surface does no Plotly work while 3D is active.
+                // Rebuild its current zone layout first, then paint the latest
+                // canonical target snapshot before the user sees it again.
+                renderChartForCurrentMode();
+                if (zoneModule && typeof zoneModule.refreshTargetVisualization === 'function') {
+                    zoneModule.refreshTargetVisualization();
+                }
+            }
+            if (
+                !is3d &&
+                chartElement &&
+                chartElement.data &&
+                appContainer &&
+                !appContainer.hidden &&
+                chartElement.getClientRects().length > 0 &&
+                typeof Plotly !== 'undefined'
+            ) {
+                setTimeout(() => {
+                    if (!appContainer.hidden && chartElement.getClientRects().length > 0) {
+                        Plotly.Plots.resize(chartElement);
+                    }
+                }, 0);
+            }
+        }
+
+        function setRadarVisibleForCurrentView() {
+            if (!radar3dModule || typeof radar3dModule.setVisible !== 'function') return;
+            const activeTab = window.SwitchStudioTabs && typeof window.SwitchStudioTabs.getActiveTab === 'function'
+                ? String(window.SwitchStudioTabs.getActiveTab() || '').toLowerCase()
+                : 'zones';
+            const workspaceVisible = !!(appContainer && !appContainer.hidden);
+            const radarVisible = workspaceVisible && activeTab === 'zones';
+            radar3dModule.setVisible(radarVisible);
+            if (
+                radarVisible &&
+                typeof radar3dModule.getMode === 'function' &&
+                radar3dModule.getMode() === '2d' &&
+                isRadar2dSurfaceVisible()
+            ) {
+                renderChartForCurrentMode();
+                if (zoneModule && typeof zoneModule.refreshTargetVisualization === 'function') {
+                    zoneModule.refreshTargetVisualization();
+                }
+            }
+        }
+
         function showDashboardView(options) {
             const opts = options || {};
+            if (radar3dModule && typeof radar3dModule.setVisible === 'function') {
+                radar3dModule.setVisible(false);
+            }
             if (window.SwitchStudioLed && typeof window.SwitchStudioLed.setVisible === 'function') {
                 window.SwitchStudioLed.setVisible(false);
             }
@@ -4127,6 +4553,7 @@
                     : null;
                 window.SwitchStudioLed.setVisible(String(activeTab || '').toLowerCase() === 'led');
             }
+            setRadarVisibleForCurrentView();
             updateDeviceSelectState();
         }
 
@@ -4150,6 +4577,9 @@
             setMapStandbyState(false);
             if (zoneModule && typeof zoneModule.resetHistory === 'function') zoneModule.resetHistory();
             else targetHistory = {};
+            if (radar3dModule && typeof radar3dModule.resetForDeviceChange === 'function') {
+                radar3dModule.resetForDeviceChange();
+            }
             deviceZones = {
                 global: null,
                 mmwave_detection_areas: { area1: null, area2: null, area3: null, area4: null },
@@ -4157,8 +4587,12 @@
                 mmwave_stay_areas: { area1: null, area2: null, area3: null, area4: null }
             };
             if (isEditingZone) endZoneEdit();
-            if (typeof Plotly !== 'undefined') {
-                Plotly.update('chart', { x: [[]], y: [[]], text: [[]] }, { shapes: getChartShapes(), annotations: [] });
+            if (typeof Plotly !== 'undefined' && isRadar2dSurfaceVisible()) {
+                runRadarPlotlyUpdate(() => Plotly.update(
+                    chartElement,
+                    { x: [[]], y: [[]], text: [[]] },
+                    { shapes: getChartShapes(), annotations: [] }
+                ));
             }
             dataTableBody.innerHTML = '<tr><td colspan="5" class="no-data">No targets detected</td></tr>';
             nonMmwaveWarning.style.display = 'none';
@@ -4233,6 +4667,9 @@
             if (window.SwitchStudioLed && typeof window.SwitchStudioLed.setActiveDevice === 'function') {
                 window.SwitchStudioLed.setActiveDevice(normalizedNext);
             }
+            if (radar3dModule && typeof radar3dModule.setActiveDevice === 'function') {
+                radar3dModule.setActiveDevice(normalizedNext);
+            }
             if (window.SwitchStudioState && typeof window.SwitchStudioState.setActiveDevice === 'function') {
                 window.SwitchStudioState.setActiveDevice(normalizedNext);
                 window.SwitchStudioState.setPacketStatus('info', 'Awaiting fresh device data…');
@@ -4261,7 +4698,15 @@
             socket.emit('force_sync');
             setTimeout(() => {
                 const chartDiv = document.getElementById('chart');
-                if (chartDiv && chartDiv.data && typeof Plotly !== 'undefined') Plotly.Plots.resize(chartDiv);
+                if (
+                    chartDiv &&
+                    chartDiv.data &&
+                    !chartDiv.hidden &&
+                    chartDiv.getClientRects().length > 0 &&
+                    typeof Plotly !== 'undefined'
+                ) {
+                    Plotly.Plots.resize(chartDiv);
+                }
             }, 40);
             return true;
         }
@@ -4294,6 +4739,7 @@
                 mobileToggle: mobileTabMenuButton,
                 onTabChange: (activeTab) => {
                     applyLayoutMode(activeTab);
+                    setRadarVisibleForCurrentView();
                     if (window.SwitchStudioLed && typeof window.SwitchStudioLed.setVisible === 'function') {
                         window.SwitchStudioLed.setVisible(String(activeTab || '').toLowerCase() === 'led');
                     }
@@ -4304,7 +4750,13 @@
                         applyZonesSidebarPane(activeZonesSidebarPane);
                         setTimeout(() => {
                             const chartDiv = document.getElementById('chart');
-                            if (chartDiv && chartDiv.data) {
+                            if (
+                                chartDiv &&
+                                chartDiv.data &&
+                                appContainer &&
+                                !appContainer.hidden &&
+                                chartDiv.getClientRects().length > 0
+                            ) {
                                 Plotly.Plots.resize(chartDiv);
                             }
                         }, 40);
@@ -5749,7 +6201,16 @@
 
         // Responsive Resize Handler
         window.addEventListener('resize', function() {
-            Plotly.Plots.resize('chart');
+            const chartDiv = document.getElementById('chart');
+            if (
+                chartDiv &&
+                chartDiv.data &&
+                !chartDiv.hidden &&
+                chartDiv.getClientRects().length > 0 &&
+                typeof Plotly !== 'undefined'
+            ) {
+                Plotly.Plots.resize(chartDiv);
+            }
             // Prevent mobile keyboard from triggering layout collapse
         });
 
@@ -5795,10 +6256,22 @@
             if (localStorage.getItem('vizShowDetection3') !== null) showDetection3 = localStorage.getItem('vizShowDetection3') === 'true';
             if (localStorage.getItem('vizShowDetection4') !== null) showDetection4 = localStorage.getItem('vizShowDetection4') === 'true';
             
-            if (localStorage.getItem('vizXMin') !== null) chartXMin = parseInt(localStorage.getItem('vizXMin'));
-            if (localStorage.getItem('vizXMax') !== null) chartXMax = parseInt(localStorage.getItem('vizXMax'));
-            if (localStorage.getItem('vizYMin') !== null) chartYMin = parseInt(localStorage.getItem('vizYMin'));
-            if (localStorage.getItem('vizYMax') !== null) chartYMax = parseInt(localStorage.getItem('vizYMax'));
+            const storedXMinRaw = localStorage.getItem('vizXMin');
+            const storedXMaxRaw = localStorage.getItem('vizXMax');
+            const storedYMinRaw = localStorage.getItem('vizYMin');
+            const storedYMaxRaw = localStorage.getItem('vizYMax');
+            const storedXMin = storedXMinRaw === null ? NaN : Number(storedXMinRaw);
+            const storedXMax = storedXMaxRaw === null ? NaN : Number(storedXMaxRaw);
+            const storedYMin = storedYMinRaw === null ? NaN : Number(storedYMinRaw);
+            const storedYMax = storedYMaxRaw === null ? NaN : Number(storedYMaxRaw);
+            if (Number.isFinite(storedXMin)) chartXMin = storedXMin;
+            if (Number.isFinite(storedXMax)) chartXMax = storedXMax;
+            if (Number.isFinite(storedYMin)) chartYMin = storedYMin;
+            if (Number.isFinite(storedYMax)) chartYMax = storedYMax;
+            [chartXMin, chartXMax] = [chartXMin, chartXMax].sort((left, right) => left - right);
+            [chartYMin, chartYMax] = [chartYMin, chartYMax].sort((left, right) => left - right);
+            if (chartXMin === chartXMax) [chartXMin, chartXMax] = [-650, 650];
+            if (chartYMin === chartYMax) [chartYMin, chartYMax] = [-50, 650];
         } catch(e) { console.log('Storage access error', e); }
 
         const vizToggleInterference = document.getElementById('vizToggleInterference');
@@ -5833,46 +6306,82 @@
             if (vizToggleDetection2) vizToggleDetection2.checked = showDetection2;
             if (vizToggleDetection3) vizToggleDetection3.checked = showDetection3;
             if (vizToggleDetection4) vizToggleDetection4.checked = showDetection4;
+            layout.xaxis.showgrid = showGrid;
+            layout.yaxis.showgrid = showGrid;
             
             // Only update Plotly if the chart exists
             const chartDiv = document.getElementById('chart');
-            if (chartDiv && chartDiv.layout) {
+            if (chartDiv && chartDiv.layout && isRadar2dSurfaceVisible()) {
                 if (isEditingZone) {
                     renderChartForCurrentMode();
                 } else {
                     // Update both shapes and annotations (labels)
-                    Plotly.relayout('chart', {
+                    runRadarPlotlyUpdate(() => Plotly.relayout(chartDiv, {
                         shapes: getChartShapes(),
                         annotations: getChartAnnotations()
-                    });
+                    }));
                 }
+                runRadarPlotlyUpdate(() => Plotly.relayout(chartDiv, {
+                    'xaxis.showgrid': showGrid,
+                    'yaxis.showgrid': showGrid
+                }));
             }
+            refreshRadar3dScene();
         }
         
         function updateRadarScale() {
-            chartXMin = parseInt(vizXMin.value);
-            chartXMax = parseInt(vizXMax.value);
-            chartYMin = parseInt(vizYMin.value);
-            chartYMax = parseInt(vizYMax.value);
+            const requested = [vizXMin.value, vizXMax.value, vizYMin.value, vizYMax.value].map(Number);
+            if (requested.some((value) => !Number.isFinite(value))) {
+                if (window.SwitchStudioState && typeof window.SwitchStudioState.showToast === 'function') {
+                    window.SwitchStudioState.showToast('error', 'Radar map bounds must be valid numbers.', 2600);
+                }
+                vizXMin.value = chartXMin;
+                vizXMax.value = chartXMax;
+                vizYMin.value = chartYMin;
+                vizYMax.value = chartYMax;
+                return false;
+            }
+            const [nextXMin, nextXMax] = requested.slice(0, 2).sort((left, right) => left - right);
+            const [nextYMin, nextYMax] = requested.slice(2, 4).sort((left, right) => left - right);
+            if (nextXMin === nextXMax || nextYMin === nextYMax) {
+                if (window.SwitchStudioState && typeof window.SwitchStudioState.showToast === 'function') {
+                    window.SwitchStudioState.showToast('error', 'Radar map bounds need a non-zero width and depth.', 2600);
+                }
+                vizXMin.value = chartXMin;
+                vizXMax.value = chartXMax;
+                vizYMin.value = chartYMin;
+                vizYMax.value = chartYMax;
+                return false;
+            }
+            chartXMin = nextXMin;
+            chartXMax = nextXMax;
+            chartYMin = nextYMin;
+            chartYMax = nextYMax;
+            vizXMin.value = chartXMin;
+            vizXMax.value = chartXMax;
+            vizYMin.value = chartYMin;
+            vizYMax.value = chartYMax;
             
             localStorage.setItem('vizXMin', chartXMin);
             localStorage.setItem('vizXMax', chartXMax);
             localStorage.setItem('vizYMin', chartYMin);
             localStorage.setItem('vizYMax', chartYMax);
+            layout.xaxis.range = [chartXMin, chartXMax];
+            layout.yaxis.range = [chartYMin, chartYMax];
             
             const chartDiv = document.getElementById('chart');
-            if (chartDiv && chartDiv.layout) {
+            if (chartDiv && chartDiv.layout && isRadar2dSurfaceVisible()) {
                 if (isEditingZone) {
-                    layout.xaxis.range = [chartXMin, chartXMax];
-                    layout.yaxis.range = [chartYMin, chartYMax];
                     renderChartForCurrentMode();
                 } else {
-                    Plotly.relayout('chart', {
+                    runRadarPlotlyUpdate(() => Plotly.relayout(chartDiv, {
                         'xaxis.range': [chartXMin, chartXMax],
                         'yaxis.range': [chartYMin, chartYMax]
-                    });
+                    }));
                 }
             }
+            refreshRadar3dScene();
+            return true;
         }
 
         // Attach Listeners
@@ -5893,7 +6402,7 @@
             const tanHalf = Math.tan(halfAngleRad);
             if (!Number.isFinite(tanHalf) || tanHalf <= 0) return { x: 0, y: 0 };
 
-            const yCeiling = Math.max(0, chartYMax);
+            const yCeiling = Math.min(600, Math.max(0, chartYMax));
             const isRight = direction >= 0;
             const xLimit = isRight ? Math.max(0, chartXMax) : Math.min(0, chartXMin);
             const xAtTop = (isRight ? 1 : -1) * yCeiling * tanHalf;
@@ -5907,7 +6416,7 @@
         function buildFovSectorPath(halfAngleDegrees) {
             const right = getFovBoundaryPoint(halfAngleDegrees, 1);
             const left = getFovBoundaryPoint(halfAngleDegrees, -1);
-            const topY = Math.max(0, chartYMax);
+            const topY = Math.min(600, Math.max(0, chartYMax));
             const rightTouchesTop = Math.abs(right.y - topY) < 0.5;
             const leftTouchesTop = Math.abs(left.y - topY) < 0.5;
             const points = [[0, 0], [right.x, right.y]];
@@ -5922,7 +6431,7 @@
         function buildFovSectorPoints(halfAngleDegrees) {
             const right = getFovBoundaryPoint(halfAngleDegrees, 1);
             const left = getFovBoundaryPoint(halfAngleDegrees, -1);
-            const topY = Math.max(0, chartYMax);
+            const topY = Math.min(600, Math.max(0, chartYMax));
             const rightTouchesTop = Math.abs(right.y - topY) < 0.5;
             const leftTouchesTop = Math.abs(left.y - topY) < 0.5;
             const points = [[0, 0], [right.x, right.y]];
@@ -6123,7 +6632,13 @@
         function renderChartForCurrentMode() {
             layout.shapes = getChartShapes();
             layout.annotations = getChartAnnotations();
-            Plotly.react('chart', buildChartDataForCurrentMode(), layout, chartConfig);
+            if (!isRadar2dSurfaceVisible() || typeof Plotly === 'undefined') return false;
+            return runRadarPlotlyUpdate(() => Plotly.react(
+                chartElement,
+                buildChartDataForCurrentMode(),
+                layout,
+                chartConfig
+            ));
         }
 
         function buildVerticalBandShapes() {
@@ -6759,6 +7274,9 @@
                     if (window.SwitchStudioLed && typeof window.SwitchStudioLed.setActiveDevice === 'function') {
                         window.SwitchStudioLed.setActiveDevice(null);
                     }
+                    if (radar3dModule && typeof radar3dModule.setActiveDevice === 'function') {
+                        radar3dModule.setActiveDevice(null);
+                    }
                     if (window.SwitchStudioState && typeof window.SwitchStudioState.setActiveDevice === 'function') {
                         window.SwitchStudioState.setActiveDevice(null);
                     }
@@ -6837,7 +7355,7 @@
             } else if ('z_min' in area) {
                  z0 = area.z_min; z1 = area.z_max;
             } else {
-                 z0 = -300; z1 = 300; // Updated Default height per Inovelli specs
+                 z0 = -600; z1 = 600; // Full supported span until height is reported
             }
 
             // Treat strictly zeroed zones as disabled/null (ignore Z for this check as partials might lack it)
@@ -6872,14 +7390,32 @@
             updateTimestamp(); 
 
             // 1. PARSE ZONES FOR VISUALIZATION
-            if ("mmWaveWidthMin" in config) {
-                 // Global Zone Config update
-                 // Note: we might receive partial updates, so we need to merge
-                 if (!deviceZones.mmwave_detection_areas.area1) deviceZones.mmwave_detection_areas.area1 = { x_min: -100, x_max: 100, y_min: 0, y_max: 600, z_min: -300, z_max: 300 }; // Default
-                 if ("mmWaveWidthMin" in config) deviceZones.mmwave_detection_areas.area1.x_min = parseInt(config.mmWaveWidthMin);
-                 if ("mmWaveWidthMax" in config) deviceZones.mmwave_detection_areas.area1.x_max = parseInt(config.mmWaveWidthMax);
-                 if ("mmWaveDepthMin" in config) deviceZones.mmwave_detection_areas.area1.y_min = parseInt(config.mmWaveDepthMin);
-                 if ("mmWaveDepthMax" in config) deviceZones.mmwave_detection_areas.area1.y_max = parseInt(config.mmWaveDepthMax);
+            const globalZoneFieldMap = {
+                mmWaveWidthMin: 'x_min',
+                mmWaveWidthMax: 'x_max',
+                mmWaveDepthMin: 'y_min',
+                mmWaveDepthMax: 'y_max',
+                mmWaveHeightMin: 'z_min',
+                mmWaveHeightMax: 'z_max'
+            };
+            const globalZoneUpdates = Object.entries(globalZoneFieldMap).reduce((updates, [field, coordinate]) => {
+                if (!(field in config)) return updates;
+                const rawValue = config[field];
+                if (rawValue === null || rawValue === undefined || (typeof rawValue === 'string' && !rawValue.trim())) return updates;
+                const parsed = Number(rawValue);
+                if (Number.isFinite(parsed)) updates[coordinate] = Math.round(parsed);
+                return updates;
+            }, {});
+            if (Object.keys(globalZoneUpdates).length > 0) {
+                const defaults = { x_min: -400, x_max: 400, y_min: 0, y_max: 600, z_min: -600, z_max: 600 };
+                if (!deviceZones.global) deviceZones.global = { ...defaults };
+                if (!deviceZones.mmwave_detection_areas.area1) {
+                    deviceZones.mmwave_detection_areas.area1 = { ...defaults };
+                }
+                Object.entries(globalZoneUpdates).forEach(([coordinate, rounded]) => {
+                    deviceZones.global[coordinate] = rounded;
+                    deviceZones.mmwave_detection_areas.area1[coordinate] = rounded;
+                });
             }
 
             if ("mmwave_detection_areas" in config) {
@@ -6913,9 +7449,8 @@
             }
             
             // Refresh chart to show new zones (unless editing)
-            if (!isEditingZone) {
-                Plotly.relayout('chart', {shapes: getChartShapes(), annotations: getChartAnnotations()});
-            }
+            refreshRadar2dZoneLayoutIfVisible();
+            refreshRadar3dScene();
 
             // 2. UPDATE LIVE SENSORS
             if ("occupancy" in config) {
@@ -7057,7 +7592,28 @@
                 getIsEditing: () => isEditingZone,
                 getIsInteracting: () => isInteracting,
                 historyLength: HISTORY_LENGTH,
-                shouldRenderTargets: () => hasActiveOccupancy()
+                shouldRenderTargets: () => hasActiveOccupancy(),
+                shouldRender2d: () => isRadar2dSurfaceVisible()
+            });
+        }
+
+        if (window.SwitchStudioRadar3D && typeof window.SwitchStudioRadar3D.init === 'function') {
+            radar3dModule = window.SwitchStudioRadar3D.init({
+                chart2dEl: chartElement,
+                chart3dEl: chart3dElement,
+                modeInputs: [radarView2d, radarView3d],
+                resetButton: radarResetView,
+                statusEl: radarViewStatus,
+                legendEl: radar3dLegend,
+                descriptionEl: document.getElementById('radarViewDescription'),
+                interactionButton: radar3dInteractionToggle,
+                plotly: window.Plotly,
+                zonesApi: zoneModule || window.SwitchStudioZones,
+                storage: window.localStorage,
+                visible: false,
+                activeDevice: activeDeviceTopic,
+                sceneModel: buildRadar3dSceneModel(),
+                onModeChange: (mode, details) => syncRadarShellForMode(mode, details)
             });
         }
         
@@ -7075,11 +7631,32 @@
             // Map the global config to our internal object
             deviceZones.global = {
                 x_min: config.x_min, x_max: config.x_max,
-                y_min: config.y_min, y_max: config.y_max
+                y_min: config.y_min, y_max: config.y_max,
+                z_min: config.z_min ?? -600, z_max: config.z_max ?? 600
             };
-            
-            if (!isEditingZone) Plotly.relayout('chart', {shapes: getChartShapes(), annotations: getChartAnnotations()});
+
+            refreshRadar2dZoneLayoutIfVisible();
+            refreshRadar3dScene();
         });
+
+        function applyRawZoneSnapshot(category, rawZones) {
+            if (!deviceZones[category]) return;
+            const nextAreas = { area1: null, area2: null, area3: null, area4: null };
+            const zones = Array.isArray(rawZones) ? rawZones : [];
+            const mappedZones = zoneModule && typeof zoneModule.mapRawZonesByAreaId === 'function'
+                ? zoneModule.mapRawZonesByAreaId(zones)
+                : zones.reduce((mapped, rawZone, compactIndex) => {
+                    if (!rawZone || typeof rawZone !== 'object') return mapped;
+                    mapped[`area${compactIndex + 1}`] = rawZone;
+                    return mapped;
+                }, nextAreas);
+            Object.entries(mappedZones).forEach(([areaKey, rawZone]) => {
+                if (!(areaKey in nextAreas) || !rawZone) return;
+                nextAreas[areaKey] = parseZ2MArea(rawZone);
+            });
+            deviceZones[category] = nextAreas;
+            refreshRadar3dScene();
+        }
 
         // --- INTERFERENCE ZONE LOGIC (From Raw Packets) ---
         socket.on('interference_zones', function(msg) {
@@ -7090,27 +7667,9 @@
             // FILTER: IGNORE DATA FROM OTHER DEVICES
             if (msg.topic !== deviceSelect.value) return;
 
-            // Update our internal state from the raw packet data
-            // Note: The backend sends an array. We try to map it to area1..4
-            for (let i = 0; i < 4; i++) {
-                const areaKey = `area${i + 1}`;
-                if (zones[i]) {
-                    // Raw packets Cmd 2 do not carry Z. Preserve existing Z if available.
-                    const existingZMin = deviceZones.mmwave_interference_areas[areaKey]?.z_min || 0;
-                    const existingZMax = deviceZones.mmwave_interference_areas[areaKey]?.z_max || 300;
+            applyRawZoneSnapshot('mmwave_interference_areas', zones);
 
-                    const newArea = parseZ2MArea(zones[i]);
-                    if (newArea) {
-                        newArea.z_min = existingZMin;
-                        newArea.z_max = existingZMax;
-                        deviceZones.mmwave_interference_areas[areaKey] = newArea;
-                    }
-                } else {
-                    deviceZones.mmwave_interference_areas[areaKey] = null;
-                }
-            }
-
-            if (!isEditingZone) Plotly.relayout('chart', {shapes: getChartShapes(), annotations: getChartAnnotations()});
+            refreshRadar2dZoneLayoutIfVisible();
 
             if (zoneModule && typeof zoneModule.handleInterferenceZones === 'function') {
                 zoneModule.handleInterferenceZones(zones);
@@ -7134,20 +7693,8 @@
             const zones = msg.payload;
             if (msg.topic !== deviceSelect.value) return;
 
-            for(let i=0; i<4; i++) {
-                if (zones[i]) {
-                    const newArea = parseZ2MArea(zones[i]);
-                    if (newArea) {
-                         // Use Z from packet if available, else default from parseZ2MArea
-                         if (zones[i].z_min !== undefined) newArea.z_min = zones[i].z_min;
-                         if (zones[i].z_max !== undefined) newArea.z_max = zones[i].z_max;
-                         deviceZones.mmwave_detection_areas[`area${i+1}`] = newArea;
-                    }
-                } else {
-                    deviceZones.mmwave_detection_areas[`area${i+1}`] = null;
-                }
-            }
-            if (!isEditingZone) Plotly.relayout('chart', {shapes: getChartShapes(), annotations: getChartAnnotations()});
+            applyRawZoneSnapshot('mmwave_detection_areas', zones);
+            refreshRadar2dZoneLayoutIfVisible();
         });
 
         socket.on('stay_zones', function(msg) {
@@ -7155,19 +7702,8 @@
             const zones = msg.payload;
             if (msg.topic !== deviceSelect.value) return;
 
-            for(let i=0; i<4; i++) {
-                if (zones[i]) {
-                    const newArea = parseZ2MArea(zones[i]);
-                    if (newArea) {
-                         if (zones[i].z_min !== undefined) newArea.z_min = zones[i].z_min;
-                         if (zones[i].z_max !== undefined) newArea.z_max = zones[i].z_max;
-                         deviceZones.mmwave_stay_areas[`area${i+1}`] = newArea;
-                    }
-                } else {
-                    deviceZones.mmwave_stay_areas[`area${i+1}`] = null;
-                }
-            }
-            if (!isEditingZone) Plotly.relayout('chart', {shapes: getChartShapes(), annotations: getChartAnnotations()});
+            applyRawZoneSnapshot('mmwave_stay_areas', zones);
+            refreshRadar2dZoneLayoutIfVisible();
         });
 
         socket.on('new_data', function(msg) {
@@ -7209,34 +7745,36 @@
 
             const sizes = data.targets.map(t => Math.max(8, Math.min(40, 10 + (t.z / 5))));
 
-            // CRITICAL JITTER FIX: If editing, use Plotly.restyle to ONLY update the points.
-            // Do NOT touch the layout (shapes) or trigger a full redraw (Plotly.react).
-            if (isEditingZone) {
-                // IMPORTANT: If user is interacting (dragging), we SKIP updates entirely to prevent glitching
-                if (isInteracting) return; 
+            if (isRadar2dSurfaceVisible()) {
+                // CRITICAL JITTER FIX: If editing, use Plotly.restyle to ONLY update the points.
+                // Do NOT touch the layout (shapes) or trigger a full redraw (Plotly.react).
+                if (isEditingZone) {
+                    // IMPORTANT: If user is interacting (dragging), we SKIP updates entirely to prevent glitching
+                    if (isInteracting) return;
 
-                const [targetTraceIndex, historyTraceIndex] = getTargetTraceIndices(document.getElementById('chart'));
-                Plotly.restyle('chart', {
-                    x: [data.targets.map(t => t.x), historyX],
-                    y: [data.targets.map(t => t.y), historyY],
-                    text: [data.targets.map(t => `ID: ${t.id} [Z:${t.z}cm]`), null],
-                    'marker.size': [sizes, null]
-                }, [targetTraceIndex, historyTraceIndex]);
-            } else {
-                // Normal update
-                Plotly.react('chart', [
-                    {
-                        x: data.targets.map(t => t.x),
-                        y: data.targets.map(t => t.y),
-                        text: data.targets.map(t => `ID: ${t.id} [Z:${t.z}cm]`),
-                        mode: 'markers+text',
-                        textposition: 'top center',
-                        marker: { size: sizes, color: '#58d7f0', line: {color: '#e3f8fd', width: 1.6} },
-                        textfont: { color: '#d7f5fb' },
-                        type: 'scatter'
-                    },
-                    { x: historyX, y: historyY, mode: 'lines', line: {color: '#43cde8', width: 2}, opacity: 0.26, type: 'scatter' }
-                ], layout);
+                    const [targetTraceIndex, historyTraceIndex] = getTargetTraceIndices(chartElement);
+                    runRadarPlotlyUpdate(() => Plotly.restyle(chartElement, {
+                        x: [data.targets.map(t => t.x), historyX],
+                        y: [data.targets.map(t => t.y), historyY],
+                        text: [data.targets.map(t => `ID: ${t.id} [Z:${t.z}cm]`), null],
+                        'marker.size': [sizes, null]
+                    }, [targetTraceIndex, historyTraceIndex]));
+                } else {
+                    // Normal update
+                    runRadarPlotlyUpdate(() => Plotly.react(chartElement, [
+                        {
+                            x: data.targets.map(t => t.x),
+                            y: data.targets.map(t => t.y),
+                            text: data.targets.map(t => `ID: ${t.id} [Z:${t.z}cm]`),
+                            mode: 'markers+text',
+                            textposition: 'top center',
+                            marker: { size: sizes, color: '#58d7f0', line: {color: '#e3f8fd', width: 1.6} },
+                            textfont: { color: '#d7f5fb' },
+                            type: 'scatter'
+                        },
+                        { x: historyX, y: historyY, mode: 'lines', line: {color: '#43cde8', width: 2}, opacity: 0.26, type: 'scatter' }
+                    ], layout));
+                }
             }
 
             if (data.targets.length === 0) {
@@ -7285,6 +7823,9 @@
 
             editingTarget = target;
             isEditingZone = true;
+            if (radar3dModule && typeof radar3dModule.setEditing === 'function') {
+                radar3dModule.setEditing(true);
+            }
             btnStartEdit.style.display = 'none'; // Hide Start Button
             
             // Find existing config or create default
@@ -7562,6 +8103,9 @@
         
         function endZoneEdit() {
             isEditingZone = false;
+            if (radar3dModule && typeof radar3dModule.setEditing === 'function') {
+                radar3dModule.setEditing(false);
+            }
             editingTarget = null;
             draftZoneConfig = null;
             zoneEditRequestId = null;

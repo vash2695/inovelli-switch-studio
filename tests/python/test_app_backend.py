@@ -21,7 +21,7 @@ def _make_device(name, topic, model="VZM32-SN", capabilities=None):
         "interference_zones": [],
         "detection_zones": [],
         "stay_zones": [],
-        "zone_config": {"x_min": -400, "x_max": 400, "y_min": 0, "y_max": 600},
+        "zone_config": dict(app_module.DEFAULT_GLOBAL_ZONE_CONFIG),
         "last_config": {},
         "ota_status": app_module.default_ota_status(),
         "last_update": 0,
@@ -35,6 +35,23 @@ def _make_device(name, topic, model="VZM32-SN", capabilities=None):
 def _int16_to_le_bytes(value):
     raw = int(value).to_bytes(2, byteorder="little", signed=True)
     return raw[0], raw[1]
+
+
+def _raw_zone_packet(command_id, zones):
+    payload = {"0": 29, "1": 47, "2": 18, "3": 1, "4": command_id, "5": len(zones)}
+    offset = 6
+    for zone in zones:
+        values = (
+            zone.get("x_min", 0), zone.get("x_max", 0),
+            zone.get("y_min", 0), zone.get("y_max", 0),
+            zone.get("z_min", 0), zone.get("z_max", 0),
+        )
+        for value in values:
+            low, high = _int16_to_le_bytes(value)
+            payload[str(offset)] = low
+            payload[str(offset + 1)] = high
+            offset += 2
+    return payload
 
 
 class AppBackendTests(unittest.TestCase):
@@ -1309,13 +1326,105 @@ class AppBackendTests(unittest.TestCase):
             "mmWaveWidthMax": "100",
             "mmWaveDepthMin": "10",
             "mmWaveDepthMax": "220",
+            "mmWaveHeightMin": "-175",
+            "mmWaveHeightMax": "325",
         }
         msg = SimpleNamespace(topic=topic, payload=json.dumps(payload).encode("utf-8"))
-        app_module.on_message(None, None, msg)
+        with patch.object(app_module.socketio, "emit") as emit:
+            app_module.on_message(None, None, msg)
 
         with app_module.device_list_lock:
             zone = dict(app_module.device_list["Bedroom Light Control"]["zone_config"])
-        self.assertEqual(zone, {"x_min": 20, "x_max": 100, "y_min": 10, "y_max": 220})
+        expected = {
+            "x_min": 20, "x_max": 100,
+            "y_min": 10, "y_max": 220,
+            "z_min": -175, "z_max": 325,
+        }
+        self.assertEqual(zone, expected)
+        snapshot = app_module.build_device_snapshot(topic)
+        self.assertEqual(snapshot["payload"]["zone_config"], expected)
+        zone_events = [
+            call.args[1]["payload"]
+            for call in emit.call_args_list
+            if call.args and call.args[0] == "zone_config"
+        ]
+        self.assertEqual(zone_events, [expected])
+        zone_deltas = [
+            call.args[1]["payload"]
+            for call in emit.call_args_list
+            if call.args and call.args[0] == "device_delta"
+            and call.args[1].get("kind") == "zone_config"
+        ]
+        self.assertEqual(zone_deltas, [expected])
+
+        partial = SimpleNamespace(
+            topic=topic,
+            payload=json.dumps({"mmWaveWidthMax": "120", "mmWaveHeightMin": ""}).encode("utf-8"),
+        )
+        app_module.on_message(None, None, partial)
+        with app_module.device_list_lock:
+            updated = dict(app_module.device_list["Bedroom Light Control"]["zone_config"])
+        self.assertEqual(updated, {**expected, "x_max": 120})
+
+    def test_default_global_zone_uses_the_full_supported_height_span(self):
+        self.assertEqual(app_module.DEFAULT_GLOBAL_ZONE_CONFIG["z_min"], -600)
+        self.assertEqual(app_module.DEFAULT_GLOBAL_ZONE_CONFIG["z_max"], 600)
+
+    def test_raw_zone_packets_preserve_slot_identity_and_signed_z_bounds(self):
+        topic = "zigbee2mqtt/Bedroom Light Control"
+        friendly_name = "Bedroom Light Control"
+        with app_module.device_list_lock:
+            app_module.device_list[friendly_name] = _make_device(friendly_name, topic)
+
+        active_area1 = {
+            "x_min": -120, "x_max": 140,
+            "y_min": 15, "y_max": 250,
+            "z_min": -345, "z_max": 456,
+        }
+        empty_area2 = {key: 0 for key in active_area1}
+        active_area3 = {
+            "x_min": 10, "x_max": 90,
+            "y_min": 30, "y_max": 180,
+            "z_min": -500, "z_max": -100,
+        }
+        expected = [
+            {"area_id": "area1", "area_index": 1, **active_area1},
+            {"area_id": "area3", "area_index": 3, **active_area3},
+        ]
+
+        event_and_cache = {
+            2: ("interference_zones", "interference_zones"),
+            3: ("detection_zones", "detection_zones"),
+            4: ("stay_zones", "stay_zones"),
+        }
+        for command_id, (event_name, cache_name) in event_and_cache.items():
+            with self.subTest(command_id=command_id):
+                message = SimpleNamespace(
+                    topic=topic,
+                    payload=json.dumps(_raw_zone_packet(
+                        command_id,
+                        [active_area1, empty_area2, active_area3],
+                    )).encode("utf-8"),
+                )
+                with patch.object(app_module.socketio, "emit") as emit:
+                    app_module.on_message(None, None, message)
+
+                with app_module.device_list_lock:
+                    cached = app_module.device_list[friendly_name][cache_name]
+                self.assertEqual(cached, expected)
+                raw_events = [
+                    call.args[1]["payload"]
+                    for call in emit.call_args_list
+                    if call.args and call.args[0] == event_name
+                ]
+                self.assertEqual(raw_events, [expected])
+                raw_deltas = [
+                    call.args[1]["payload"]
+                    for call in emit.call_args_list
+                    if call.args and call.args[0] == "device_delta"
+                    and call.args[1].get("kind") == event_name
+                ]
+                self.assertEqual(raw_deltas, [expected])
 
     def test_on_message_updates_ota_status_from_device_payload(self):
         topic = "zigbee2mqtt/Bedroom Light Control"
@@ -1426,7 +1535,7 @@ class AppBackendTests(unittest.TestCase):
             zones = list(app_module.device_list["Bedroom Light Control"]["detection_zones"])
 
         self.assertEqual(len(zones), 1)
-        self.assertEqual(zones[0], zone_values)
+        self.assertEqual(zones[0], {"area_id": "area1", "area_index": 1, **zone_values})
 
 
 if __name__ == "__main__":
