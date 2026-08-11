@@ -192,6 +192,31 @@ function createZonesApi() {
                 { type: 'scatter3d', name: `${options.name} edges` },
             ];
         },
+        buildZoneCuboidGeometry(zone) {
+            const read = (primary, alternate) => {
+                const value = Number(zone?.[primary] ?? zone?.[alternate]);
+                return Number.isFinite(value) ? value : null;
+            };
+            const raw = {
+                xMin: read('x_min', 'width_min'),
+                xMax: read('x_max', 'width_max'),
+                yMin: read('y_min', 'depth_min'),
+                yMax: read('y_max', 'depth_max'),
+                zMin: read('z_min', 'height_min'),
+                zMax: read('z_max', 'height_max'),
+            };
+            if (Object.values(raw).some((value) => value === null)) return null;
+            return {
+                bounds: {
+                    xMin: Math.min(raw.xMin, raw.xMax),
+                    xMax: Math.max(raw.xMin, raw.xMax),
+                    yMin: Math.min(raw.yMin, raw.yMax),
+                    yMax: Math.max(raw.yMin, raw.yMax),
+                    zMin: Math.min(raw.zMin, raw.zMax),
+                    zMax: Math.max(raw.zMin, raw.zMax),
+                },
+            };
+        },
         buildTarget3DTraces(targets, history, options) {
             calls.targets.push({ targets, history, options });
             return [
@@ -1013,6 +1038,152 @@ test('display-only height changes stay dormant in native 2D and preserve physica
     assert.equal(setup.zonesApi.calls.fov.at(-1).zMax, 180);
 });
 
+test('zone cuboids expand only Plotly render bounds while persisted display bounds and floor grid stay configured', () => {
+    const deviceKey = 'zigbee2mqtt/office switch';
+    const displayStorageKey = `switchStudio.radarDisplayHeight:${encodeURIComponent(deviceKey)}`;
+    const storage = createStorage({
+        'switchStudio.radarViewMode': '3d',
+        [displayStorageKey]: '{"zMin":-120,"zMax":160}',
+    });
+    const displayBounds = {
+        xMin: -300,
+        xMax: 300,
+        yMin: 0,
+        yMax: 600,
+        zMin: -120,
+        zMax: 160,
+    };
+    const zones = {
+        global: null,
+        mmwave_detection_areas: {
+            area1: {
+                area_id: 'area1',
+                x_min: -720,
+                x_max: -640,
+                y_min: 20,
+                y_max: 700,
+                z_min: -540,
+                z_max: -300,
+            },
+        },
+        mmwave_stay_areas: {
+            area1: {
+                area_id: 'area1',
+                x_min: 120,
+                x_max: 680,
+                y_min: -90,
+                y_max: 500,
+                z_min: 100,
+                z_max: 570,
+            },
+        },
+        mmwave_interference_areas: [{
+            area_id: 'area1',
+            x_min: -100,
+            x_max: 100,
+            y_min: 50,
+            y_max: 200,
+            z_min: -40,
+            z_max: 80,
+        }],
+    };
+    const setup = loadController({
+        storage,
+        sceneModel: scene({
+            zones,
+            bounds: displayBounds,
+            fovBounds: { zMin: -90, zMax: 140 },
+        }),
+        initialMode: '3d',
+        activeDevice: deviceKey,
+    });
+    const initialPlot = setup.plotly.calls.find((call) => call.kind === 'newPlot');
+
+    assert.deepEqual(
+        Array.from(initialPlot.layout.scene.xaxis.range),
+        [-762, 722],
+        'the 1,400 cm zone union receives a 42 cm fit margin on both overflowing sides',
+    );
+    assert.deepEqual(
+        Array.from(initialPlot.layout.scene.yaxis.range),
+        [-114, 724],
+        'the 790 cm zone union receives a 24 cm fit margin on both overflowing sides',
+    );
+    assert.deepEqual(
+        Array.from(initialPlot.layout.scene.zaxis.range),
+        [-574, 604],
+        'the 1,110 cm zone union receives a 34 cm fit margin on both overflowing sides',
+    );
+    const floorGrid = initialPlot.traces.find((trace) => trace.name === 'Floor grid');
+    const finiteFloorX = Array.from(floorGrid.x).filter(Number.isFinite);
+    const finiteFloorY = Array.from(floorGrid.y).filter(Number.isFinite);
+    const finiteFloorZ = Array.from(floorGrid.z).filter(Number.isFinite);
+    assert.deepEqual([Math.min(...finiteFloorX), Math.max(...finiteFloorX)], [-300, 300]);
+    assert.deepEqual([Math.min(...finiteFloorY), Math.max(...finiteFloorY)], [0, 600]);
+    assert.equal(finiteFloorZ.every((value) => value === -120), true, 'the floor grid stays at the configured display floor');
+    assert.deepEqual(plain(setup.controller.loadDisplayHeightBounds(deviceKey)), { zMin: -120, zMax: 160 });
+    assert.equal(storage.value(displayStorageKey), '{"zMin":-120,"zMax":160}');
+    assert.equal(storage.writes.length, 0, 'expanding render axes must not rewrite the saved per-device display range');
+
+    setup.controller.setSceneModel(scene({
+        zones: {
+            global: null,
+            mmwave_detection_areas: {},
+            mmwave_stay_areas: {},
+            mmwave_interference_areas: [],
+        },
+        bounds: displayBounds,
+        fovBounds: { zMin: -90, zMax: 140 },
+    }));
+    const withoutOutliers = setup.plotly.calls.filter((call) => call.kind === 'react').at(-1);
+    assert.deepEqual(Array.from(withoutOutliers.layout.scene.xaxis.range), [-300, 300]);
+    assert.deepEqual(Array.from(withoutOutliers.layout.scene.yaxis.range), [0, 600]);
+    assert.deepEqual(Array.from(withoutOutliers.layout.scene.zaxis.range), [-120, 160]);
+    const restoredFloorGrid = withoutOutliers.traces.find((trace) => trace.name === 'Floor grid');
+    assert.equal(
+        Array.from(restoredFloorGrid.z).filter(Number.isFinite).every((value) => value === -120),
+        true,
+    );
+    assert.deepEqual(plain(setup.controller.loadDisplayHeightBounds(deviceKey)), { zMin: -120, zMax: 160 });
+    assert.equal(storage.value(displayStorageKey), '{"zMin":-120,"zMax":160}');
+    assert.equal(storage.writes.length, 0);
+});
+
+test('a sensor origin outside the display envelope expands render axes to zero without zone padding', () => {
+    const displayBounds = {
+        xMin: 50,
+        xMax: 300,
+        yMin: 100,
+        yMax: 600,
+        zMin: 20,
+        zMax: 160,
+    };
+    const setup = loadController({
+        sceneModel: scene({
+            zones: {
+                global: null,
+                mmwave_detection_areas: {},
+                mmwave_stay_areas: {},
+                mmwave_interference_areas: [],
+            },
+            bounds: displayBounds,
+        }),
+        initialMode: '3d',
+    });
+    const newPlot = setup.plotly.calls.find((call) => call.kind === 'newPlot');
+
+    assert.deepEqual(Array.from(newPlot.layout.scene.xaxis.range), [0, 300]);
+    assert.deepEqual(Array.from(newPlot.layout.scene.yaxis.range), [0, 600]);
+    assert.deepEqual(Array.from(newPlot.layout.scene.zaxis.range), [0, 160]);
+    const floorGrid = newPlot.traces.find((trace) => trace.name === 'Floor grid');
+    const finiteFloorX = Array.from(floorGrid.x).filter(Number.isFinite);
+    const finiteFloorY = Array.from(floorGrid.y).filter(Number.isFinite);
+    const finiteFloorZ = Array.from(floorGrid.z).filter(Number.isFinite);
+    assert.deepEqual([Math.min(...finiteFloorX), Math.max(...finiteFloorX)], [50, 300]);
+    assert.deepEqual([Math.min(...finiteFloorY), Math.max(...finiteFloorY)], [100, 600]);
+    assert.equal(finiteFloorZ.every((value) => value === 20), true);
+});
+
 test('scene assembly uses exact XYZ bounds, one primary cuboid, slot visibility, and separate zone colors', () => {
     const setup = loadController({ sceneModel: scene(), initialMode: '3d' });
     const newPlot = setup.plotly.calls.find((call) => call.kind === 'newPlot');
@@ -1737,6 +1908,170 @@ test('target rendering safely falls back to react when Plotly restyle is unavail
     setup.zonesApi.emitSnapshot({ reason: 'live', targets: [{ id: 1, x: 5 }], history: {} });
     setup.clock.advance(125);
     assert.equal(plotly.calls.filter((call) => call.kind === 'react').length, initialReactCalls + 1);
+});
+
+test('delayed target and scene reacts preserve the latest user camera indefinitely despite stale Plotly layout state', async () => {
+    const plotly = createPlotly();
+    const renders = [];
+    delete plotly.restyle;
+    plotly.react = (element, traces, layout, config) => {
+        const deferred = createDeferred();
+        const call = { kind: 'react', element, traces, layout, config, deferred };
+        plotly.calls.push(call);
+        renders.push(call);
+        return deferred.promise;
+    };
+    const setup = loadController({
+        initialMode: '3d',
+        activeDevice: 'device-a',
+        sceneModel: scene(),
+        plotly,
+    });
+    renders.forEach((render) => render.deferred.resolve(setup.elements.chart3d));
+    await flushPromises();
+    const baselineRenders = renders.length;
+    const initialPlot = plotly.calls.find((call) => call.kind === 'newPlot');
+    setup.elements.chart3d._fullLayout = {
+        scene: {
+            camera: plain(initialPlot.layout.scene.camera),
+            uirevision: initialPlot.layout.scene.uirevision,
+        },
+    };
+    const userCamera = {
+        eye: { x: -1.7, y: -1.1, z: 0.85 },
+        center: { x: 0, y: 0, z: 0 },
+        up: { x: 0, y: 0, z: 1 },
+        projection: { type: 'perspective' },
+    };
+    const relayoutsBeforeUserCamera = cameraRelayouts(setup).length;
+    setup.elements.chart3d.emit('plotly_relayout', { 'scene.camera': userCamera });
+    assert.equal(cameraRelayouts(setup).length, relayoutsBeforeUserCamera, 'a safe user camera should not be corrected');
+
+    setup.zonesApi.emitSnapshot({
+        reason: 'live',
+        targets: [{ id: 1, x: 12, y: 34, z: 56 }],
+        history: {},
+    });
+    setup.clock.advance(125);
+    assert.equal(renders.length, baselineRenders + 1);
+    assertCameraClose(plain(renders.at(-1).layout.scene.camera), userCamera);
+
+    const updatedScene = scene({
+        bounds: { xMin: -560, xMax: 640, yMin: -40, yMax: 720, zMin: -320, zMax: 460 },
+    });
+    setup.controller.setSceneModel(updatedScene);
+    assert.equal(renders.length, baselineRenders + 2);
+    assertCameraClose(plain(renders.at(-1).layout.scene.camera), userCamera);
+
+    renders.at(-1).deferred.resolve(setup.elements.chart3d);
+    await flushPromises();
+    renders[baselineRenders].deferred.resolve(setup.elements.chart3d);
+    await flushPromises();
+
+    setup.clock.advance(86_400_000);
+    setup.zonesApi.emitSnapshot({
+        reason: 'live',
+        targets: [{ id: 1, x: 98, y: 76, z: 54 }],
+        history: {},
+    });
+    assert.equal(renders.length, baselineRenders + 3, 'a target arriving a day later should still render immediately');
+    assertCameraClose(plain(renders.at(-1).layout.scene.camera), userCamera);
+    renders.at(-1).deferred.resolve(setup.elements.chart3d);
+    await flushPromises();
+
+    setup.controller.setSceneModel(scene({
+        bounds: { xMin: -600, xMax: 600, yMin: 0, yMax: 800, zMin: -420, zMax: 520 },
+    }));
+    assert.equal(renders.length, baselineRenders + 4);
+    renders.slice(baselineRenders).forEach((render) => {
+        assertCameraClose(plain(render.layout.scene.camera), userCamera);
+    });
+    renders.at(-1).deferred.resolve(setup.elements.chart3d);
+    await flushPromises();
+
+    assert.equal(setup.controller.getMode(), '3d');
+    assert.equal(setup.elements.chart2d.hidden, true);
+    assert.equal(setup.elements.chart3d.hidden, false);
+    assert.equal(projectionRelayouts(setup).length, 0);
+});
+
+test('a user camera change during a pending steady react is restored after finalize and stays authoritative', async () => {
+    const plotly = createPlotly();
+    const setup = loadController({
+        initialMode: '3d',
+        activeDevice: 'device-a',
+        sceneModel: scene(),
+        plotly,
+    });
+    const initialPlot = plotly.calls.find((call) => call.kind === 'newPlot');
+    const cameraA = {
+        eye: { x: 1.9, y: -0.8, z: 1.25 },
+        center: { x: 0, y: 0, z: 0 },
+        up: { x: 0, y: 0, z: 1 },
+        projection: { type: 'perspective' },
+    };
+    const cameraB = {
+        eye: { x: -1.4, y: -1.6, z: 0.95 },
+        center: { x: 0, y: 0, z: 0 },
+        up: { x: 0, y: 0, z: 1 },
+        projection: { type: 'perspective' },
+    };
+    setup.elements.chart3d._fullLayout = {
+        scene: {
+            camera: cameraA,
+            uirevision: initialPlot.layout.scene.uirevision,
+        },
+    };
+
+    const pendingRenders = [];
+    plotly.react = (element, traces, layout, config) => {
+        const deferred = createDeferred();
+        const call = { kind: 'react', element, traces, layout, config, deferred };
+        plotly.calls.push(call);
+        pendingRenders.push(call);
+        return deferred.promise;
+    };
+    setup.controller.setSceneModel(scene({
+        bounds: { xMin: -560, xMax: 640, yMin: -20, yMax: 720, zMin: -320, zMax: 460 },
+    }));
+    assert.equal(pendingRenders.length, 1);
+    assertCameraClose(plain(pendingRenders[0].layout.scene.camera), cameraA);
+
+    const relayoutCountBeforeB = cameraRelayouts(setup).length;
+    const projectionCountBeforeB = projectionRelayouts(setup).length;
+    setup.elements.chart3d.emit('plotly_relayout', { 'scene.camera': cameraB });
+    assert.equal(
+        cameraRelayouts(setup).length,
+        relayoutCountBeforeB,
+        'the safe user camera itself must not need a correction',
+    );
+
+    pendingRenders[0].deferred.resolve(setup.elements.chart3d);
+    await flushPromises();
+    const restoreCalls = cameraRelayouts(setup).slice(relayoutCountBeforeB);
+    assert.equal(restoreCalls.length, 1, 'finalizing stale camera A should restore newer camera B exactly once');
+    assertCameraClose(plain(cameraFromRelayout(restoreCalls[0])), cameraB);
+    assert.equal(restoreCalls[0].update['scene.camera'], undefined, 'camera restoration should use flattened camera vectors');
+    assert.equal(restoreCalls[0].update['scene.camera.projection.type'], undefined);
+    assert.equal(projectionRelayouts(setup).length, projectionCountBeforeB);
+
+    setup.controller.setSceneModel(scene({
+        bounds: { xMin: -600, xMax: 680, yMin: -40, yMax: 760, zMin: -360, zMax: 500 },
+    }));
+    assert.equal(pendingRenders.length, 2);
+    assertCameraClose(
+        plain(pendingRenders[1].layout.scene.camera),
+        cameraB,
+        1e-9,
+    );
+    pendingRenders[1].deferred.resolve(setup.elements.chart3d);
+    await flushPromises();
+    assert.equal(
+        cameraRelayouts(setup).length,
+        relayoutCountBeforeB + 1,
+        'later steady renders using camera B must not schedule another restoration',
+    );
+    assert.equal(projectionRelayouts(setup).length, projectionCountBeforeB);
 });
 
 test('uirevision is stable for one device and changes to reset the camera for another', () => {

@@ -15,6 +15,9 @@
     const TOP_DOWN_ORBIT_AZIMUTH = -Math.PI / 2;
     const MIN_CAMERA_RADIUS = 0.82;
     const MAX_CAMERA_RADIUS = 4.6;
+    const ZONE_RENDER_PADDING_MIN_CM = 20;
+    const ZONE_RENDER_PADDING_MAX_CM = 60;
+    const ZONE_RENDER_PADDING_RATIO = 0.03;
     const CAMERA_POLE_MARGIN = 0.015;
     const MIN_CAMERA_ELEVATION = (-Math.PI / 2) + CAMERA_POLE_MARGIN;
     const MAX_CAMERA_ELEVATION = (Math.PI / 2) - CAMERA_POLE_MARGIN;
@@ -118,6 +121,8 @@
     let mobileInteractionLocked = true;
     let lastMobileState = null;
     let lastPerspectiveCamera = null;
+    let perspectiveCameraGeneration = 0;
+    let perspectiveCameraAuthoritative = false;
     let cameraTransitionTimer = null;
     let cameraTransitionGeneration = 0;
     let modeRequestGeneration = 0;
@@ -171,6 +176,107 @@
         return { xMin, xMax, yMin, yMax, zMin, zMax };
     }
 
+    function readZoneCoordinate(source, names) {
+        for (const name of names) {
+            const rawValue = source?.[name];
+            if (rawValue === null || rawValue === undefined) continue;
+            if (typeof rawValue === 'string' && !rawValue.trim()) continue;
+            const value = Number(rawValue);
+            if (Number.isFinite(value)) return value;
+        }
+        return null;
+    }
+
+    function getZoneCoordinateBounds(zone) {
+        const source = zone?.zone || zone?.config || zone;
+        if (!source || typeof source !== 'object') return null;
+        if (zonesApi && typeof zonesApi.buildZoneCuboidGeometry === 'function') {
+            const geometry = zonesApi.buildZoneCuboidGeometry(source);
+            const geometryBounds = geometry?.bounds;
+            if (geometryBounds && ['xMin', 'xMax', 'yMin', 'yMax', 'zMin', 'zMax'].every(
+                (key) => Number.isFinite(Number(geometryBounds[key])),
+            )) {
+                if (
+                    Number(geometryBounds.xMin) === Number(geometryBounds.xMax)
+                    || Number(geometryBounds.yMin) === Number(geometryBounds.yMax)
+                    || Number(geometryBounds.zMin) === Number(geometryBounds.zMax)
+                ) return null;
+                return normalizeBounds(geometryBounds);
+            }
+        }
+
+        const values = {
+            xMin: readZoneCoordinate(source, ['x_min', 'width_min']),
+            xMax: readZoneCoordinate(source, ['x_max', 'width_max']),
+            yMin: readZoneCoordinate(source, ['y_min', 'depth_min']),
+            yMax: readZoneCoordinate(source, ['y_max', 'depth_max']),
+            zMin: readZoneCoordinate(source, ['z_min', 'height_min']),
+            zMax: readZoneCoordinate(source, ['z_max', 'height_max']),
+        };
+        if (Object.values(values).some((value) => value === null)) return null;
+        if (values.xMin === values.xMax || values.yMin === values.yMax || values.zMin === values.zMax) return null;
+        const normalized = normalizeBounds(values);
+        return normalized;
+    }
+
+    function collectConfiguredZoneBounds(source, output, visited) {
+        if (!source || typeof source !== 'object') return output;
+        const seen = visited || new WeakSet();
+        if (seen.has(source)) return output;
+        seen.add(source);
+        if (Array.isArray(source)) {
+            source.forEach((entry) => collectConfiguredZoneBounds(entry, output, seen));
+            return output;
+        }
+        const zoneBounds = getZoneCoordinateBounds(source);
+        if (zoneBounds) {
+            output.push(zoneBounds);
+            return output;
+        }
+        Object.values(source).forEach((entry) => collectConfiguredZoneBounds(entry, output, seen));
+        return output;
+    }
+
+    function buildRenderBounds(displayBounds, zones) {
+        const renderBounds = { ...displayBounds };
+        const zoneBounds = collectConfiguredZoneBounds(zones, [], new WeakSet());
+        const contentBounds = { ...displayBounds };
+        zoneBounds.forEach((bounds) => {
+            contentBounds.xMin = Math.min(contentBounds.xMin, bounds.xMin);
+            contentBounds.xMax = Math.max(contentBounds.xMax, bounds.xMax);
+            contentBounds.yMin = Math.min(contentBounds.yMin, bounds.yMin);
+            contentBounds.yMax = Math.max(contentBounds.yMax, bounds.yMax);
+            contentBounds.zMin = Math.min(contentBounds.zMin, bounds.zMin);
+            contentBounds.zMax = Math.max(contentBounds.zMax, bounds.zMax);
+        });
+
+        const axes = [
+            ['xMin', 'xMax'],
+            ['yMin', 'yMax'],
+            ['zMin', 'zMax'],
+        ];
+        axes.forEach(([minKey, maxKey]) => {
+            const span = contentBounds[maxKey] - contentBounds[minKey];
+            const padding = Math.min(
+                ZONE_RENDER_PADDING_MAX_CM,
+                Math.max(ZONE_RENDER_PADDING_MIN_CM, Math.ceil(span * ZONE_RENDER_PADDING_RATIO)),
+            );
+            const zoneTouchesMin = zoneBounds.some((bounds) => bounds[minKey] <= displayBounds[minKey]);
+            const zoneTouchesMax = zoneBounds.some((bounds) => bounds[maxKey] >= displayBounds[maxKey]);
+            if (zoneTouchesMin) renderBounds[minKey] = contentBounds[minKey] - padding;
+            else renderBounds[minKey] = contentBounds[minKey];
+            if (zoneTouchesMax) renderBounds[maxKey] = contentBounds[maxKey] + padding;
+            else renderBounds[maxKey] = contentBounds[maxKey];
+
+            // The physical switch remains a reference point even when a user
+            // chooses a display range that excludes zero. Unlike zone meshes,
+            // the point itself does not need extra clipping clearance.
+            renderBounds[minKey] = Math.min(renderBounds[minKey], 0);
+            renderBounds[maxKey] = Math.max(renderBounds[maxKey], 0);
+        });
+        return renderBounds;
+    }
+
     function normalizeVisibility(rawVisibility) {
         const raw = rawVisibility || {};
         const detectionAreas = Array.isArray(raw.detectionAreas)
@@ -192,16 +298,20 @@
 
     function normalizeSceneModel(rawModel) {
         const raw = rawModel || {};
-        const bounds = normalizeBounds(raw.bounds);
+        const displayBounds = normalizeBounds(raw.displayBounds || raw.bounds);
+        const zones = raw.zones && typeof raw.zones === 'object' ? raw.zones : {};
+        const renderBounds = buildRenderBounds(displayBounds, zones);
         const fovSource = raw.fovBounds || {};
         let fovZMin = readBound(fovSource, 'zMin', 'z_min', DISPLAY_HEIGHT_MIN);
         let fovZMax = readBound(fovSource, 'zMax', 'z_max', DISPLAY_HEIGHT_MAX);
         if (fovZMin > fovZMax) [fovZMin, fovZMax] = [fovZMax, fovZMin];
         if (fovZMin === fovZMax) fovZMax = fovZMin + 1;
         return {
-            zones: raw.zones && typeof raw.zones === 'object' ? raw.zones : {},
+            zones,
             visibility: normalizeVisibility(raw.visibility),
-            bounds,
+            bounds: displayBounds,
+            displayBounds,
+            renderBounds,
             fovBounds: { zMin: fovZMin, zMax: fovZMax },
         };
     }
@@ -285,6 +395,12 @@
         return normalizeMode(mode) === '3d'
             ? sanitizePerspectiveCamera(lastPerspectiveCamera || DEFAULT_CAMERA)
             : sanitizeOrthographicCamera();
+    }
+
+    function cameraForSteadyRender(mode) {
+        const normalized = normalizeMode(mode);
+        if (normalized === '3d' && perspectiveCameraAuthoritative) return cameraForMode('3d');
+        return copyRenderedCamera(normalized) || cameraForMode(normalized);
     }
 
     function cameraSignature(camera) {
@@ -1140,7 +1256,7 @@
         const startingCamera = cameraTransitioning && lastIssuedCamera
             ? cloneCamera(lastIssuedCamera)
             : previousRenderedMode === '3d'
-                ? (copyRenderedCamera('3d') || lastPerspectiveCamera || copyCamera())
+                ? cameraForSteadyRender('3d')
                 : copyTopDownCamera();
         if (previousRenderedMode === '3d' && !cameraTransitioning) {
             lastPerspectiveCamera = sanitizePerspectiveCamera(startingCamera);
@@ -1313,7 +1429,7 @@
         }
         if (activeMode === '3d' && chartInitialized && pendingCameraTarget) {
             const requestGeneration = ++modeRequestGeneration;
-            const startingCamera = copyRenderedCamera('3d') || lastIssuedCamera || copyCamera();
+            const startingCamera = cameraForSteadyRender('3d') || lastIssuedCamera || copyCamera();
             lastPerspectiveCamera = cloneCamera(pendingCameraTarget);
             pendingCameraTarget = null;
             prepareSceneForTransition(
@@ -1336,7 +1452,7 @@
             && lastRenderedGeneration !== renderGeneration
         ) {
             const requestGeneration = ++modeRequestGeneration;
-            const camera = copyRenderedCamera('3d') || lastPerspectiveCamera || copyCamera();
+            const camera = cameraForSteadyRender('3d');
             beginSurfaceTransition('3d');
             syncSurfaceVisibility();
             prepareSceneForTransition(
@@ -1560,13 +1676,14 @@
 
     function buildStaticTraces(model) {
         const traces = [];
-        const { zones, visibility, bounds, fovBounds } = model;
-        if (visibility.grid) traces.push(buildFloorGridTrace(bounds));
+        const { zones, visibility, fovBounds } = model;
+        const displayBounds = model.displayBounds || model.bounds;
+        if (visibility.grid) traces.push(buildFloorGridTrace(displayBounds));
         if (visibility.fov && zonesApi && typeof zonesApi.buildFov3DTraces === 'function') {
             traces.push(...(zonesApi.buildFov3DTraces({
-                xMin: bounds.xMin,
-                xMax: bounds.xMax,
-                yMax: Math.min(600, Math.max(0, bounds.yMax)),
+                xMin: displayBounds.xMin,
+                xMax: displayBounds.xMax,
+                yMax: Math.min(600, Math.max(0, displayBounds.yMax)),
                 zMin: fovBounds.zMin,
                 zMax: fovBounds.zMax,
                 innerHalfAngleDegrees: 60,
@@ -1607,7 +1724,7 @@
     }
 
     function getSceneUiRevision() {
-        const bounds = sceneModel.bounds;
+        const bounds = sceneModel.renderBounds || sceneModel.bounds;
         return `${getUiRevision()}:scene:${[
             bounds.xMin,
             bounds.xMax,
@@ -1619,7 +1736,7 @@
     }
 
     function getSceneModeRelayout(mode) {
-        const bounds = sceneModel.bounds;
+        const bounds = sceneModel.renderBounds || sceneModel.bounds;
         return {
             'scene.xaxis.range': [bounds.xMin, bounds.xMax],
             'scene.yaxis.range': [bounds.yMin, bounds.yMax],
@@ -1656,7 +1773,8 @@
 
     function buildLayout(options) {
         const opts = options || {};
-        const { bounds, visibility } = sceneModel;
+        const { visibility } = sceneModel;
+        const bounds = sceneModel.renderBounds || sceneModel.bounds;
         const revision = getUiRevision();
         const mobile = mobileFn();
         const zAxis = axisLayout('Height (cm)', [bounds.zMin, bounds.zMax], visibility.grid, {
@@ -1753,8 +1871,16 @@
                 : activeMode;
             delete layoutOptions.renderedMode;
             if (!layoutOptions.camera && !resetCamera) {
-                layoutOptions.camera = copyRenderedCamera(activeMode) || cameraForMode(activeMode);
+                // Plotly's layout camera can lag behind a native orbit even
+                // after plotly_relayout reports the new view. The controller's
+                // remembered camera is therefore authoritative for every
+                // steady same-device render.
+                layoutOptions.camera = resultingCameraMode === '3d'
+                    ? cameraForSteadyRender('3d')
+                    : (copyRenderedCamera('2d') || cameraForMode('2d'));
             }
+            const perspectiveGenerationAtStart = perspectiveCameraGeneration;
+            const requestedCamera = layoutOptions.camera ? cloneCamera(layoutOptions.camera) : null;
             const result = renderer.react(
                 chart3dEl,
                 assembleTraces(),
@@ -1773,6 +1899,16 @@
                 lastModePathProgress = resultingCameraMode === '3d' ? 1 : 0;
                 lastModePathProgressValid = true;
                 lastRenderedGeneration = renderedGeneration;
+                if (
+                    resultingCameraMode === '3d'
+                    && !cameraTransitioning
+                    && perspectiveCameraGeneration !== perspectiveGenerationAtStart
+                ) {
+                    const latestCamera = cameraForMode('3d');
+                    if (!requestedCamera || !cameraNearlyEqual(requestedCamera, latestCamera)) {
+                        issueCameraRelayout(latestCamera, null, { fatal: false, includeProjection: false });
+                    }
+                }
                 return chart3dEl;
             };
             if (result && typeof result.then === 'function') {
@@ -1862,10 +1998,11 @@
             const creationGeneration = renderGeneration;
             const creationLifecycle = lifecycleGeneration;
             const creationMode = activeMode;
+            const creationCamera = opts.camera || cameraForMode(creationMode);
             const result = renderer.newPlot(
                 chart3dEl,
                 assembleTraces(),
-                buildLayout({ camera: opts.camera }),
+                buildLayout({ camera: creationCamera }),
                 buildConfig(),
             );
             const finalize = () => {
@@ -1893,7 +2030,7 @@
                     // is allowed to fade in, while preserving its bridge
                     // camera and logical 2D rendered state.
                     return reactCurrentScene('post-create', {
-                        camera: opts.camera || copyTopDownCamera(),
+                        camera: creationCamera,
                         renderedMode: opts.renderedMode || creationMode,
                     });
                 }
@@ -2002,6 +2139,8 @@
         cancelCameraTransition();
         cameraRevision = 0;
         lastPerspectiveCamera = copyCamera();
+        perspectiveCameraAuthoritative = false;
+        perspectiveCameraGeneration += 1;
         lastModePathProgress = activeMode === '3d' ? 1 : 0;
         lastModePathProgressValid = true;
         latestSnapshot = { reason: 'device-change', targets: [], history: {} };
@@ -2019,11 +2158,13 @@
             || activeMode !== '3d'
             || !!surfaceTransitionDirection
         ) return false;
-        const currentCamera = copyRenderedCamera('3d') || lastPerspectiveCamera || copyCamera();
+        const currentCamera = cameraForSteadyRender('3d');
         pendingCameraTarget = null;
         cancelCameraTransition();
         cameraRevision += 1;
         lastPerspectiveCamera = copyCamera();
+        perspectiveCameraGeneration += 1;
+        perspectiveCameraAuthoritative = true;
         return startCameraTransition('3d', '3d', currentCamera);
     }
 
@@ -2039,6 +2180,8 @@
         cameraRevision += 1;
         cancelCameraTransition();
         lastPerspectiveCamera = copyCamera();
+        perspectiveCameraAuthoritative = false;
+        perspectiveCameraGeneration += 1;
         lastModePathProgress = activeMode === '3d' ? 1 : 0;
         lastModePathProgressValid = true;
         lastTargetRenderAt = -Infinity;
@@ -2099,7 +2242,9 @@
         }
         const cameraKeys = Object.keys(event).filter((key) => key.startsWith('scene.camera.'));
         if (!cameraKeys.length) return null;
-        const fallback = copyRenderedCamera(activeMode) || cameraForMode(activeMode);
+        const fallback = activeMode === '3d'
+            ? cameraForSteadyRender('3d')
+            : (copyRenderedCamera('2d') || cameraForMode('2d'));
         const camera = cloneCamera(fallback);
         cameraKeys.forEach((key) => {
             const parts = key.split('.').slice(2);
@@ -2123,7 +2268,11 @@
         const corrected = activeMode === '3d'
             ? sanitizePerspectiveCamera(observed)
             : sanitizeOrthographicCamera();
-        if (activeMode === '3d') lastPerspectiveCamera = cloneCamera(corrected);
+        if (activeMode === '3d') {
+            lastPerspectiveCamera = cloneCamera(corrected);
+            perspectiveCameraGeneration += 1;
+            perspectiveCameraAuthoritative = true;
+        }
         if (activeMode === '3d') {
             lastModePathProgress = 1;
             lastModePathProgressValid = true;
@@ -2184,7 +2333,7 @@
         if (Math.abs(deltaY) < 0.01) return;
         stopCameraGesture(event);
         cancelCameraTransition();
-        const current = copyRenderedCamera('3d') || lastPerspectiveCamera || copyCamera();
+        const current = cameraForSteadyRender('3d');
         const factor = Math.exp(clamp(deltaY, -500, 500) * 0.0012);
         const zoomed = sanitizePerspectiveCamera({
             ...current,
@@ -2195,6 +2344,8 @@
             },
         });
         lastPerspectiveCamera = cloneCamera(zoomed);
+        perspectiveCameraGeneration += 1;
+        perspectiveCameraAuthoritative = true;
         issueCameraRelayout(zoomed, null, { fatal: false, includeProjection: false });
     }
 
@@ -2273,7 +2424,9 @@
                     // so the next 3D handoff prepares this layout before reveal.
                     if (canRenderScene()) {
                         reactCurrentScene('breakpoint', {
-                            camera: copyRenderedCamera(activeMode) || cameraForMode(activeMode),
+                            camera: activeMode === '3d'
+                                ? cameraForSteadyRender('3d')
+                                : (copyRenderedCamera('2d') || cameraForMode('2d')),
                             renderedMode: renderedCameraMode,
                         });
                     }
@@ -2364,6 +2517,8 @@
         mobileInteractionLocked = true;
         lastMobileState = null;
         lastPerspectiveCamera = copyCamera();
+        perspectiveCameraGeneration = 0;
+        perspectiveCameraAuthoritative = false;
         cameraTransitionTimer = null;
         cameraTransitionGeneration = 0;
         modeRequestGeneration = 0;

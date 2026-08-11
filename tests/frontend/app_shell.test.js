@@ -162,7 +162,7 @@ test('3D display height supports an accessible current-inventory bulk action wit
     assert.match(template, /Radar Display Range \(cm\)/);
     assert.match(
         template,
-        /Display only; does not change zones\. X\/Y affect both views\. Z affects 3D and uses the switch as 0 cm \(negative below, positive above\)\. Saved per device in this browser\./,
+        /Display only; does not change zones\. X\/Y affect both views\. Z affects 3D and uses the switch as 0 cm \(negative below, positive above\)\. The 3D view expands when needed to keep every zone whole\. Saved per device in this browser\./,
     );
     assert.match(template, /<label for="vizZMin">Height min \(Z\)<\/label><input type="number" id="vizZMin" min="-600" max="600" step="1" value="-600">/);
     assert.match(template, /<label for="vizZMax">Height max \(Z\)<\/label><input type="number" id="vizZMax" min="-600" max="600" step="1" value="600">/);
