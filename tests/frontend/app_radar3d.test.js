@@ -387,9 +387,11 @@ function cameraFromRelayout(call) {
 }
 
 function finishCameraTransition(setup, targetMode) {
-    // The 560 ms camera path resolves on the following 24 ms frame. Returning
-    // to native 2D then lets the 170 ms surface crossfade retire WebGL.
-    setup.clock.advance(targetMode === '2d' ? 760 : 584);
+    // Forward mode changes prepare for 48 ms, crossfade for 170 ms, and then
+    // run the 560 ms orbit, which resolves on the following 24 ms frame.
+    // Returning to native 2D keeps the 560 ms orbit followed by its 170 ms
+    // surface retirement.
+    setup.clock.advance(targetMode === '2d' ? 760 : 800);
 }
 
 function createGestureEvent(overrides) {
@@ -459,17 +461,43 @@ test('mode controls crossfade native 2D with one perspective scene and a fixed w
     assert.equal(setup.elements.chart3d.dataset.radarSurfaceState, 'incoming');
     assert.equal(setup.elements.reset.hidden, true);
     assert.equal(setup.controller.resetView(), false);
+    const preparedPlot = setup.plotly.calls.find((call) => call.kind === 'newPlot');
+    assertCameraClose(plain(preparedPlot.layout.scene.camera), TOP_DOWN_CAMERA);
+    assert.equal(cameraRelayouts(setup).length, 0);
 
     setup.clock.advance(47);
     assert.equal(setup.elements.chart2d.dataset.radarSurfaceState, 'outgoing');
     assert.equal(setup.elements.chart3d.dataset.radarSurfaceState, 'incoming');
+    assert.equal(cameraRelayouts(setup).length, 0, 'the prepared top-down scene must not orbit before its fade begins');
     setup.clock.advance(1);
     assert.equal(setup.elements.chart2d.dataset.radarSurfaceState, 'retiring');
     assert.equal(setup.elements.chart3d.dataset.radarSurfaceState, 'active');
+    assert.equal(cameraRelayouts(setup).length, 0);
 
-    setup.clock.advance(511);
+    setup.clock.advance(169);
+    assert.equal(setup.elements.chart2d.hidden, false);
+    assert.equal(setup.elements.chart2d.dataset.radarSurfaceState, 'retiring');
+    assert.equal(cameraRelayouts(setup).length, 0);
+    setup.clock.advance(1);
+    assert.equal(setup.elements.chart2d.hidden, true);
+    assert.equal(setup.elements.chart2d.dataset.radarSurfaceState, 'inactive');
+    assert.equal(setup.elements.chart3d.dataset.radarSurfaceState, 'active');
+    assert.equal(cameraRelayouts(setup).length, 0, 'the orbit must wait until the surface crossfade has settled');
+
+    setup.clock.advance(23);
+    assert.equal(cameraRelayouts(setup).length, 0);
+    setup.clock.advance(1);
+    const firstOrbitCamera = cameraFromRelayout(cameraRelayouts(setup).at(-1));
+    const firstOrbitDelta = Math.hypot(
+        firstOrbitCamera.eye.x - TOP_DOWN_CAMERA.eye.x,
+        firstOrbitCamera.eye.y - TOP_DOWN_CAMERA.eye.y,
+        firstOrbitCamera.eye.z - TOP_DOWN_CAMERA.eye.z,
+    );
+    assert.ok(firstOrbitDelta < 0.25, `first forward orbit frame jumped ${firstOrbitDelta}`);
+
+    setup.clock.advance(551);
     assert.equal(setup.elements.chart3d.dataset.transitioning, 'true');
-    setup.clock.advance(17);
+    setup.clock.advance(1);
     assert.equal(setup.elements.chart3d.dataset.transitioning, 'false');
     assert.equal(setup.elements.chart2d.hidden, true);
     assert.equal(setup.elements.chart3d.hidden, false);
@@ -482,11 +510,22 @@ test('mode controls crossfade native 2D with one perspective scene and a fixed w
     assert.equal(perspectiveRelayout.update['scene.aspectmode'], 'data');
     assert.equal(perspectiveRelayout.update['scene.dragmode'], 'turntable');
     assert.ok(forwardRelayouts.length >= 20, 'the 560 ms orbit should emit a smooth sequence of frames');
-    forwardRelayouts.forEach((call) => {
+    let previousEye = TOP_DOWN_CAMERA.eye;
+    forwardRelayouts.forEach((call, index) => {
         const camera = cameraFromRelayout(call);
+        const frameDelta = Math.hypot(
+            camera.eye.x - previousEye.x,
+            camera.eye.y - previousEye.y,
+            camera.eye.z - previousEye.z,
+        );
+        assert.ok(frameDelta < 0.25, `forward orbit frame ${index + 1} jumped ${frameDelta}`);
+        assert.ok(camera.eye.x >= -1e-9, `forward orbit frame ${index + 1} inverted world X`);
+        assert.ok(camera.eye.y < 0, `forward orbit frame ${index + 1} crossed the camera behind the map`);
+        assert.ok(-camera.eye.y > 0, `forward orbit frame ${index + 1} must keep world +X screen-right`);
         assert.deepEqual(plain(camera.center), { x: 0, y: 0, z: 0 });
         assert.deepEqual(plain(camera.up), { x: 0, y: 0, z: 1 });
         assert.equal(call.update['scene.camera']?.projection, undefined);
+        previousEye = camera.eye;
     });
 
     const reverseStart = cameraRelayouts(setup).length;
@@ -579,7 +618,7 @@ test('rapid mode reversal continues from the in-flight camera path and latest mo
     const setup = loadController();
 
     setup.elements.mode3d.click();
-    setup.clock.advance(280);
+    setup.clock.advance(498);
     assert.equal(setup.elements.chart3d.dataset.transitioning, 'true');
     const forwardCalls = cameraRelayouts(setup);
     const forwardCamera = cameraFromRelayout(forwardCalls.at(-1));
@@ -602,7 +641,10 @@ test('rapid mode reversal continues from the in-flight camera path and latest mo
     assert.deepEqual(plain(reverseCamera.center), { x: 0, y: 0, z: 0 });
     assert.deepEqual(plain(reverseCamera.up), { x: 0, y: 0, z: 1 });
 
-    finishCameraTransition(setup, '2d');
+    // Only the unfinished canonical path is reversed. This must settle well
+    // before a fresh 560 ms reverse orbit plus 170 ms fade would complete.
+    setup.clock.advance(450);
+    assert.equal(setup.elements.chart3d.dataset.transitioning, 'false');
     const completedCount = cameraRelayouts(setup).length;
     assertCameraClose(
         plain(cameraFromRelayout(cameraRelayouts(setup).at(-1))),
@@ -622,6 +664,40 @@ test('rapid mode reversal continues from the in-flight camera path and latest mo
         assert.deepEqual(plain(camera.up), { x: 0, y: 0, z: 1 });
         assert.equal(call.update['scene.camera']?.projection, undefined);
     });
+    assert.equal(projectionRelayouts(setup).length, 0);
+});
+
+test('reversing during the forward surface prelude restores native 2D immediately', () => {
+    const setup = loadController();
+
+    setup.elements.mode3d.click();
+    setup.clock.advance(100);
+    assert.equal(setup.controller.getMode(), '3d');
+    assert.equal(setup.elements.chart3d.dataset.transitioning, 'true');
+    assert.equal(setup.elements.chart2d.hidden, false);
+    assert.equal(setup.elements.chart2d.dataset.radarSurfaceState, 'retiring');
+    assert.equal(setup.elements.chart3d.hidden, false);
+    assert.equal(setup.elements.chart3d.dataset.radarSurfaceState, 'active');
+    assert.equal(cameraRelayouts(setup).length, 0, 'the 560 ms orbit must not have begun during the crossfade');
+
+    setup.elements.mode2d.click();
+    assert.equal(setup.controller.getMode(), '2d');
+    assert.equal(setup.storage.value('switchStudio.radarViewMode'), '2d');
+    assert.equal(setup.elements.chart3d.dataset.transitioning, 'false');
+    assert.equal(setup.elements.chart2d.hidden, false);
+    assert.equal(setup.elements.chart2d.dataset.radarSurfaceState, 'active');
+    assert.equal(setup.elements.chart2d.getAttribute('aria-hidden'), 'false');
+    assert.equal(setup.elements.chart3d.hidden, true);
+    assert.equal(setup.elements.chart3d.dataset.radarSurfaceState, 'inactive');
+    assert.equal(cameraRelayouts(setup).length, 0);
+
+    setup.clock.advance(1000);
+    assert.equal(setup.controller.getMode(), '2d');
+    assert.equal(setup.elements.chart2d.hidden, false);
+    assert.equal(setup.elements.chart2d.dataset.radarSurfaceState, 'active');
+    assert.equal(setup.elements.chart3d.hidden, true);
+    assert.equal(setup.elements.chart3d.dataset.radarSurfaceState, 'inactive');
+    assert.equal(cameraRelayouts(setup).length, 0, 'the canceled forward timers must not restart a stale orbit');
     assert.equal(projectionRelayouts(setup).length, 0);
 });
 
@@ -652,7 +728,9 @@ test('a hidden canceled reverse handoff restarts 3D continuously from the top-do
     const callsBeforeForward = cameraRelayouts(setup).length;
     setup.elements.mode3d.click();
     assert.equal(cameraRelayouts(setup).length, callsBeforeForward);
-    setup.clock.advance(24);
+    setup.clock.advance(241);
+    assert.equal(cameraRelayouts(setup).length, callsBeforeForward);
+    setup.clock.advance(1);
     assert.equal(cameraRelayouts(setup).length, callsBeforeForward + 1);
     const firstForwardCamera = cameraFromRelayout(cameraRelayouts(setup).at(-1));
     const bridgeDelta = Math.hypot(
@@ -685,7 +763,7 @@ test('target packets received during a camera transition reconcile once with the
     setup.elements.mode3d.click();
     setup.zonesApi.emitSnapshot({ reason: 'live', targets: [{ id: 1, x: 10, y: 20, z: 30 }], history: {} });
     setup.zonesApi.emitSnapshot({ reason: 'live', targets: [{ id: 1, x: 44, y: 55, z: 66 }], history: {} });
-    setup.clock.advance(575);
+    setup.clock.advance(793);
 
     assert.equal(setup.plotly.calls.filter((call) => call.kind === 'restyle').length, restylesBefore);
     assert.equal(setup.plotly.calls.filter((call) => call.kind === 'react').length, reactsBefore);
@@ -744,6 +822,97 @@ test('zone editing forces 2D without replacing the preference, then restores 3D'
     assert.equal(setup.modeEvents.at(-1).metadata.forced, false);
 });
 
+test('display height bounds validate and persist atomically for each device', () => {
+    const storage = createStorage({ 'switchStudio.radarViewMode': '3d' });
+    const setup = loadController({ storage, activeDevice: 'device-a' });
+    const api = setup.controller;
+    const keyA = 'switchStudio.radarDisplayHeight:zigbee2mqtt%2Foffice%20switch';
+    const keyB = 'switchStudio.radarDisplayHeight:zigbee2mqtt%2Fbedroom%20switch';
+
+    assert.deepEqual(plain(api.normalizeDisplayHeightBounds(420, -180)), { zMin: -180, zMax: 420 });
+    assert.deepEqual(plain(api.normalizeDisplayHeightBounds('-100', '-80')), { zMin: -100, zMax: -80 });
+    [
+        [null, 100],
+        [-100, undefined],
+        ['', 100],
+        ['   ', 100],
+        ['not-a-number', 100],
+        [-100, Infinity],
+        [-100, -100],
+        [-100, -81],
+        [-601, 100],
+        [-100, 601],
+    ].forEach(([zMin, zMax]) => {
+        assert.equal(api.normalizeDisplayHeightBounds(zMin, zMax), null);
+    });
+
+    assert.deepEqual(plain(api.loadDisplayHeightBounds('zigbee2mqtt/office switch')), { zMin: -600, zMax: 600 });
+    assert.deepEqual(
+        plain(api.saveDisplayHeightBounds('zigbee2mqtt/office switch', 420, -180)),
+        { zMin: -180, zMax: 420 },
+    );
+    assert.equal(storage.value(keyA), '{"zMin":-180,"zMax":420}');
+    assert.deepEqual(
+        plain(api.saveDisplayHeightBounds('zigbee2mqtt/bedroom switch', -360, 140)),
+        { zMin: -360, zMax: 140 },
+    );
+    assert.equal(storage.value(keyB), '{"zMin":-360,"zMax":140}');
+
+    assert.deepEqual(plain(api.loadDisplayHeightBounds('zigbee2mqtt/office switch')), { zMin: -180, zMax: 420 });
+    assert.deepEqual(plain(api.loadDisplayHeightBounds('zigbee2mqtt/bedroom switch')), { zMin: -360, zMax: 140 });
+    assert.deepEqual(plain(api.loadDisplayHeightBounds('zigbee2mqtt/office switch')), { zMin: -180, zMax: 420 });
+    assert.equal(api.saveDisplayHeightBounds('', -100, 100), null, 'unselected state must not create a shared height preference');
+
+    const priorA = storage.value(keyA);
+    assert.equal(api.saveDisplayHeightBounds('zigbee2mqtt/office switch', '', 100), null);
+    assert.equal(api.saveDisplayHeightBounds('zigbee2mqtt/office switch', 0, 10), null);
+    assert.equal(storage.value(keyA), priorA, 'invalid saves must retain the complete prior pair');
+
+    storage.setItem(keyA, '{"zMin":-120}');
+    assert.deepEqual(
+        plain(api.loadDisplayHeightBounds('zigbee2mqtt/office switch')),
+        { zMin: -600, zMax: 600 },
+        'a partial pair must fall back atomically',
+    );
+    storage.setItem(keyA, '{broken json');
+    assert.deepEqual(plain(api.loadDisplayHeightBounds('zigbee2mqtt/office switch')), { zMin: -600, zMax: 600 });
+    storage.setItem(keyA, '{"zMin":-601,"zMax":200}');
+    assert.deepEqual(plain(api.loadDisplayHeightBounds('zigbee2mqtt/office switch')), { zMin: -600, zMax: 600 });
+
+    assert.equal(setup.controller.getMode(), '3d');
+    assert.equal(storage.value('switchStudio.radarViewMode'), '3d', 'height persistence must not overwrite the global view mode');
+    const reloaded = loadController({ storage, activeDevice: 'zigbee2mqtt/bedroom switch' });
+    assert.equal(reloaded.controller.getMode(), '3d');
+    assert.deepEqual(
+        plain(reloaded.controller.loadDisplayHeightBounds('zigbee2mqtt/bedroom switch')),
+        { zMin: -360, zMax: 140 },
+    );
+});
+
+test('display-only height changes stay dormant in native 2D and preserve physical FOV bounds', () => {
+    const storage = createStorage({ 'switchStudio.radarViewMode': '2d' });
+    const initial = scene({
+        bounds: { xMin: -500, xMax: 500, yMin: 0, yMax: 600, zMin: -600, zMax: 600 },
+        fovBounds: { zMin: -120, zMax: 180 },
+    });
+    const setup = loadController({ storage, sceneModel: initial, activeDevice: 'device-a' });
+    const plotCount = setup.plotly.calls.filter((call) => call.kind === 'newPlot').length;
+
+    setup.controller.setSceneModel(scene({
+        bounds: { xMin: -500, xMax: 500, yMin: 0, yMax: 600, zMin: -180, zMax: 420 },
+        fovBounds: { zMin: -120, zMax: 180 },
+    }));
+
+    assert.equal(setup.controller.getMode(), '2d');
+    assert.equal(storage.value('switchStudio.radarViewMode'), '2d');
+    assert.equal(setup.plotly.calls.filter((call) => call.kind === 'newPlot').length, plotCount);
+    assert.equal(setup.elements.chart2d.hidden, false);
+    assert.equal(setup.elements.chart2d.dataset.radarSurfaceState, 'active');
+    assert.equal(setup.elements.chart3d.hidden, true);
+    assert.equal(setup.zonesApi.calls.fov.at(-1).zMin, -120);
+    assert.equal(setup.zonesApi.calls.fov.at(-1).zMax, 180);
+});
+
 test('scene assembly uses exact XYZ bounds, one primary cuboid, slot visibility, and separate zone colors', () => {
     const setup = loadController({ sceneModel: scene(), initialMode: '3d' });
     const newPlot = setup.plotly.calls.find((call) => call.kind === 'newPlot');
@@ -759,8 +928,8 @@ test('scene assembly uses exact XYZ bounds, one primary cuboid, slot visibility,
     assert.equal(setup.zonesApi.calls.fov.length, 1);
     assert.equal(setup.zonesApi.calls.fov[0].innerHalfAngleDegrees, 60);
     assert.equal(setup.zonesApi.calls.fov[0].outerHalfAngleDegrees, 75);
-    assert.equal(setup.zonesApi.calls.fov[0].zMin, -250);
-    assert.equal(setup.zonesApi.calls.fov[0].zMax, 250);
+    assert.equal(setup.zonesApi.calls.fov[0].zMin, -600);
+    assert.equal(setup.zonesApi.calls.fov[0].zMax, 600);
 
     const labels = setup.zonesApi.calls.zones.map((call) => call.options.name);
     assert.deepEqual(labels, [
@@ -771,7 +940,33 @@ test('scene assembly uses exact XYZ bounds, one primary cuboid, slot visibility,
     ]);
     assert.equal(labels.filter((label) => label === 'Primary detection area').length, 1);
     assert.notEqual(setup.zonesApi.calls.zones[0].options.color, setup.zonesApi.calls.zones[1].options.color);
-    assert.equal(newPlot.traces.some((trace) => trace.name === 'Sensor' && trace.marker.color === '#ff6f7d'), true);
+    assert.equal(
+        setup.zonesApi.calls.zones.every((call) => call.options.hoverinfo === 'skip'),
+        true,
+        'passive zone volumes must not create hover labels over the scene',
+    );
+
+    const sensorHeight = newPlot.traces.find((trace) => trace.name === 'Sensor height reference');
+    const sensorOrigin = newPlot.traces.find((trace) => trace.name === 'Sensor');
+    assert.ok(sensorHeight);
+    assert.equal(sensorHeight.type, 'scatter3d');
+    assert.equal(sensorHeight.mode, 'lines');
+    assert.deepEqual(Array.from(sensorHeight.x), [0, 0]);
+    assert.deepEqual(Array.from(sensorHeight.y), [0, 0]);
+    assert.deepEqual(Array.from(sensorHeight.z), [-250, 250]);
+    assert.equal(sensorHeight.hoverinfo, 'skip');
+    assert.ok(sensorOrigin);
+    assert.equal(sensorOrigin.mode, 'markers+text');
+    assert.deepEqual(Array.from(sensorOrigin.x), [0]);
+    assert.deepEqual(Array.from(sensorOrigin.y), [0]);
+    assert.deepEqual(Array.from(sensorOrigin.z), [0]);
+    assert.equal(sensorOrigin.marker.symbol, 'diamond');
+    assert.equal(sensorOrigin.marker.color, '#ff6f7d');
+    assert.deepEqual(
+        Array.from(newPlot.traces.slice(-2), (trace) => trace.name),
+        ['Live targets', 'Target trails'],
+        'static sensor traces must not disturb the stable live-target indices',
+    );
 });
 
 test('FOV remains capped at the supported six metre depth while axes can extend farther', () => {
@@ -795,6 +990,66 @@ test('FOV height stays authoritative while the scene axis can include other volu
     assert.deepEqual(Array.from(newPlot.layout.scene.zaxis.range), [-420, 510]);
     assert.equal(setup.zonesApi.calls.fov[0].zMin, -120);
     assert.equal(setup.zonesApi.calls.fov[0].zMax, 180);
+    const sensorHeight = newPlot.traces.find((trace) => trace.name === 'Sensor height reference');
+    const sensorOrigin = newPlot.traces.find((trace) => trace.name === 'Sensor');
+    assert.deepEqual(Array.from(sensorHeight.z), [-420, 510], 'sensor height follows the complete scene, not the narrower FOV');
+    assert.deepEqual(Array.from(sensorOrigin.z), [0]);
+});
+
+test('per-device display height updates the 3D axis and sensor span without changing FOV, mode, or camera', () => {
+    const storage = createStorage({ 'switchStudio.radarViewMode': '3d' });
+    const initialModel = scene({
+        bounds: { xMin: -500, xMax: 500, yMin: 0, yMax: 600, zMin: -600, zMax: 600 },
+        fovBounds: { zMin: -120, zMax: 180 },
+    });
+    const setup = loadController({
+        storage,
+        sceneModel: initialModel,
+        initialMode: '3d',
+        activeDevice: 'device-a',
+    });
+    const initialPlot = setup.plotly.calls.find((call) => call.kind === 'newPlot');
+    const userCamera = {
+        eye: { x: 1.9, y: -0.75, z: 1.45 },
+        center: { x: 0, y: 0, z: 0 },
+        up: { x: 0, y: 0, z: 1 },
+        projection: { type: 'perspective' },
+    };
+    setup.elements.chart3d._fullLayout = {
+        scene: {
+            camera: userCamera,
+            uirevision: initialPlot.layout.scene.uirevision,
+        },
+    };
+    assert.deepEqual(
+        plain(setup.controller.saveDisplayHeightBounds('device-a', -180, 420)),
+        { zMin: -180, zMax: 420 },
+    );
+
+    setup.controller.setSceneModel(scene({
+        bounds: { xMin: -500, xMax: 500, yMin: 0, yMax: 600, zMin: -180, zMax: 420 },
+        fovBounds: { zMin: -120, zMax: 180 },
+    }));
+
+    const render = setup.plotly.calls.filter((call) => call.kind === 'react').at(-1);
+    assert.ok(render);
+    assert.equal(setup.controller.getMode(), '3d');
+    assert.equal(storage.value('switchStudio.radarViewMode'), '3d');
+    assert.deepEqual(Array.from(render.layout.scene.zaxis.range), [-180, 420]);
+    assertVectorClose(render.layout.scene.camera.eye, userCamera.eye);
+    assert.deepEqual(plain(render.layout.scene.camera.center), { x: 0, y: 0, z: 0 });
+    assert.deepEqual(plain(render.layout.scene.camera.up), { x: 0, y: 0, z: 1 });
+    assert.equal(setup.elements.chart2d.hidden, true);
+    assert.equal(setup.elements.chart3d.hidden, false);
+
+    const sensorHeight = render.traces.find((trace) => trace.name === 'Sensor height reference');
+    const sensorOrigin = render.traces.find((trace) => trace.name === 'Sensor');
+    assert.deepEqual(Array.from(sensorHeight.z), [-180, 420], 'the full-height visual reference follows the display range');
+    assert.equal(sensorHeight.hoverinfo, 'skip');
+    assert.deepEqual(Array.from(sensorOrigin.z), [0]);
+    assert.equal(setup.zonesApi.calls.fov.at(-1).zMin, -120, 'physical FOV height remains device-authored');
+    assert.equal(setup.zonesApi.calls.fov.at(-1).zMax, 180);
+    assert.deepEqual(Array.from(render.traces.slice(-2), (trace) => trace.name), ['Live targets', 'Target trails']);
 });
 
 test('global detection bounds are used only when area1 is absent', () => {
@@ -896,6 +1151,13 @@ test('an unresolved initial 3D creation cannot reveal WebGL after the user retur
 
     setup.elements.mode2d.click();
     assert.equal(setup.controller.getMode(), '2d');
+    assert.equal(setup.elements.chart2d.hidden, false);
+    assert.equal(setup.elements.chart2d.dataset.radarSurfaceState, 'active');
+    assert.equal(setup.elements.chart2d.getAttribute('aria-hidden'), 'false');
+    assert.equal(setup.elements.chart3d.hidden, true);
+    assert.equal(setup.elements.chart3d.dataset.radarSurfaceState, 'inactive');
+    assert.equal(setup.elements.chart3d.dataset.transitioning, 'false');
+    assert.equal(cameraRelayouts(setup).length, 0);
     creation.resolve(setup.elements.chart3d);
     await flushPromises();
 
@@ -968,11 +1230,21 @@ test('pending creation and preflight renders reconcile the latest generation bef
     assert.equal(setup.elements.chart2d.dataset.radarSurfaceState, 'outgoing');
     assert.equal(setup.elements.chart3d.dataset.radarSurfaceState, 'incoming');
     setup.clock.advance(47);
-    assert.ok(cameraRelayouts(setup).length > 0, 'the orbit should begin only after the current preparation resolves');
+    assert.equal(cameraRelayouts(setup).length, 0, 'preparation must not start the orbit before the surface fade');
     assert.equal(setup.elements.chart3d.dataset.radarSurfaceState, 'incoming');
     setup.clock.advance(1);
     assert.equal(setup.elements.chart2d.dataset.radarSurfaceState, 'retiring');
     assert.equal(setup.elements.chart3d.dataset.radarSurfaceState, 'active');
+    assert.equal(cameraRelayouts(setup).length, 0);
+    setup.clock.advance(170);
+    assert.equal(setup.elements.chart2d.hidden, true);
+    assert.equal(setup.elements.chart2d.dataset.radarSurfaceState, 'inactive');
+    assert.equal(setup.elements.chart3d.dataset.radarSurfaceState, 'active');
+    assert.equal(cameraRelayouts(setup).length, 0);
+    setup.clock.advance(23);
+    assert.equal(cameraRelayouts(setup).length, 0);
+    setup.clock.advance(1);
+    assert.ok(cameraRelayouts(setup).length > 0, 'the orbit should begin only after the current preparation and crossfade resolve');
 });
 
 test('a hidden 2D breakpoint change is reconciled before the next 3D reveal', async () => {

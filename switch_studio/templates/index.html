@@ -1188,6 +1188,7 @@
 
         /* Grid for Raw Zone Data */
         .zone-data-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+        .radar-display-range-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         .zone-input-group { display: flex; flex-direction: column; gap: 2px; }
         .zone-input-group label { font-size: 0.75em; color: var(--text-muted); }
         .zone-input-group input { width: 100%; box-sizing: border-box; font-family: monospace; color: var(--accent); font-weight: bold;}
@@ -2885,6 +2886,13 @@
                 justify-content: flex-start;
                 padding-inline: 8px;
             }
+            .radar-display-range-grid .zone-input-group input {
+                min-height: 44px;
+                font-size: 16px;
+            }
+            .radar-display-range-apply {
+                min-height: 44px;
+            }
             .device-grid {
                 grid-template-columns: minmax(0, 1fr);
             }
@@ -2894,6 +2902,16 @@
             .device-card-controls {
                 grid-template-columns: 58px minmax(0, 1fr);
                 gap: 13px;
+            }
+        }
+
+        @media (hover: none) and (pointer: coarse) {
+            .radar-display-range-grid .zone-input-group input {
+                min-height: 44px;
+                font-size: 16px;
+            }
+            .radar-display-range-apply {
+                min-height: 44px;
             }
         }
     </style>
@@ -3003,7 +3021,7 @@
                         <button class="radar-reset-view" id="radarResetView" type="button" hidden>Reset view</button>
                     </div>
                 </div>
-                <p class="visually-hidden" id="radarViewDescription">The live radar uses a full-size top-down Cartesian map in 2D and a fixed-center perspective camera in 3D. Zone drawing and editing stay in the Cartesian 2D view. Sensor field-of-view height follows the primary detection range when available; otherwise the full supported height range is shown. On phones, choose Explore 3D before rotating or zooming the scene, then choose Done to resume page scrolling.</p>
+                <p class="visually-hidden" id="radarViewDescription">The live radar uses a full-size top-down Cartesian map in 2D and a fixed-center perspective camera in 3D. Zone drawing and editing stay in the Cartesian 2D view. The 3D height axis uses the selected device's display range. Sensor field-of-view height follows the primary detection range when available; otherwise the full supported height range is shown. On phones, choose Explore 3D before rotating or zooming the scene, then choose Done to resume page scrolling.</p>
                 <div class="config-content">
                     <div class="chart-canvas-wrap">
                         <div id="chart" role="img" aria-label="Two-dimensional live presence radar map. Exact target coordinates are listed in the table below."></div>
@@ -3216,14 +3234,17 @@
                         </div>
                     </div>
                     
-                    <div class="config-title" style="margin-top: 15px; border-top: 1px solid #444; padding-top: 5px;">Radar Map Size (cm)</div>
-                    <div class="zone-data-grid">
-                        <div class="zone-input-group"><label>X Min</label><input type="number" id="vizXMin" value="-650"></div>
-                        <div class="zone-input-group"><label>X Max</label><input type="number" id="vizXMax" value="650"></div>
-                        <div class="zone-input-group"><label>Y Min</label><input type="number" id="vizYMin" value="-50"></div>
-                        <div class="zone-input-group"><label>Y Max</label><input type="number" id="vizYMax" value="650"></div>
+                    <div class="config-title" style="margin-top: 15px; border-top: 1px solid #444; padding-top: 5px;">Radar Display Range (cm)</div>
+                    <div class="panel-lede">Display only; does not change zones. X/Y affect both views. Z affects 3D and uses the switch as 0 cm (negative below, positive above). Saved per device in this browser.</div>
+                    <div class="zone-data-grid radar-display-range-grid">
+                        <div class="zone-input-group"><label for="vizXMin">Width min (X)</label><input type="number" id="vizXMin" value="-650"></div>
+                        <div class="zone-input-group"><label for="vizXMax">Width max (X)</label><input type="number" id="vizXMax" value="650"></div>
+                        <div class="zone-input-group"><label for="vizYMin">Depth min (Y)</label><input type="number" id="vizYMin" value="-50"></div>
+                        <div class="zone-input-group"><label for="vizYMax">Depth max (Y)</label><input type="number" id="vizYMax" value="650"></div>
+                        <div class="zone-input-group"><label for="vizZMin">Height min (Z)</label><input type="number" id="vizZMin" min="-600" max="600" step="1" value="-600"></div>
+                        <div class="zone-input-group"><label for="vizZMax">Height max (Z)</label><input type="number" id="vizZMax" min="-600" max="600" step="1" value="600"></div>
                     </div>
-                    <button class="cmd-btn btn-full" onclick="updateRadarScale()" style="margin-top:5px; background: #00bcd4; color: #1a1a1a;">Update Scale</button>
+                    <button class="cmd-btn btn-full radar-display-range-apply" onclick="updateRadarScale()" style="margin-top:5px; background: #00bcd4; color: #1a1a1a;">Apply Display Range</button>
                 </div>
             </section>
             </div>
@@ -3444,6 +3465,8 @@
         const vizXMax = document.getElementById('vizXMax');
         const vizYMin = document.getElementById('vizYMin');
         const vizYMax = document.getElementById('vizYMax');
+        const vizZMin = document.getElementById('vizZMin');
+        const vizZMax = document.getElementById('vizZMax');
         const chart3dElement = document.getElementById('chart3d');
         const chartCanvasWrap = document.querySelector('#chartContainer .chart-canvas-wrap');
         const radarView2d = document.getElementById('radarView2d');
@@ -4411,31 +4434,12 @@
             return { zMin: -600, zMax: 600 };
         }
 
-        function getRadar3dAxisHeightBounds(fovBounds) {
-            const values = [fovBounds.zMin, fovBounds.zMax];
-            ['mmwave_detection_areas', 'mmwave_interference_areas', 'mmwave_stay_areas'].forEach((category) => {
-                const areas = deviceZones && deviceZones[category];
-                if (!areas) return;
-                Object.values(areas).forEach((area) => {
-                    const zMin = getFiniteRadarValue(area && area.z_min);
-                    const zMax = getFiniteRadarValue(area && area.z_max);
-                    if (zMin !== null) values.push(zMin);
-                    if (zMax !== null) values.push(zMax);
-                });
-            });
-            const min = Math.min(...values);
-            const max = Math.max(...values);
-            const padding = Math.max(20, Math.round((max - min) * 0.06));
-            return { zMin: min - padding, zMax: max + padding };
-        }
-
         function buildRadar3dSceneModel() {
             const xMin = Math.min(chartXMin, chartXMax);
             const xMax = Math.max(chartXMin, chartXMax);
             const yMin = Math.min(chartYMin, chartYMax);
             const yMax = Math.max(chartYMin, chartYMax);
             const fovHeightBounds = getConfiguredRadarHeightBounds();
-            const axisHeightBounds = getRadar3dAxisHeightBounds(fovHeightBounds);
             return {
                 zones: deviceZones,
                 visibility: {
@@ -4452,8 +4456,8 @@
                     xMax,
                     yMin,
                     yMax,
-                    zMin: axisHeightBounds.zMin,
-                    zMax: axisHeightBounds.zMax
+                    zMin: chartZMin,
+                    zMax: chartZMax
                 },
                 fovBounds: fovHeightBounds
             };
@@ -4707,12 +4711,14 @@
             activeDeviceFriendlyName = requestedDevice && requestedDevice.friendly_name
                 ? requestedDevice.friendly_name
                 : getDeviceDisplayName(normalizedNext);
+            loadRadarDisplayHeightBounds(normalizedNext);
             if (window.SwitchStudioLed && typeof window.SwitchStudioLed.setActiveDevice === 'function') {
                 window.SwitchStudioLed.setActiveDevice(normalizedNext);
             }
             if (radar3dModule && typeof radar3dModule.setActiveDevice === 'function') {
                 radar3dModule.setActiveDevice(normalizedNext);
             }
+            refreshRadar3dScene();
             if (window.SwitchStudioState && typeof window.SwitchStudioState.setActiveDevice === 'function') {
                 window.SwitchStudioState.setActiveDevice(normalizedNext);
                 window.SwitchStudioState.setPacketStatus('info', 'Awaiting fresh device data…');
@@ -6283,6 +6289,8 @@
         let chartXMax = 650;
         let chartYMin = -50;
         let chartYMax = 650;
+        let chartZMin = -600;
+        let chartZMax = 600;
 
         // Init Settings from LocalStorage
         try {
@@ -6335,6 +6343,23 @@
         vizXMax.value = chartXMax;
         vizYMin.value = chartYMin;
         vizYMax.value = chartYMax;
+        vizZMin.value = chartZMin;
+        vizZMax.value = chartZMax;
+
+        function setRadarDisplayHeightInputs() {
+            if (vizZMin) vizZMin.value = chartZMin;
+            if (vizZMax) vizZMax.value = chartZMax;
+        }
+
+        function loadRadarDisplayHeightBounds(topic) {
+            const loaded = radar3dModule && typeof radar3dModule.loadDisplayHeightBounds === 'function'
+                ? radar3dModule.loadDisplayHeightBounds(topic)
+                : { zMin: -600, zMax: 600 };
+            chartZMin = loaded.zMin;
+            chartZMax = loaded.zMax;
+            setRadarDisplayHeightInputs();
+            return loaded;
+        }
 
         function applyVizSettings() {
             // Set checkboxes
@@ -6373,42 +6398,69 @@
         }
         
         function updateRadarScale() {
-            const requested = [vizXMin.value, vizXMax.value, vizYMin.value, vizYMax.value].map(Number);
-            if (requested.some((value) => !Number.isFinite(value))) {
+            const requested = [vizXMin.value, vizXMax.value, vizYMin.value, vizYMax.value]
+                .map((value) => getFiniteRadarValue(value));
+            if (requested.some((value) => value === null)) {
                 if (window.SwitchStudioState && typeof window.SwitchStudioState.showToast === 'function') {
-                    window.SwitchStudioState.showToast('error', 'Radar map bounds must be valid numbers.', 2600);
+                    window.SwitchStudioState.showToast('error', 'Radar display bounds must be valid numbers.', 2600);
                 }
                 vizXMin.value = chartXMin;
                 vizXMax.value = chartXMax;
                 vizYMin.value = chartYMin;
                 vizYMax.value = chartYMax;
+                setRadarDisplayHeightInputs();
                 return false;
             }
             const [nextXMin, nextXMax] = requested.slice(0, 2).sort((left, right) => left - right);
             const [nextYMin, nextYMax] = requested.slice(2, 4).sort((left, right) => left - right);
             if (nextXMin === nextXMax || nextYMin === nextYMax) {
                 if (window.SwitchStudioState && typeof window.SwitchStudioState.showToast === 'function') {
-                    window.SwitchStudioState.showToast('error', 'Radar map bounds need a non-zero width and depth.', 2600);
+                    window.SwitchStudioState.showToast('error', 'Radar display bounds need a non-zero width and depth.', 2600);
                 }
                 vizXMin.value = chartXMin;
                 vizXMax.value = chartXMax;
                 vizYMin.value = chartYMin;
                 vizYMax.value = chartYMax;
+                setRadarDisplayHeightInputs();
+                return false;
+            }
+            const nextHeightBounds = radar3dModule && typeof radar3dModule.normalizeDisplayHeightBounds === 'function'
+                ? radar3dModule.normalizeDisplayHeightBounds(vizZMin.value, vizZMax.value)
+                : null;
+            if (!nextHeightBounds) {
+                if (window.SwitchStudioState && typeof window.SwitchStudioState.showToast === 'function') {
+                    window.SwitchStudioState.showToast('error', '3D height bounds must be between -600 and 600 cm with at least 20 cm between them.', 3200);
+                }
+                vizXMin.value = chartXMin;
+                vizXMax.value = chartXMax;
+                vizYMin.value = chartYMin;
+                vizYMax.value = chartYMax;
+                setRadarDisplayHeightInputs();
                 return false;
             }
             chartXMin = nextXMin;
             chartXMax = nextXMax;
             chartYMin = nextYMin;
             chartYMax = nextYMax;
+            chartZMin = nextHeightBounds.zMin;
+            chartZMax = nextHeightBounds.zMax;
             vizXMin.value = chartXMin;
             vizXMax.value = chartXMax;
             vizYMin.value = chartYMin;
             vizYMax.value = chartYMax;
+            setRadarDisplayHeightInputs();
             
-            localStorage.setItem('vizXMin', chartXMin);
-            localStorage.setItem('vizXMax', chartXMax);
-            localStorage.setItem('vizYMin', chartYMin);
-            localStorage.setItem('vizYMax', chartYMax);
+            try {
+                localStorage.setItem('vizXMin', chartXMin);
+                localStorage.setItem('vizXMax', chartXMax);
+                localStorage.setItem('vizYMin', chartYMin);
+                localStorage.setItem('vizYMax', chartYMax);
+            } catch (error) {
+                console.log('Storage access error', error);
+            }
+            if (radar3dModule && typeof radar3dModule.saveDisplayHeightBounds === 'function') {
+                radar3dModule.saveDisplayHeightBounds(activeDeviceTopic, chartZMin, chartZMax);
+            }
             layout.xaxis.range = [chartXMin, chartXMax];
             layout.yaxis.range = [chartYMin, chartYMax];
             
@@ -6533,13 +6585,13 @@
             return {
                 outer: {
                     edgeColor: 'rgba(135, 153, 175, 0.12)',
-                    fill2d: 'rgba(102, 118, 138, 0.007)',
+                    fill2d: 'rgba(102, 118, 138, 0.02)',
                     edgeWidth: 1,
                     edgeDash: 'dot'
                 },
                 nominal: {
                     edgeColor: 'rgba(165, 181, 201, 0.18)',
-                    fill2d: 'rgba(143, 161, 184, 0.014)',
+                    fill2d: 'rgba(143, 161, 184, 0.04)',
                     edgeWidth: 1.3,
                     edgeDash: 'solid'
                 }
@@ -6551,6 +6603,15 @@
 
             const traces = [];
             if (showGrid) {
+                buildVerticalBandShapes().forEach((shape) => {
+                    traces.push(createScatterLineTrace([
+                        [shape.x0, shape.y0],
+                        [shape.x1, shape.y0],
+                        [shape.x1, shape.y1],
+                        [shape.x0, shape.y1],
+                        [shape.x0, shape.y0],
+                    ], 'rgba(0, 0, 0, 0)', 0, 'solid', shape.fillcolor));
+                });
                 const fovStyles = getRadarFovStyleSet();
                 traces.push(createScatterLineTrace(
                     buildFovSectorPoints(75),
@@ -6695,7 +6756,15 @@
         }
 
         function buildVerticalBandShapes() {
-            // Disabled per feedback: keep radar background clean with no vertical bands.
+            const api = zoneModule || window.SwitchStudioZones;
+            if (api && typeof api.buildUnsupportedRange2DShapes === 'function') {
+                return api.buildUnsupportedRange2DShapes({
+                    xMin: chartXMin,
+                    xMax: chartXMax,
+                    yMin: chartYMin,
+                    yMax: chartYMax,
+                });
+            }
             return [];
         }
 

@@ -301,6 +301,11 @@ test('zone cuboid helpers build exact vertices, faces, edges, and visibility', (
     assert.equal(volume.visible, false);
     assert.equal(edges.visible, false);
     assert.equal(edges.x.length, 36);
+    const [passiveVolume, passiveEdges] = zones.buildZoneCuboidTraces({
+        x_min: -40, x_max: 120, y_min: 60, y_max: 260, z_min: -30, z_max: 110,
+    }, { name: 'Passive area', hoverinfo: 'skip' });
+    assert.equal(passiveVolume.hoverinfo, 'skip');
+    assert.equal(passiveEdges.hoverinfo, 'skip');
     assert.equal(zones.buildZoneCuboidGeometry({ x_min: 0, x_max: 0, y_min: 0, y_max: 20, z_min: 0, z_max: 20 }), null);
     assert.deepEqual(plain(zones.buildZoneCuboidTraces({ x_min: 0, x_max: 20 })), []);
 });
@@ -351,25 +356,29 @@ test('3D FOV volumes match the clipped forward-facing 120 and 150 degree sectors
         'FOV edge traces retain stable indices without drawing a border',
     );
     assert.equal(traces[0].color, '#66768A');
-    assert.equal(traces[0].opacity, 0.005);
+    assert.equal(traces[0].opacity, 0.03);
     assert.equal(traces[1].line.color, 'rgba(135, 153, 175, 0.12)');
+    assert.equal(traces[1].visible, false);
+    assert.equal(traces[1].hoverinfo, 'skip');
     assert.equal(traces[2].color, '#8FA1B8');
-    assert.equal(traces[2].opacity, 0.011);
+    assert.equal(traces[2].opacity, 0.06);
     assert.equal(traces[3].line.color, 'rgba(165, 181, 201, 0.18)');
+    assert.equal(traces[3].visible, false);
+    assert.equal(traces[3].hoverinfo, 'skip');
     assert.deepEqual(plain(zones.getFovStyles()), {
         outer: {
             color: '#66768A',
             edgeColor: 'rgba(135, 153, 175, 0.12)',
-            opacity3d: 0.005,
-            fill2d: 'rgba(102, 118, 138, 0.007)',
+            opacity3d: 0.03,
+            fill2d: 'rgba(102, 118, 138, 0.02)',
             edgeWidth: 1,
             edgeDash: 'dot',
         },
         nominal: {
             color: '#8FA1B8',
             edgeColor: 'rgba(165, 181, 201, 0.18)',
-            opacity3d: 0.011,
-            fill2d: 'rgba(143, 161, 184, 0.014)',
+            opacity3d: 0.06,
+            fill2d: 'rgba(143, 161, 184, 0.04)',
             edgeWidth: 1.3,
             edgeDash: 'solid',
         },
@@ -387,6 +396,57 @@ test('3D FOV volumes match the clipped forward-facing 120 and 150 degree sectors
     assert.equal(asymmetric.bounds.zMax, 600);
     assert.ok(asymmetric.polygon.every((point) => point.x >= -200 && point.x <= 500));
     assert.ok(asymmetric.polygon.every((point) => point.y >= 0 && point.y <= 600));
+});
+
+test('2D unsupported-range masks cover only the disjoint space outside the sensor limits', () => {
+    const { zones } = loadZonesModule();
+    const metadata = {
+        type: 'rect',
+        xref: 'x',
+        yref: 'y',
+        fillcolor: 'rgba(120, 132, 148, 0.09)',
+        line: { color: 'rgba(0, 0, 0, 0)', width: 0 },
+        editable: false,
+        layer: 'below',
+    };
+    const shapes = plain(zones.buildUnsupportedRange2DShapes({
+        xMin: -900,
+        xMax: 900,
+        yMin: -200,
+        yMax: 1400,
+    }));
+
+    assert.deepEqual(shapes, [
+        { ...metadata, x0: -900, x1: 900, y0: -200, y1: 0 },
+        { ...metadata, x0: -900, x1: 900, y0: 600, y1: 1400 },
+        { ...metadata, x0: -900, x1: -600, y0: 0, y1: 600 },
+        { ...metadata, x0: 600, x1: 900, y0: 0, y1: 600 },
+    ]);
+
+    assert.deepEqual(
+        plain(zones.buildUnsupportedRange2DShapes({
+            xMin: -500,
+            xMax: 500,
+            yMin: 25,
+            yMax: 575,
+        })),
+        [],
+        'a viewport wholly inside the supported range needs no mask',
+    );
+
+    const clipped = plain(zones.buildUnsupportedRange2DShapes({
+        xMin: -700,
+        xMax: 500,
+        yMin: -50,
+        yMax: 650,
+        fillcolor: 'rgba(1, 2, 3, 0.4)',
+    }));
+    const clippedMetadata = { ...metadata, fillcolor: 'rgba(1, 2, 3, 0.4)' };
+    assert.deepEqual(clipped, [
+        { ...clippedMetadata, x0: -700, x1: 500, y0: -50, y1: 0 },
+        { ...clippedMetadata, x0: -700, x1: 500, y0: 600, y1: 650 },
+        { ...clippedMetadata, x0: -700, x1: -600, y0: 0, y1: 600 },
+    ]);
 });
 
 test('interference command lifecycle reports completion and clears pending command id', () => {

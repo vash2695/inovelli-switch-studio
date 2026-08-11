@@ -1,6 +1,6 @@
 # Home Assistant Ingress QA Checklist
 
-Last updated: 2026-08-10
+Last updated: 2026-08-11
 
 ## Test Environment
 
@@ -41,11 +41,14 @@ Last updated: 2026-08-10
 
 - Verify occupancy, area badges, illuminance, live targets, trails, and target table updates on `Presence & Zones`.
 - Confirm targets clear when occupancy reports clear.
-- Confirm 2D retains the full-size Cartesian radar/editor footprint, then switch to 3D and verify the prepared scene crossfades and orbits smoothly with no blank frame, projection flash, roll, snap, or canvas-height jump.
+- Confirm 2D retains the full-size Cartesian radar/editor footprint, then switch to 3D and verify the prepared top-down scene crossfades first and follows with the exact reverse of the 3D-to-2D camera orbit, with no blank frame, projection flash, roll, snap, or canvas-height jump.
 - Switch between 2D and 3D repeatedly, including a rapid reversal mid-transition; the final selected mode must win, configured axis ranges must remain intact, and no stale WebGL canvases or context-loss warnings should accumulate.
+- In `View`, set a device-specific 3D Height min/max, apply the display range, and verify the Z axis updates without changing the physical FOV or any zone configuration. Reversed values should normalize, blank/equal/out-of-range values should be rejected, and switching A → B → A should restore each switch's own range.
 - In 3D, verify each live target uses its exact X/Y/Z coordinates, trails remain separated by target ID, the camera rotates/elevates/zooms around one fixed focus, and the room plane never rolls or flips.
 - Confirm detection, stay, and interference zones render as correctly bounded translucent cuboids, including a packet where an empty raw area slot precedes an active area.
-- Confirm both live modes preserve the nested 120° and 150° horizontal FOV reference envelopes, render them as borderless subdued informational shading distinct from semantic zones, and extrude them through the reported primary minimum/maximum height range; before that report, confirm they use the full supported −600..600 cm fallback.
+- Confirm both live modes preserve the nested 120° and 150° horizontal FOV reference envelopes, render them as visible but borderless informational shading distinct from semantic zones, and extrude them through the reported primary minimum/maximum height range; before that report, confirm they use the full supported −600..600 cm fallback.
+- In 2D, extend the map beyond the supported range and verify one even borderless mask covers Y below 0, Y beyond 600, and X outside −600..600 without darker overlapping corners. In 3D, confirm passive FOV and zone faces do not produce hover cards over empty-looking space, while target hover remains available.
+- Confirm the 3D sensor origin retains its marker at (0, 0, 0) and its vertical reference spans the selected device's full visible Z-axis range, including after changing display bounds or switching devices.
 - Rotate the 3D scene, press `Reset view`, then switch devices; Reset must restore the default camera and a device change must clear targets/trails and intentionally reset the camera.
 - Begin a zone edit while 3D is selected. The app must explain and force 2D for editing, disable 3D during the draft, and restore the preferred 3D view after Apply or Cancel without losing the draft.
 - Turn off the grid/FOV and each zone category/individual detection-area visibility option; verify both radar modes follow the same settings and hidden volumes leave no ghost traces.

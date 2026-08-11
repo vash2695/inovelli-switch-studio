@@ -13,16 +13,16 @@
         outer: Object.freeze({
             color: '#66768A',
             edgeColor: 'rgba(135, 153, 175, 0.12)',
-            opacity3d: 0.005,
-            fill2d: 'rgba(102, 118, 138, 0.007)',
+            opacity3d: 0.03,
+            fill2d: 'rgba(102, 118, 138, 0.02)',
             edgeWidth: 1,
             edgeDash: 'dot'
         }),
         nominal: Object.freeze({
             color: '#8FA1B8',
             edgeColor: 'rgba(165, 181, 201, 0.18)',
-            opacity3d: 0.011,
-            fill2d: 'rgba(143, 161, 184, 0.014)',
+            opacity3d: 0.06,
+            fill2d: 'rgba(143, 161, 184, 0.04)',
             edgeWidth: 1.3,
             edgeDash: 'solid'
         })
@@ -810,6 +810,55 @@
         return [...outerTraces, ...innerTraces];
     }
 
+    function buildUnsupportedRange2DShapes(options) {
+        const opts = options || {};
+        const [xMin, xMax] = sortPair(
+            toFiniteNumber(opts.xMin) ?? DEFAULT_LIMITS.xMin,
+            toFiniteNumber(opts.xMax) ?? DEFAULT_LIMITS.xMax,
+        );
+        const [yMin, yMax] = sortPair(
+            toFiniteNumber(opts.yMin) ?? DEFAULT_LIMITS.yMin,
+            toFiniteNumber(opts.yMax) ?? DEFAULT_LIMITS.yMax,
+        );
+        const [supportedXMin, supportedXMax] = sortPair(
+            toFiniteNumber(opts.supportedXMin) ?? -600,
+            toFiniteNumber(opts.supportedXMax) ?? 600,
+        );
+        const [supportedYMin, supportedYMax] = sortPair(
+            toFiniteNumber(opts.supportedYMin) ?? 0,
+            toFiniteNumber(opts.supportedYMax) ?? 600,
+        );
+        const fillcolor = opts.fillcolor || 'rgba(120, 132, 148, 0.09)';
+        const shapes = [];
+        const pushRect = (x0, x1, y0, y1) => {
+            if (!(x1 > x0 && y1 > y0)) return;
+            shapes.push({
+                type: 'rect',
+                xref: 'x',
+                yref: 'y',
+                x0,
+                x1,
+                y0,
+                y1,
+                fillcolor,
+                line: { color: 'rgba(0, 0, 0, 0)', width: 0 },
+                editable: false,
+                layer: 'below',
+            });
+        };
+
+        // Keep the four masks disjoint so corners never become darker from
+        // stacked transparency. Rear and far spans own the full chart width;
+        // the lateral masks fill only the supported forward-depth interval.
+        pushRect(xMin, xMax, yMin, Math.min(yMax, supportedYMin));
+        pushRect(xMin, xMax, Math.max(yMin, supportedYMax), yMax);
+        const forwardMin = Math.max(yMin, supportedYMin);
+        const forwardMax = Math.min(yMax, supportedYMax);
+        pushRect(xMin, Math.min(xMax, supportedXMin), forwardMin, forwardMax);
+        pushRect(Math.max(xMin, supportedXMax), xMax, forwardMin, forwardMax);
+        return shapes;
+    }
+
     function getFovStyles() {
         return {
             outer: { ...FOV_STYLES.outer },
@@ -994,6 +1043,7 @@
         buildZoneCuboidTraces,
         buildFovVolumeGeometry,
         buildFov3DTraces,
+        buildUnsupportedRange2DShapes,
         getFovStyles,
         refreshTargetVisualization: renderTargetVisualization2d,
         handleNewData,

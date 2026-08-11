@@ -2,6 +2,10 @@
     'use strict';
 
     const STORAGE_KEY = 'switchStudio.radarViewMode';
+    const DISPLAY_HEIGHT_STORAGE_PREFIX = 'switchStudio.radarDisplayHeight:';
+    const DISPLAY_HEIGHT_MIN = -600;
+    const DISPLAY_HEIGHT_MAX = 600;
+    const DISPLAY_HEIGHT_MIN_SPAN = 20;
     const DEFAULT_MODE = '2d';
     const DESKTOP_RENDER_INTERVAL_MS = 125;
     const MOBILE_RENDER_INTERVAL_MS = 200;
@@ -189,9 +193,9 @@
     function normalizeSceneModel(rawModel) {
         const raw = rawModel || {};
         const bounds = normalizeBounds(raw.bounds);
-        const fovSource = raw.fovBounds || raw.bounds || {};
-        let fovZMin = readBound(fovSource, 'zMin', 'z_min', bounds.zMin);
-        let fovZMax = readBound(fovSource, 'zMax', 'z_max', bounds.zMax);
+        const fovSource = raw.fovBounds || {};
+        let fovZMin = readBound(fovSource, 'zMin', 'z_min', DISPLAY_HEIGHT_MIN);
+        let fovZMax = readBound(fovSource, 'zMax', 'z_max', DISPLAY_HEIGHT_MAX);
         if (fovZMin > fovZMax) [fovZMin, fovZMax] = [fovZMax, fovZMin];
         if (fovZMin === fovZMax) fovZMax = fovZMin + 1;
         return {
@@ -370,6 +374,49 @@
         } catch (error) {
             // Private browsing and embedded WebViews can deny local storage.
         }
+    }
+
+    function displayHeightStorageKey(deviceKey) {
+        const normalizedDevice = String(deviceKey || '').trim();
+        return normalizedDevice
+            ? `${DISPLAY_HEIGHT_STORAGE_PREFIX}${encodeURIComponent(normalizedDevice)}`
+            : '';
+    }
+
+    function normalizeDisplayHeightBounds(rawMin, rawMax) {
+        if (rawMin === null || rawMin === undefined || rawMax === null || rawMax === undefined) return null;
+        if (typeof rawMin === 'string' && !rawMin.trim()) return null;
+        if (typeof rawMax === 'string' && !rawMax.trim()) return null;
+        const parsedMin = Number(rawMin);
+        const parsedMax = Number(rawMax);
+        if (!Number.isFinite(parsedMin) || !Number.isFinite(parsedMax)) return null;
+        const zMin = Math.min(parsedMin, parsedMax);
+        const zMax = Math.max(parsedMin, parsedMax);
+        if (zMin < DISPLAY_HEIGHT_MIN || zMax > DISPLAY_HEIGHT_MAX) return null;
+        if ((zMax - zMin) < DISPLAY_HEIGHT_MIN_SPAN) return null;
+        return { zMin, zMax };
+    }
+
+    function loadDisplayHeightBounds(deviceKey) {
+        const fallback = { zMin: DISPLAY_HEIGHT_MIN, zMax: DISPLAY_HEIGHT_MAX };
+        const key = displayHeightStorageKey(deviceKey);
+        if (!key) return fallback;
+        const stored = safeStorageGet(key);
+        if (!stored) return fallback;
+        try {
+            const parsed = JSON.parse(stored);
+            return normalizeDisplayHeightBounds(parsed?.zMin, parsed?.zMax) || fallback;
+        } catch (error) {
+            return fallback;
+        }
+    }
+
+    function saveDisplayHeightBounds(deviceKey, rawMin, rawMax) {
+        const key = displayHeightStorageKey(deviceKey);
+        const normalized = normalizeDisplayHeightBounds(rawMin, rawMax);
+        if (!key || !normalized) return null;
+        safeStorageSet(key, JSON.stringify(normalized));
+        return normalized;
     }
 
     function normalizeMode(mode) {
@@ -612,6 +659,58 @@
         };
     }
 
+    function buildModePathArcLookup(perspectiveCamera) {
+        const sampleCount = 160;
+        const samples = [{ progress: 0, distance: 0 }];
+        let prior = cameraAlongModePath(perspectiveCamera, 0).eye;
+        let distance = 0;
+        for (let index = 1; index <= sampleCount; index += 1) {
+            const progress = index / sampleCount;
+            const eye = cameraAlongModePath(perspectiveCamera, progress).eye;
+            distance += Math.hypot(
+                eye.x - prior.x,
+                eye.y - prior.y,
+                eye.z - prior.z,
+            );
+            samples.push({ progress, distance });
+            prior = eye;
+        }
+        return { samples, totalDistance: Math.max(distance, 0.001) };
+    }
+
+    function modePathDistanceFraction(lookup, progress) {
+        const samples = lookup.samples;
+        const scaled = clamp(progress, 0, 1) * (samples.length - 1);
+        const lowIndex = Math.floor(scaled);
+        const highIndex = Math.min(samples.length - 1, lowIndex + 1);
+        const localProgress = scaled - lowIndex;
+        const distance = samples[lowIndex].distance
+            + (samples[highIndex].distance - samples[lowIndex].distance) * localProgress;
+        return distance / lookup.totalDistance;
+    }
+
+    function modePathProgressAtDistance(lookup, distanceFraction) {
+        const samples = lookup.samples;
+        const targetDistance = clamp(distanceFraction, 0, 1) * lookup.totalDistance;
+        let lowIndex = 0;
+        let highIndex = samples.length - 1;
+        while (lowIndex + 1 < highIndex) {
+            const middle = Math.floor((lowIndex + highIndex) / 2);
+            if (samples[middle].distance < targetDistance) lowIndex = middle;
+            else highIndex = middle;
+        }
+        const low = samples[lowIndex];
+        const high = samples[highIndex];
+        const span = Math.max(0.000001, high.distance - low.distance);
+        const localProgress = clamp((targetDistance - low.distance) / span, 0, 1);
+        return low.progress + (high.progress - low.progress) * localProgress;
+    }
+
+    function smoothModeProgress(progress) {
+        const value = clamp(progress, 0, 1);
+        return value * value * (3 - 2 * value);
+    }
+
     function modePathProgressForCamera(camera, perspectiveCamera) {
         if (!camera || camera.projection?.type !== 'perspective') return 0;
         const current = sphericalEye(camera.eye);
@@ -643,7 +742,8 @@
         };
     }
 
-    function cancelCameraTransition() {
+    function cancelCameraTransition(options) {
+        const opts = options || {};
         const canceledModeHandoff = cameraTransitioning && cameraTransitionChangesMode;
         cameraTransitionGeneration += 1;
         cameraTransitioning = false;
@@ -657,7 +757,9 @@
             surfaceTransitionTimer = null;
         }
         if (chart3dEl?.dataset) chart3dEl.dataset.transitioning = 'false';
-        if (surfaceTransitionDirection) settleSurfaceTransition(activeMode);
+        if (surfaceTransitionDirection && opts.settleSurface !== false) {
+            settleSurfaceTransition(activeMode);
+        }
         if (canceledModeHandoff) {
             // An interrupted scene camera is neither a completed 2D bridge nor
             // the saved 3D view. Treat native 2D as the stable anchor so the
@@ -810,10 +912,40 @@
         const opts = options || {};
         const toMode = normalizeMode(targetMode);
         const changesMode = normalizeMode(previousMode) !== toMode;
-        const usesSurfaceHandoff = changesMode || opts.surfaceHandoff === true;
+        const wasCameraTransitioning = cameraTransitioning;
+        const wasModeHandoff = cameraTransitionChangesMode;
         const usesCanonicalModePath = changesMode && lastModePathProgressValid;
         const carriedModePathProgress = lastModePathProgress;
-        cancelCameraTransition();
+        const continuesVisibleScene = (
+            changesMode
+            && toMode === '3d'
+            && wasCameraTransitioning
+            && wasModeHandoff
+            && usesCanonicalModePath
+            && carriedModePathProgress > 0
+            && carriedModePathProgress < 1
+        );
+        const usesSurfaceHandoff = (changesMode || opts.surfaceHandoff === true) && !continuesVisibleScene;
+        cancelCameraTransition({ settleSurface: false });
+        const requestedPathEndpoint = toMode === '3d' ? 1 : 0;
+        if (
+            changesMode
+            && usesCanonicalModePath
+            && Math.abs(carriedModePathProgress - requestedPathEndpoint) < 0.000001
+        ) {
+            // The latest request returned to the endpoint before the camera
+            // ever left it (usually during the prepared-surface crossfade).
+            // Restore that surface immediately instead of running a stale
+            // 24 ms zero-distance handoff in the opposite direction.
+            renderedCameraMode = toMode;
+            lastModePathProgress = requestedPathEndpoint;
+            lastModePathProgressValid = true;
+            settleSurfaceTransition(toMode);
+            syncSurfaceVisibility();
+            if (toMode === '3d') scheduleTargetRender(true);
+            return true;
+        }
+        if (continuesVisibleScene) settleSurfaceTransition('3d');
         const generation = ++cameraTransitionGeneration;
         cameraTransitioning = true;
         cameraTransitionChangesMode = changesMode;
@@ -843,11 +975,24 @@
             ? clamp(carriedModePathProgress, 0, 1)
             : (startingIsPerspective ? modePathProgressForCamera(start, perspectiveTarget) : 0);
         const endPathProgress = toMode === '3d' ? 1 : 0;
+        const modePathLookup = usesCanonicalModePath
+            ? buildModePathArcLookup(perspectiveTarget)
+            : null;
+        const startPathDistance = modePathLookup
+            ? modePathDistanceFraction(modePathLookup, startPathProgress)
+            : 0;
+        const endPathDistance = modePathLookup
+            ? modePathDistanceFraction(modePathLookup, endPathProgress)
+            : 1;
+        const pathDistance = Math.abs(endPathDistance - startPathDistance);
+        const transitionDuration = usesCanonicalModePath
+            ? Math.max(CAMERA_TRANSITION_STEP_MS, CAMERA_TRANSITION_DURATION_MS * pathDistance)
+            : CAMERA_TRANSITION_DURATION_MS;
         let startedAt = null;
         const step = () => {
             if (generation !== cameraTransitionGeneration || destroyed) return;
             if (startedAt === null) startedAt = nowFn();
-            const progress = clamp((nowFn() - startedAt) / CAMERA_TRANSITION_DURATION_MS, 0, 1);
+            const progress = clamp((nowFn() - startedAt) / transitionDuration, 0, 1);
             if (progress >= 1) {
                 finishCameraTransition(
                     generation,
@@ -857,20 +1002,24 @@
                 );
                 return;
             }
-            const easedProgress = easeCameraProgress(progress);
-            const camera = usesCanonicalModePath
-                ? cameraAlongModePath(
-                    perspectiveTarget,
-                    startPathProgress + (endPathProgress - startPathProgress) * easedProgress,
+            const easedProgress = usesCanonicalModePath
+                ? smoothModeProgress(progress)
+                : easeCameraProgress(progress);
+            const pathProgress = usesCanonicalModePath
+                ? modePathProgressAtDistance(
+                    modePathLookup,
+                    startPathDistance + (endPathDistance - startPathDistance) * easedProgress,
                 )
+                : null;
+            const camera = usesCanonicalModePath
+                ? cameraAlongModePath(perspectiveTarget, pathProgress)
                 : interpolatePerspectiveCameras(
                     start,
                     changesMode && toMode === '2d' ? topDown : perspectiveTarget,
                     easedProgress,
                 );
             if (usesCanonicalModePath) {
-                lastModePathProgress = startPathProgress
-                    + (endPathProgress - startPathProgress) * easedProgress;
+                lastModePathProgress = pathProgress;
             }
             if (!usesCanonicalModePath) lastModePathProgressValid = false;
             const relayout = issueCameraRelayout(camera, null, { fatal: true, includeProjection: false });
@@ -892,15 +1041,20 @@
                 cameraTransitionTimer = setTimeoutFn(step, CAMERA_TRANSITION_STEP_MS);
             };
             if (usesSurfaceHandoff && toMode === '3d') {
-                // Begin the orbit while the prepared WebGL scene is still
-                // transparent, then blend it in after the first two frames.
-                // The user sees one continuous lift from the Cartesian map
-                // instead of a separate top-down scene followed by an orbit.
-                beginOrbit();
+                // The successful 3D-to-2D handoff finishes its orbit before
+                // swapping surfaces. Run that sequence in exact reverse here:
+                // first reveal the prepared top-down WebGL map, then lift it
+                // smoothly into the saved perspective camera.
                 surfaceTransitionTimer = setTimeoutFn(() => {
                     surfaceTransitionTimer = null;
                     if (generation !== cameraTransitionGeneration || destroyed) return;
                     startSurfaceFade('3d');
+                    surfaceTransitionTimer = setTimeoutFn(() => {
+                        surfaceTransitionTimer = null;
+                        if (generation !== cameraTransitionGeneration || destroyed) return;
+                        settleSurfaceTransition('3d');
+                        beginOrbit();
+                    }, SURFACE_TRANSITION_DURATION_MS);
                 }, CAMERA_TRANSITION_STEP_MS * 2);
             } else {
                 beginOrbit();
@@ -973,7 +1127,14 @@
         if (changed && activeMode === '3d' && mobileFn()) mobileInteractionLocked = true;
         syncModeControls();
         if (changed && visible && !editing && !webglUnavailable && !plotlyUnavailable) {
-            beginSurfaceTransition(activeMode);
+            if (activeMode === '2d' && !chartInitialized) {
+                // A still-pending newPlot has no usable pixels to fade back
+                // from. Keep the real Cartesian map visible while the stale
+                // async creation resolves harmlessly in the background.
+                settleSurfaceTransition('2d');
+            } else {
+                beginSurfaceTransition(activeMode);
+            }
         }
         syncSurfaceVisibility();
 
@@ -1245,6 +1406,7 @@
             edgeWidth: category === 'global' ? 1.3 : 2,
             visible: true,
             legendgroup: category,
+            hoverinfo: 'skip',
         }) || [];
     }
 
@@ -1309,8 +1471,28 @@
         return traces;
     }
 
-    function buildSensorTrace() {
-        return {
+    function buildSensorTraces(bounds) {
+        const rawZMin = Number(bounds?.zMin);
+        const rawZMax = Number(bounds?.zMax);
+        const zMin = Number.isFinite(rawZMin) ? rawZMin : -600;
+        const zMax = Number.isFinite(rawZMax) ? rawZMax : 600;
+        const low = Math.min(zMin, zMax);
+        const high = Math.max(zMin, zMax);
+        const heightReference = {
+            type: 'scatter3d',
+            mode: 'lines',
+            x: [0, 0],
+            y: [0, 0],
+            z: [low, high],
+            line: {
+                color: 'rgba(255, 111, 125, 0.42)',
+                width: 4,
+            },
+            hoverinfo: 'skip',
+            showlegend: false,
+            name: 'Sensor height reference',
+        };
+        const origin = {
             type: 'scatter3d',
             mode: 'markers+text',
             x: [0],
@@ -1329,6 +1511,7 @@
             showlegend: false,
             name: 'Sensor',
         };
+        return [heightReference, origin];
     }
 
     function buildStaticTraces(model) {
@@ -1356,7 +1539,7 @@
         traces.push(...(structured
             ? buildStructuredZoneTraces(zones, visibility)
             : buildFlatZoneTraces(zones, visibility)));
-        traces.push(buildSensorTrace());
+        traces.push(...buildSensorTraces(bounds));
         return traces;
     }
 
@@ -2177,6 +2360,9 @@
     function getPublicApi() {
         return {
             init,
+            normalizeDisplayHeightBounds,
+            loadDisplayHeightBounds,
+            saveDisplayHeightBounds,
             setVisible,
             setActiveDevice,
             setEditing,

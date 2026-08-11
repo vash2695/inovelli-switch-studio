@@ -139,7 +139,8 @@ test('radar shell keeps the full Cartesian 2D surface beside one accessible 3D s
     assert.match(template, /mmWaveHeightMin:\s*'z_min',[\s\S]*?mmWaveHeightMax:\s*'z_max'/);
     assert.match(template, /return \{ zMin: -600, zMax: 600 \};/);
     assert.doesNotMatch(template, /getTargetSnapshot\('height-bounds'\)/);
-    assert.match(template, /const axisHeightBounds = getRadar3dAxisHeightBounds\(fovHeightBounds\);[\s\S]*?fovBounds: fovHeightBounds/);
+    assert.doesNotMatch(template, /getRadar3dAxisHeightBounds/);
+    assert.match(template, /bounds:\s*\{[\s\S]*?zMin:\s*chartZMin,[\s\S]*?zMax:\s*chartZMax[\s\S]*?fovBounds:\s*fovHeightBounds/);
     assert.match(template, /zoneModule\.mapRawZonesByAreaId\(zones\)/);
     assert.match(template, /function isRadar2dSurfaceVisible\(\)[\s\S]*?!chartElement\.hidden[\s\S]*?getClientRects\(\)\.length/);
     assert.match(template, /shouldRender2d:\s*\(\)\s*=>\s*isRadar2dSurfaceVisible\(\)/);
@@ -149,7 +150,64 @@ test('radar shell keeps the full Cartesian 2D surface beside one accessible 3D s
     assert.match(template, /zoneModule\.refreshTargetVisualization\(\)/);
     assert.match(template, /const globalZoneUpdates = Object\.entries\(globalZoneFieldMap\)\.reduce[\s\S]*?rawValue === null \|\| rawValue === undefined[\s\S]*?if \(Object\.keys\(globalZoneUpdates\)\.length > 0\)/);
     assert.match(template, /function getFiniteRadarValue\(value\)[\s\S]*?value === null \|\| value === undefined[\s\S]*?!value\.trim\(\)/);
+    assert.match(template, /function buildVerticalBandShapes\(\)[\s\S]*?buildUnsupportedRange2DShapes\(\{[\s\S]*?xMin: chartXMin,[\s\S]*?yMax: chartYMax/);
+    assert.match(template, /function getEditModePassiveTraces\(\)[\s\S]*?buildVerticalBandShapes\(\)\.forEach[\s\S]*?shape\.fillcolor/);
+    assert.match(template, /function getRadarRings\(\)[\s\S]*?const rings = buildVerticalBandShapes\(\);/);
     assert.match(template, /@media \(max-width: 700px\)[\s\S]*?\.chart-canvas-wrap\s*\{[\s\S]*?height:\s*clamp\(280px, 54dvh, 370px\);[\s\S]*?aspect-ratio:\s*auto;/);
     assert.match(template, /@media \(max-width: 640px\)[\s\S]*?\.radar-panel-heading\s*\{[\s\S]*?min-height:\s*47px;/);
     assert.doesNotMatch(template, /\.chart-canvas-wrap\.radar-view-3d\s*\{/);
+});
+
+test('3D display height is validated and persisted per device without changing 2D or physical FOV state', () => {
+    assert.match(template, /Radar Display Range \(cm\)/);
+    assert.match(
+        template,
+        /Display only; does not change zones\. X\/Y affect both views\. Z affects 3D and uses the switch as 0 cm \(negative below, positive above\)\. Saved per device in this browser\./,
+    );
+    assert.match(template, /<label for="vizZMin">Height min \(Z\)<\/label><input type="number" id="vizZMin" min="-600" max="600" step="1" value="-600">/);
+    assert.match(template, /<label for="vizZMax">Height max \(Z\)<\/label><input type="number" id="vizZMax" min="-600" max="600" step="1" value="600">/);
+    assert.match(template, />Apply Display Range<\/button>/);
+    assert.match(template, /\.radar-display-range-grid\s*\{\s*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);/);
+    assert.match(template, /@media \(max-width: 640px\)[\s\S]*?\.radar-display-range-grid \.zone-input-group input\s*\{[\s\S]*?min-height:\s*44px;[\s\S]*?font-size:\s*16px;[\s\S]*?\.radar-display-range-apply\s*\{[\s\S]*?min-height:\s*44px;/);
+    assert.match(template, /@media \(hover: none\) and \(pointer: coarse\)[\s\S]*?\.radar-display-range-grid \.zone-input-group input\s*\{[\s\S]*?min-height:\s*44px;[\s\S]*?font-size:\s*16px;[\s\S]*?\.radar-display-range-apply\s*\{[\s\S]*?min-height:\s*44px;/);
+    assert.equal((template.match(/id="vizZMin"/g) || []).length, 1);
+    assert.equal((template.match(/id="vizZMax"/g) || []).length, 1);
+
+    assert.match(template, /let chartZMin = -600;[\s\S]*?let chartZMax = 600;/);
+    assert.match(
+        template,
+        /function loadRadarDisplayHeightBounds\(topic\)[\s\S]*?radar3dModule\.loadDisplayHeightBounds\(topic\)[\s\S]*?chartZMin = loaded\.zMin;[\s\S]*?chartZMax = loaded\.zMax;[\s\S]*?setRadarDisplayHeightInputs\(\)/,
+    );
+
+    const selectionStart = template.indexOf('function requestDeviceSelection(nextTopic, options)');
+    const selectionEnd = template.indexOf('function applyLegacyLayout()', selectionStart);
+    assert.ok(selectionStart >= 0 && selectionEnd > selectionStart);
+    const selectionSource = template.slice(selectionStart, selectionEnd);
+    const hydrateIndex = selectionSource.indexOf('loadRadarDisplayHeightBounds(normalizedNext);');
+    const activateIndex = selectionSource.indexOf('radar3dModule.setActiveDevice(normalizedNext);');
+    const refreshIndex = selectionSource.indexOf('refreshRadar3dScene();', activateIndex);
+    assert.ok(hydrateIndex >= 0, 'device selection should hydrate its display-height pair');
+    assert.ok(activateIndex > hydrateIndex, 'height inputs should hydrate before the new device scene is activated');
+    assert.ok(refreshIndex > activateIndex, 'the selected device scene should immediately receive its stored display range');
+
+    const sceneStart = template.indexOf('function buildRadar3dSceneModel()');
+    const sceneEnd = template.indexOf('function refreshRadar3dScene()', sceneStart);
+    const sceneSource = template.slice(sceneStart, sceneEnd);
+    assert.match(sceneSource, /const fovHeightBounds = getConfiguredRadarHeightBounds\(\);/);
+    assert.match(sceneSource, /bounds:\s*\{[\s\S]*?zMin:\s*chartZMin,[\s\S]*?zMax:\s*chartZMax/);
+    assert.match(sceneSource, /fovBounds:\s*fovHeightBounds/);
+    assert.doesNotMatch(sceneSource, /chartZMin[\s\S]*?fovBounds:\s*\{\s*zMin:\s*chartZMin/);
+
+    const updateStart = template.indexOf('function updateRadarScale()');
+    const updateEnd = template.indexOf('// Attach Listeners', updateStart);
+    const updateSource = template.slice(updateStart, updateEnd);
+    assert.match(updateSource, /normalizeDisplayHeightBounds\(vizZMin\.value, vizZMax\.value\)/);
+    assert.match(updateSource, /if \(!nextHeightBounds\)[\s\S]*?return false;/);
+    assert.match(updateSource, /chartZMin = nextHeightBounds\.zMin;[\s\S]*?chartZMax = nextHeightBounds\.zMax;/);
+    assert.match(updateSource, /saveDisplayHeightBounds\(activeDeviceTopic, chartZMin, chartZMax\)/);
+    assert.match(updateSource, /localStorage\.setItem\('vizXMin',[\s\S]*?localStorage\.setItem\('vizYMax'/);
+    assert.doesNotMatch(updateSource, /localStorage\.setItem\('vizZ(?:Min|Max)'/);
+    assert.match(updateSource, /'xaxis\.range': \[chartXMin, chartXMax\],[\s\S]*?'yaxis\.range': \[chartYMin, chartYMax\]/);
+    assert.doesNotMatch(updateSource, /zaxis\.range/);
+    assert.doesNotMatch(updateSource, /\.setMode\(/);
 });
