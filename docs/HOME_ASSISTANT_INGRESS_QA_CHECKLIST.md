@@ -41,9 +41,11 @@ Last updated: 2026-08-10
 
 - Verify occupancy, area badges, illuminance, live targets, trails, and target table updates on `Presence & Zones`.
 - Confirm targets clear when occupancy reports clear.
-- Switch to 3D and verify each live target uses its exact X/Y/Z coordinates, trails remain separated by target ID, and orbit/zoom does not snap back as packets arrive.
+- Confirm 2D retains the full-size Cartesian radar/editor footprint, then switch to 3D and verify the prepared scene crossfades and orbits smoothly with no blank frame, projection flash, roll, snap, or canvas-height jump.
+- Switch between 2D and 3D repeatedly, including a rapid reversal mid-transition; the final selected mode must win, configured axis ranges must remain intact, and no stale WebGL canvases or context-loss warnings should accumulate.
+- In 3D, verify each live target uses its exact X/Y/Z coordinates, trails remain separated by target ID, the camera rotates/elevates/zooms around one fixed focus, and the room plane never rolls or flips.
 - Confirm detection, stay, and interference zones render as correctly bounded translucent cuboids, including a packet where an empty raw area slot precedes an active area.
-- Confirm the 3D scene preserves both the 120° and 150° horizontal FOV reference envelopes and extrudes them through the reported primary minimum/maximum height range; before that report, confirm it uses the full supported −600..600 cm fallback.
+- Confirm both live modes preserve the nested 120° and 150° horizontal FOV reference envelopes, render them as borderless subdued informational shading distinct from semantic zones, and extrude them through the reported primary minimum/maximum height range; before that report, confirm they use the full supported −600..600 cm fallback.
 - Rotate the 3D scene, press `Reset view`, then switch devices; Reset must restore the default camera and a device change must clear targets/trails and intentionally reset the camera.
 - Begin a zone edit while 3D is selected. The app must explain and force 2D for editing, disable 3D during the draft, and restore the preferred 3D view after Apply or Cancel without losing the draft.
 - Turn off the grid/FOV and each zone category/individual detection-area visibility option; verify both radar modes follow the same settings and hidden volumes leave no ghost traces.
@@ -85,7 +87,7 @@ Last updated: 2026-08-10
 - On phone and tablet widths, confirm the device selector shares the header row with the Inovelli anchor, quick controls use the next row, and long device names do not cause horizontal overflow.
 - Open the compact section menu from the current-page header; confirm all six sections remain one accessible tab set, selecting a section closes the menu, Escape returns focus to the menu button, and widening past the mobile breakpoint restores the desktop tab bar.
 - Confirm cards, tabs, sticky actions, zone inputs, radar, and tables remain usable without accidental horizontal page scrolling.
-- At 320/390px phone, landscape phone, foldable/tablet, and desktop sizes, verify the 3D canvas has a useful non-zero height, the 2D/3D and Reset controls remain at least 44px, touch orbit does not trap page scrolling, and rotating/resizing preserves the camera.
+- At 320/390px phone, landscape phone, foldable/tablet, exact 700/701px, and desktop sizes, verify both radar modes share a useful stable canvas height, the 2D/3D and Reset controls remain at least 44px, locked touch interaction does not trap page scrolling, and rotating/resizing preserves the perspective camera.
 - Navigate top-level and nested Presence & Zones tabs by keyboard using Arrow keys, Home, and End.
 - Confirm focus remains visible and nested tab panels retain the correct screen-reader ownership.
 - Confirm LED segment hit targets remain at least 44px, the segment editor becomes a bounded bottom panel on phone layouts, and no hue/brightness drag causes page scrolling.

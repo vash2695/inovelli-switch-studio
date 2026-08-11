@@ -178,6 +178,14 @@ test('3D target traces preserve negative height and leave missing height unplott
     assert.equal(trails.type, 'scatter3d');
     assert.deepEqual(plain(trails.z), [-20, -16, null, null, null]);
     assert.equal(trails.connectgaps, false);
+
+    const [topDownTargets, topDownTrails] = zones.buildTarget3DTraces(
+        [withNegativeHeight, withoutHeight],
+        { 2: [{ x: -22, y: 90, z: 0, hasZ: false }] },
+        { missingZValue: 0 },
+    );
+    assert.deepEqual(plain(topDownTargets.z), [-16, 0], 'top-down mode should retain targets with unavailable height');
+    assert.deepEqual(plain(topDownTrails.z), [0, null]);
 });
 
 test('canonical live history snapshots retain xyz and clear cleanly on reset', () => {
@@ -330,7 +338,42 @@ test('3D FOV volumes match the clipped forward-facing 120 and 150 degree sectors
     assert.equal(traces[0].visible, false);
     assert.equal(traces[1].visible, false);
     assert.equal(traces[2].visible, true);
-    assert.equal(traces[3].visible, true);
+    assert.equal(traces[3].visible, false);
+    assert.deepEqual(
+        plain(traces.map((trace) => trace.hoverinfo)),
+        ['skip', 'skip', 'skip', 'skip'],
+        'sensor range is a non-interactive visual reference',
+    );
+    const allVisible = zones.buildFov3DTraces({ ...common, visible: true });
+    assert.deepEqual(
+        plain(allVisible.map((trace) => trace.visible)),
+        [true, false, true, false],
+        'FOV edge traces retain stable indices without drawing a border',
+    );
+    assert.equal(traces[0].color, '#66768A');
+    assert.equal(traces[0].opacity, 0.005);
+    assert.equal(traces[1].line.color, 'rgba(135, 153, 175, 0.12)');
+    assert.equal(traces[2].color, '#8FA1B8');
+    assert.equal(traces[2].opacity, 0.011);
+    assert.equal(traces[3].line.color, 'rgba(165, 181, 201, 0.18)');
+    assert.deepEqual(plain(zones.getFovStyles()), {
+        outer: {
+            color: '#66768A',
+            edgeColor: 'rgba(135, 153, 175, 0.12)',
+            opacity3d: 0.005,
+            fill2d: 'rgba(102, 118, 138, 0.007)',
+            edgeWidth: 1,
+            edgeDash: 'dot',
+        },
+        nominal: {
+            color: '#8FA1B8',
+            edgeColor: 'rgba(165, 181, 201, 0.18)',
+            opacity3d: 0.011,
+            fill2d: 'rgba(143, 161, 184, 0.014)',
+            edgeWidth: 1.3,
+            edgeDash: 'solid',
+        },
+    });
 
     const asymmetric = zones.buildFovVolumeGeometry({
         xMin: -200,

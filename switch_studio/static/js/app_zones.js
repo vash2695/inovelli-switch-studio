@@ -9,6 +9,25 @@
         minSpan: 20
     };
 
+    const FOV_STYLES = Object.freeze({
+        outer: Object.freeze({
+            color: '#66768A',
+            edgeColor: 'rgba(135, 153, 175, 0.12)',
+            opacity3d: 0.005,
+            fill2d: 'rgba(102, 118, 138, 0.007)',
+            edgeWidth: 1,
+            edgeDash: 'dot'
+        }),
+        nominal: Object.freeze({
+            color: '#8FA1B8',
+            edgeColor: 'rgba(165, 181, 201, 0.18)',
+            opacity3d: 0.011,
+            fill2d: 'rgba(143, 161, 184, 0.014)',
+            edgeWidth: 1.3,
+            edgeDash: 'solid'
+        })
+    });
+
     let chartEl = null;
     let dataTableBodyEl = null;
     let zoneStatusEl = null;
@@ -482,13 +501,14 @@
         const showLabels = opts.showLabels !== false;
         const targetColor = opts.targetColor || '#1bd2dc';
         const trailColor = opts.trailColor || '#2e93bc';
+        const missingZValue = toFiniteNumber(opts.missingZValue);
 
         const targetTrace = {
             type: 'scatter3d',
             mode: showLabels ? 'markers+text' : 'markers',
             x: normalizedTargets.map((target) => target.x),
             y: normalizedTargets.map((target) => target.y),
-            z: normalizedTargets.map((target) => target.hasZ ? target.z : null),
+            z: normalizedTargets.map((target) => target.hasZ ? target.z : missingZValue),
             text: normalizedTargets.map((target) => getFriendlyTargetLabel(target.id)),
             textposition: 'top center',
             textfont: { color: '#bde8ef', size: 10, family: 'DM Sans, sans-serif' },
@@ -518,7 +538,7 @@
             points.forEach((point) => {
                 trailX.push(point.x);
                 trailY.push(point.y);
-                trailZ.push(point.hasZ ? point.z : null);
+                trailZ.push(point.hasZ ? point.z : missingZValue);
             });
             if (points.length > 0) {
                 trailX.push(null);
@@ -768,22 +788,33 @@
         const visible = opts.visible !== false;
         const outerTraces = buildVolumeEdgeTraces(outerGeometry, {
             name: opts.outerName || '150 degree field of view',
-            color: opts.outerColor || '#0dd4c0',
-            edgeColor: opts.outerEdgeColor || 'rgba(13, 212, 192, 0.35)',
-            opacity: toFiniteNumber(opts.outerOpacity) ?? 0.035,
-            edgeWidth: toFiniteNumber(opts.outerEdgeWidth) ?? 1.2,
-            edgeDash: 'dot',
+            color: opts.outerColor || FOV_STYLES.outer.color,
+            edgeColor: opts.outerEdgeColor || FOV_STYLES.outer.edgeColor,
+            opacity: toFiniteNumber(opts.outerOpacity) ?? FOV_STYLES.outer.opacity3d,
+            edgeWidth: toFiniteNumber(opts.outerEdgeWidth) ?? FOV_STYLES.outer.edgeWidth,
+            edgeDash: FOV_STYLES.outer.edgeDash,
+            hoverinfo: 'skip',
+            showEdges: false,
             visible: visible && opts.showOuter !== false,
         });
         const innerTraces = buildVolumeEdgeTraces(innerGeometry, {
             name: opts.innerName || '120 degree field of view',
-            color: opts.innerColor || '#0dd4c0',
-            edgeColor: opts.innerEdgeColor || 'rgba(13, 212, 192, 0.58)',
-            opacity: toFiniteNumber(opts.innerOpacity) ?? 0.065,
-            edgeWidth: toFiniteNumber(opts.innerEdgeWidth) ?? 1.6,
+            color: opts.innerColor || FOV_STYLES.nominal.color,
+            edgeColor: opts.innerEdgeColor || FOV_STYLES.nominal.edgeColor,
+            opacity: toFiniteNumber(opts.innerOpacity) ?? FOV_STYLES.nominal.opacity3d,
+            edgeWidth: toFiniteNumber(opts.innerEdgeWidth) ?? FOV_STYLES.nominal.edgeWidth,
+            hoverinfo: 'skip',
+            showEdges: false,
             visible: visible && opts.showInner !== false,
         });
         return [...outerTraces, ...innerTraces];
+    }
+
+    function getFovStyles() {
+        return {
+            outer: { ...FOV_STYLES.outer },
+            nominal: { ...FOV_STYLES.nominal }
+        };
     }
 
     function buildHistory2dCoordinates() {
@@ -963,6 +994,7 @@
         buildZoneCuboidTraces,
         buildFovVolumeGeometry,
         buildFov3DTraces,
+        getFovStyles,
         refreshTargetVisualization: renderTargetVisualization2d,
         handleNewData,
         appendCommandLog

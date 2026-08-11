@@ -19,7 +19,7 @@ Huge thanks for creating the initial tooling that made this expanded Switch Stud
 - Added reconnect-safe device inventory, availability, and command recovery
 - Added stronger mobile responsiveness for Home Assistant app usage
 - Added richer Presence & Zones tooling (zone editor, inline zone status, live target telemetry)
-- Added a height-aware 3D radar visualization with target trails, zone volumes, and the sensor's 120°/150° horizontal field-of-view reference envelopes
+- Added a full-size Cartesian 2D radar plus a fixed-center 3D perspective view with a prepared camera handoff, target trails, zone volumes, and subdued 120°/150° field-of-view reference envelopes
 - Added an interactive VZM32-SN LED-bar editor with a product preview, segment controls, and custom hue selection
 - Added in-strip `Target Reporting` control with optional auto-off on disconnect
 - Added Zigbee2MQTT OTA status, update checks, and catalog-only installation controls
@@ -39,7 +39,7 @@ Other discovered Blue Series devices use conservative, expose-derived dashboard 
 - Inventory-driven discovery from Zigbee2MQTT, with a conservative traffic fallback for VZM32-SN
 - Dashboard cards for every discovered device, including availability and supported quick controls
 - Session-scoped device selection per browser session
-- Live Presence & Zones workflow with a canonical 2D zone editor plus a height-aware 3D target, zone-volume, and field-of-view visualization
+- Live Presence & Zones workflow with a canonical Cartesian 2D radar/editor and a complementary fixed-center 3D visualization
 - Tabbed configuration for frequent-use and advanced settings
 - Visual VZM32-SN LED editor with blended On/Off defaults, seven individually selectable segments, and integrated all-bar/per-segment notification effects
 - Conditional section support for model-specific parameters (for example, shared fan-related fields)
@@ -83,7 +83,7 @@ For live target coordinates and radar updates:
 ### Presence & Zones
 
 - Top live strip for packet/telemetry status, illuminance, and target-reporting state
-- Persistent 2D/3D radar views: edit zones in 2D, or orbit a live height-aware scene with XYZ trails, translucent zone volumes, and the 120°/150° sensor field-of-view envelopes
+- Persistent 2D/3D radar views: use the full-size top-down Cartesian map for scanning and zone edits, then switch through a prepared crossfade and fixed-axis camera orbit to the 3D visualization
 - Zone status row directly below the map (optimized for desktop and mobile)
 - Right panel views: `Controls & Zones`, `Configuration`, and `View`
 

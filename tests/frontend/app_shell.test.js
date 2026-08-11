@@ -107,20 +107,21 @@ test('LED visual editor integrates effects while preserving schema-driven fallba
     assert.match(template, /individual_led_effect:\s*'LED Effect \(Single LED\)'/);
 });
 
-test('radar shell adds one accessible visualization-only 3D surface without replacing the 2D editor', () => {
+test('radar shell keeps the full Cartesian 2D surface beside one accessible 3D scene', () => {
     assert.match(
         template,
         /<h2>Live Radar<\/h2>[\s\S]*?<fieldset class="radar-view-switch" aria-label="Radar view" aria-describedby="radarViewDescription">[\s\S]*?id="radarView2d"[\s\S]*?id="radarView3d"/
     );
     assert.equal((template.match(/id="chart"/g) || []).length, 1, 'the canonical 2D editor surface should remain singular');
     assert.equal((template.match(/id="chart3d"/g) || []).length, 1, 'the 3D visualization surface should be singular');
-    assert.match(template, /id="chart3d"[^>]*aria-label="Three-dimensional live presence radar map with targets, zone volumes, and sensor field of view/);
+    assert.match(template, /id="chart3d"[^>]*aria-label="Top-down live presence radar map with targets, zones, and sensor field of view/);
     assert.match(template, /id="radarResetView" type="button" hidden>Reset view<\/button>/);
-    assert.match(template, /id="radar3dLegend" aria-label="Three-dimensional radar legend" hidden/);
+    assert.match(template, /id="radar3dLegend" aria-label="Live radar legend" hidden/);
+    assert.match(template, /FOV 120° \/ 150°/);
     assert.match(template, /Axes: X width · Y depth · Z height \(cm\)/);
     assert.match(template, /id="radar3dInteractionToggle" type="button" aria-controls="chart3d" aria-pressed="false" hidden>Explore 3D<\/button>/);
     assert.match(template, /@media \(max-width: 700px\), \(hover: none\) and \(pointer: coarse\)[\s\S]*?\.radar-interaction-toggle:not\(\[hidden\]\)/);
-    assert.match(template, /The 3D view is a live visualization\. Zone drawing and editing use the 2D view\.[\s\S]*?otherwise the full supported height range is shown\./);
+    assert.match(template, /full-size top-down Cartesian map in 2D and a fixed-center perspective camera in 3D\.[\s\S]*?Zone drawing and editing stay in the Cartesian 2D view\.[\s\S]*?otherwise the full supported height range is shown\./);
 
     const zonesScriptIndex = template.indexOf('/static/js/app_zones.js');
     const radarScriptIndex = template.indexOf('/static/js/app_radar3d.js');
@@ -142,11 +143,13 @@ test('radar shell adds one accessible visualization-only 3D surface without repl
     assert.match(template, /zoneModule\.mapRawZonesByAreaId\(zones\)/);
     assert.match(template, /function isRadar2dSurfaceVisible\(\)[\s\S]*?!chartElement\.hidden[\s\S]*?getClientRects\(\)\.length/);
     assert.match(template, /shouldRender2d:\s*\(\)\s*=>\s*isRadar2dSurfaceVisible\(\)/);
-    assert.match(template, /if \(!is3d && isRadar2dSurfaceVisible\(\)\)[\s\S]*?renderChartForCurrentMode\(\);[\s\S]*?zoneModule\.refreshTargetVisualization\(\)/);
+    assert.match(template, /if \(!usesSceneSurface && !is3d && isRadar2dSurfaceVisible\(\)\)[\s\S]*?renderChartForCurrentMode\(\);[\s\S]*?zoneModule\.refreshTargetVisualization\(\)/);
     assert.match(template, /layout\.xaxis\.showgrid = showGrid;[\s\S]*?layout\.yaxis\.showgrid = showGrid;[\s\S]*?if \(chartDiv && chartDiv\.layout && isRadar2dSurfaceVisible\(\)\)/);
     assert.match(template, /layout\.xaxis\.range = \[chartXMin, chartXMax\];[\s\S]*?layout\.yaxis\.range = \[chartYMin, chartYMax\];[\s\S]*?if \(chartDiv && chartDiv\.layout && isRadar2dSurfaceVisible\(\)\)/);
     assert.match(template, /zoneModule\.refreshTargetVisualization\(\)/);
     assert.match(template, /const globalZoneUpdates = Object\.entries\(globalZoneFieldMap\)\.reduce[\s\S]*?rawValue === null \|\| rawValue === undefined[\s\S]*?if \(Object\.keys\(globalZoneUpdates\)\.length > 0\)/);
     assert.match(template, /function getFiniteRadarValue\(value\)[\s\S]*?value === null \|\| value === undefined[\s\S]*?!value\.trim\(\)/);
-    assert.match(template, /\.chart-canvas-wrap\.radar-view-3d\s*\{[\s\S]*?height:\s*clamp\(280px, 62dvh, 440px\);[\s\S]*?aspect-ratio:\s*auto;/);
+    assert.match(template, /@media \(max-width: 700px\)[\s\S]*?\.chart-canvas-wrap\s*\{[\s\S]*?height:\s*clamp\(280px, 54dvh, 370px\);[\s\S]*?aspect-ratio:\s*auto;/);
+    assert.match(template, /@media \(max-width: 640px\)[\s\S]*?\.radar-panel-heading\s*\{[\s\S]*?min-height:\s*47px;/);
+    assert.doesNotMatch(template, /\.chart-canvas-wrap\.radar-view-3d\s*\{/);
 });
