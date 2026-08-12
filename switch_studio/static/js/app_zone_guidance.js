@@ -1,9 +1,10 @@
 (function () {
     const OFFICIAL_SOURCE_URL = 'https://help.inovelli.com/en/articles/12773613-blue-series-mmwave-presence-dimmer-switch-advanced-mmwave-configuration';
     const COMMUNITY_AREA_SOURCE_URL = 'https://community.inovelli.com/t/presence-area-configuration-best-practice/20933';
-    const COMMUNITY_STAY_SOURCE_URL = 'https://community.inovelli.com/t/having-trouble-understanding-blue-mmwave-vzm32-sn-stay-settings-parameters/21585';
+    const COMMUNITY_STAY_SOURCE_URL = 'https://community.inovelli.com/t/having-trouble-understanding-blue-mmwave-vzm32-sn-stay-settings-parameters/21585/4';
 
     const DEFAULT_ELEMENT_IDS = Object.freeze({
+        toggle: 'zoneTypeGuidanceToggle',
         guidance: 'zoneTypeGuidance',
         title: 'zoneTypeGuidanceTitle',
         summary: 'zoneTypeGuidanceSummary',
@@ -11,12 +12,16 @@
         interaction: 'zoneTypeGuidanceInteraction',
         note: 'zoneTypeGuidanceNote',
         communityLink: 'zoneTypeGuidanceCommunityLink',
+        communityLinkLabel: 'zoneTypeGuidanceCommunityLinkLabel',
     });
 
     let activeSelectEl = null;
     let activeChangeHandler = null;
+    let activeToggleEl = null;
+    let activeToggleHandler = null;
     let activeElements = null;
     let currentGuidance = null;
+    let guidanceExpanded = false;
 
     function sourceFields(communitySourceUrl) {
         return {
@@ -33,30 +38,27 @@
             return {
                 type: 'unknown',
                 accentLabel: 'Zone guidance',
-                title: 'Choose a zone',
+                title: 'Zone types',
                 summary: 'Select a detection, interference, or stay area to see what it does.',
                 use: 'Zone guidance changes with the selected zone.',
                 interaction: 'Reading this guidance does not change the switch.',
                 note: null,
+                communityLinkLabel: 'Community area setup',
                 ...sourceFields(COMMUNITY_AREA_SOURCE_URL),
             };
         }
 
         const category = match[1];
-        const areaNumber = Number(match[2]);
-
         if (category === 'mmwave_detection_areas') {
-            const isPrimary = areaNumber === 1;
             return {
                 type: 'detection',
-                accentLabel: isPrimary ? 'Default detection' : 'Detection',
-                title: `Detection Area ${areaNumber}`,
-                summary: 'An active region where the sensor reports movement or occupancy.',
-                use: 'Use detection areas to monitor the parts of the room where presence should count.',
-                interaction: 'Detection areas may overlap. Each area reports its own occupancy, while overall occupancy is on when any detection area is occupied.',
-                note: isPrimary
-                    ? 'Area 1 is the default detection area: the switch\'s basic range parameters configure this same area, not a separate fifth or global zone.'
-                    : null,
+                accentLabel: 'Detection',
+                title: 'Detection Areas',
+                summary: 'Active regions where the sensor reports presence.',
+                use: 'Monitor the parts of the room where presence should count.',
+                interaction: 'Detection areas may overlap. Each area reports its own occupancy, while overall occupancy is active when any detection area is occupied.',
+                note: 'The Basic Range X/Y/Z controls configure Detection Area 1. They do not define a separate global or fifth zone.',
+                communityLinkLabel: 'Community area setup',
                 ...sourceFields(COMMUNITY_AREA_SOURCE_URL),
             };
         }
@@ -65,11 +67,12 @@
             return {
                 type: 'interference',
                 accentLabel: 'Interference',
-                title: `Interference Area ${areaNumber}`,
-                summary: 'An exclusion region where targets are ignored for presence reporting.',
-                use: 'Use interference areas around sources of unwanted detections, such as moving fans, vents, or reflective surfaces.',
-                interaction: 'Interference areas are independent and apply across the detection setup. Area numbers are storage slots; Interference Area 2 is not paired with Detection Area 2.',
+                title: 'Interference Areas',
+                summary: 'Exclusion regions where targets are ignored for presence reporting.',
+                use: 'Block unwanted detections around sources such as moving fans, vents, or reflective surfaces.',
+                interaction: 'Interference areas apply across the detection setup. Their numbers are storage slots, not pairings with detection-area numbers.',
                 note: null,
+                communityLinkLabel: 'Community area setup',
                 ...sourceFields(COMMUNITY_AREA_SOURCE_URL),
             };
         }
@@ -77,11 +80,12 @@
         return {
             type: 'stay',
             accentLabel: 'Stay',
-            title: `Stay Area ${areaNumber}`,
-            summary: 'A region intended to help the sensor continue detecting stationary presence.',
-            use: 'Use stay areas around places where someone may sit or lie still, such as a desk, sofa, or bed.',
-            interaction: 'Stay areas complement detection areas and are typically placed inside or overlapping a detection area; they do not replace the active detection boundary.',
-            note: 'Inovelli has confirmed a switch-firmware bug can return Stay Area X coordinates mirrored or with min/max swapped. After applying, verify the reported position; Switch Studio will not silently compensate for it.',
+            title: 'Stay Areas',
+            summary: 'Regions intended to help retain stationary presence.',
+            use: 'Places where someone may sit or lie still, such as a desk, sofa, bed, or toilet.',
+            interaction: 'Stay areas are normally placed inside or overlapping a Detection Area. They improve stationary retention but do not create separate occupancy badges or replace the active detection boundary.',
+            note: 'Inovelli has confirmed a switch-firmware bug can return Stay Area X coordinates mirrored or with min/max swapped. After applying, verify the reported position; Switch Studio does not silently compensate.',
+            communityLinkLabel: 'Stay-area guidance and firmware note',
             ...sourceFields(COMMUNITY_STAY_SOURCE_URL),
         };
     }
@@ -97,6 +101,7 @@
         const ownerDocument = opts.ownerDocument || (typeof document !== 'undefined' ? document : null);
         const suppliedElements = opts.elements || null;
         return {
+            toggle: getElement(ownerDocument, suppliedElements, 'toggle'),
             guidance: getElement(ownerDocument, suppliedElements, 'guidance'),
             title: getElement(ownerDocument, suppliedElements, 'title'),
             summary: getElement(ownerDocument, suppliedElements, 'summary'),
@@ -104,6 +109,7 @@
             interaction: getElement(ownerDocument, suppliedElements, 'interaction'),
             note: getElement(ownerDocument, suppliedElements, 'note'),
             communityLink: getElement(ownerDocument, suppliedElements, 'communityLink'),
+            communityLinkLabel: getElement(ownerDocument, suppliedElements, 'communityLinkLabel'),
         };
     }
 
@@ -121,6 +127,7 @@
         setText(refs.use, model.use);
         setText(refs.interaction, model.interaction);
         setText(refs.note, model.note);
+        setText(refs.communityLinkLabel, model.communityLinkLabel);
 
         if (refs.note) refs.note.hidden = !model.note;
         if (refs.communityLink && typeof refs.communityLink.setAttribute === 'function') {
@@ -128,16 +135,30 @@
         }
         if (refs.guidance) {
             if (typeof refs.guidance.setAttribute === 'function') {
-                refs.guidance.setAttribute('role', 'note');
-                refs.guidance.setAttribute('aria-live', 'polite');
-                refs.guidance.setAttribute('aria-atomic', 'true');
                 refs.guidance.setAttribute('data-zone-type', model.type);
                 refs.guidance.setAttribute('data-accent-label', model.accentLabel);
             }
         }
+        if (refs.toggle && typeof refs.toggle.setAttribute === 'function') {
+            refs.toggle.setAttribute('data-zone-type', model.type);
+        }
 
         currentGuidance = { ...model };
         return { ...model };
+    }
+
+    function setExpanded(expanded) {
+        const refs = activeElements || {};
+        guidanceExpanded = Boolean(expanded && refs.guidance);
+
+        if (refs.guidance) refs.guidance.hidden = !guidanceExpanded;
+        if (refs.toggle && typeof refs.toggle.setAttribute === 'function') {
+            const action = guidanceExpanded ? 'Hide' : 'Show';
+            refs.toggle.setAttribute('aria-expanded', String(guidanceExpanded));
+            refs.toggle.setAttribute('aria-label', `${action} zone type help`);
+            refs.toggle.setAttribute('title', `${action} zone type help`);
+        }
+        return guidanceExpanded;
     }
 
     function init(options) {
@@ -153,18 +174,27 @@
         if (activeSelectEl && activeChangeHandler && typeof activeSelectEl.removeEventListener === 'function') {
             activeSelectEl.removeEventListener('change', activeChangeHandler);
         }
+        if (activeToggleEl && activeToggleHandler && typeof activeToggleEl.removeEventListener === 'function') {
+            activeToggleEl.removeEventListener('click', activeToggleHandler);
+        }
 
         activeSelectEl = selectEl;
         activeElements = elements;
+        activeToggleEl = elements.toggle;
         activeChangeHandler = () => {
             const target = activeSelectEl ? activeSelectEl.value : '';
             renderGuidance(resolveGuidance(target), activeElements);
         };
+        activeToggleHandler = () => setExpanded(!guidanceExpanded);
 
         if (activeSelectEl && typeof activeSelectEl.addEventListener === 'function') {
             activeSelectEl.addEventListener('change', activeChangeHandler);
         }
+        if (activeToggleEl && typeof activeToggleEl.addEventListener === 'function') {
+            activeToggleEl.addEventListener('click', activeToggleHandler);
+        }
         activeChangeHandler();
+        setExpanded(false);
         return window.SwitchStudioZoneGuidance;
     }
 
@@ -172,6 +202,8 @@
         init,
         resolveGuidance,
         renderGuidance,
+        setExpanded,
+        isExpanded: () => guidanceExpanded,
         getCurrentGuidance: () => (currentGuidance ? { ...currentGuidance } : null),
         sourceUrls: Object.freeze({
             official: OFFICIAL_SOURCE_URL,

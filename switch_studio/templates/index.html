@@ -574,6 +574,7 @@
             color: #b8c1d4;
             line-height: 1.45;
         }
+        .zone-guidance[hidden] { display: none; }
         .zone-guidance[data-zone-type="stay"] {
             border-color: rgba(240, 170, 82, 0.34);
             border-left-color: #f0aa52;
@@ -632,6 +633,45 @@
             display: grid;
             grid-template-columns: minmax(0, 1fr);
             gap: 6px;
+        }
+        .zone-target-label-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .zone-guidance-toggle {
+            display: inline-grid;
+            place-items: center;
+            width: 30px;
+            height: 30px;
+            padding: 0;
+            border: 1px solid rgba(24, 168, 216, 0.52);
+            border-radius: 50%;
+            background: rgba(24, 168, 216, 0.08);
+            color: #72d9e8;
+            font-family: inherit;
+            font-size: 0.86rem;
+            font-weight: 700;
+            line-height: 1;
+            cursor: pointer;
+        }
+        .zone-guidance-toggle[data-zone-type="stay"] {
+            border-color: rgba(240, 170, 82, 0.52);
+            background: rgba(240, 170, 82, 0.08);
+            color: #f0aa52;
+        }
+        .zone-guidance-toggle[data-zone-type="interference"] {
+            border-color: rgba(255, 98, 98, 0.52);
+            background: rgba(255, 98, 98, 0.08);
+            color: #ff8a8a;
+        }
+        .zone-guidance-toggle:hover,
+        .zone-guidance-toggle:focus-visible,
+        .zone-guidance-toggle[aria-expanded="true"] {
+            border-color: currentColor;
+            background: rgba(255, 255, 255, 0.1);
+            outline: none;
+            box-shadow: 0 0 0 2px rgba(114, 217, 232, 0.18);
         }
         .zone-target-row #zoneEditorSelect {
             width: 100%;
@@ -3028,6 +3068,10 @@
         }
 
         @media (max-width: 640px) {
+            .zone-guidance-toggle {
+                width: 44px;
+                height: 44px;
+            }
             .radar-panel-header {
                 align-items: stretch;
                 flex-direction: column;
@@ -3074,6 +3118,10 @@
         }
 
         @media (hover: none) and (pointer: coarse) {
+            .zone-guidance-toggle {
+                width: 44px;
+                height: 44px;
+            }
             .zones-pane #zoneEditorSelect,
             .zones-pane .zone-input-group input,
             .zones-pane .cmd-btn {
@@ -3266,11 +3314,14 @@
             <section class="panel-section" data-tab-panels="zones">
                 <div class="panel-section-title">Zone Editor</div>
                 <div class="config-content">
-                    <div class="panel-lede">Select a zone to learn what it controls, then draw or edit its footprint. Selecting a zone does not write to the switch.</div>
+                    <div class="panel-lede" id="zoneEditorLede">Choose a zone to draw or edit. Selection alone does not write to the switch. Use ? for zone-type guidance.</div>
                     
                     <div class="input-row zone-target-row">
-                        <label for="zoneEditorSelect">Target zone:</label>
-                        <select class="control-select" id="zoneEditorSelect" aria-describedby="zoneTypeGuidance zoneCoordinateHint">
+                        <div class="zone-target-label-row">
+                            <label for="zoneEditorSelect">Zone to edit:</label>
+                            <button class="zone-guidance-toggle" id="zoneTypeGuidanceToggle" type="button" aria-expanded="false" aria-controls="zoneTypeGuidance" aria-label="Show zone type help" title="Show zone type help">?</button>
+                        </div>
+                        <select class="control-select" id="zoneEditorSelect" aria-describedby="zoneCoordinateHint">
                             <optgroup label="Detection areas — active presence">
                                 <option value="mmwave_detection_areas:area1">Detection Area 1 (Default / Basic Range)</option>
                                 <option value="mmwave_detection_areas:area2">Detection Area 2</option>
@@ -3292,17 +3343,17 @@
                         </select>
                     </div>
 
-                    <aside class="zone-guidance" id="zoneTypeGuidance" data-zone-type="detection" role="note" aria-live="polite" aria-atomic="true">
-                        <h3 class="zone-guidance-title" id="zoneTypeGuidanceTitle">Detection Area 1</h3>
-                        <p class="zone-guidance-summary" id="zoneTypeGuidanceSummary">An active region where the switch reports movement or occupancy.</p>
+                    <aside class="zone-guidance" id="zoneTypeGuidance" data-zone-type="detection" aria-labelledby="zoneTypeGuidanceTitle" hidden>
+                        <h3 class="zone-guidance-title" id="zoneTypeGuidanceTitle">Detection Areas</h3>
+                        <p class="zone-guidance-summary" id="zoneTypeGuidanceSummary">Active regions where the switch reports presence.</p>
                         <dl class="zone-guidance-details">
-                            <div><dt>Best for</dt><dd id="zoneTypeGuidanceUse">The parts of the room where presence should count.</dd></div>
-                            <div><dt>Combines</dt><dd id="zoneTypeGuidanceInteraction">Detection areas may overlap. Area 1 is the same zone controlled by the basic room-range fields—not an extra global zone.</dd></div>
+                            <div><dt>Best for</dt><dd id="zoneTypeGuidanceUse">Monitor the parts of the room where presence should count.</dd></div>
+                            <div><dt>Combines</dt><dd id="zoneTypeGuidanceInteraction">Detection areas may overlap. Each area reports its own occupancy, while overall occupancy is active when any detection area is occupied.</dd></div>
                         </dl>
-                        <p class="zone-guidance-note" id="zoneTypeGuidanceNote"></p>
+                        <p class="zone-guidance-note" id="zoneTypeGuidanceNote">The Basic Range X/Y/Z controls configure Detection Area 1. They do not define a separate global or fifth zone.</p>
                         <div class="zone-guidance-links">
                             <a href="https://help.inovelli.com/en/articles/12773613-blue-series-mmwave-presence-dimmer-switch-advanced-mmwave-configuration" target="_blank" rel="noopener noreferrer">Official zone guide<span class="visually-hidden"> (opens in a new tab)</span></a>
-                            <a id="zoneTypeGuidanceCommunityLink" href="https://community.inovelli.com/t/presence-area-configuration-best-practice/20933" target="_blank" rel="noopener noreferrer">Community setup discussion<span class="visually-hidden"> (opens in a new tab)</span></a>
+                            <a id="zoneTypeGuidanceCommunityLink" href="https://community.inovelli.com/t/presence-area-configuration-best-practice/20933" target="_blank" rel="noopener noreferrer"><span id="zoneTypeGuidanceCommunityLinkLabel">Community area setup</span><span class="visually-hidden"> (opens in a new tab)</span></a>
                         </div>
                     </aside>
                     <p class="zone-coordinate-hint" id="zoneCoordinateHint"><strong>Coordinates:</strong> Viewed from the switch looking into the room, negative X is left, positive X is right, Y is depth in front, and negative/positive Z is below/above the switch. Values are centimeters.</p>
