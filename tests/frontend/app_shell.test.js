@@ -167,7 +167,8 @@ test('radar shell keeps the full Cartesian 2D surface beside one accessible 3D s
     assert.match(template, /Axes: X width · Y depth · Z height \(cm\)/);
     assert.match(template, /id="radar3dInteractionToggle" type="button" aria-controls="chart3d" aria-pressed="false" hidden>Explore 3D<\/button>/);
     assert.match(template, /@media \(max-width: 700px\), \(hover: none\) and \(pointer: coarse\)[\s\S]*?\.radar-interaction-toggle:not\(\[hidden\]\)/);
-    assert.match(template, /full-size top-down Cartesian map in 2D and a fixed-center perspective camera in 3D\.[\s\S]*?Zone drawing and editing stay in the Cartesian 2D view\.[\s\S]*?otherwise the full supported height range is shown\./);
+    assert.match(template, /full-size top-down Cartesian map in 2D and a fixed-center perspective camera in 3D\.[\s\S]*?Zone drawing and editing stay in the Cartesian 2D view\.[\s\S]*?informational sensor field-of-view envelopes span the visible scene height; configured detection, stay, and interference zones retain their exact heights\./);
+    assert.match(template, /3D fixed-center view · Reference FOV spans the visible height/);
 
     const zonesScriptIndex = template.indexOf('/static/js/app_zones.js');
     const radarScriptIndex = template.indexOf('/static/js/app_radar3d.js');
@@ -183,10 +184,11 @@ test('radar shell keeps the full Cartesian 2D surface beside one accessible 3D s
     assert.match(template, /radar3dModule\.setEditing\(false\);/);
     assert.match(template, /radar3dModule\.setSceneModel\(buildRadar3dSceneModel\(\)\);/);
     assert.match(template, /mmWaveHeightMin:\s*'z_min',[\s\S]*?mmWaveHeightMax:\s*'z_max'/);
-    assert.match(template, /return \{ zMin: -600, zMax: 600 \};/);
+    assert.doesNotMatch(template, /function getConfiguredRadarHeightBounds\(/);
     assert.doesNotMatch(template, /getTargetSnapshot\('height-bounds'\)/);
     assert.doesNotMatch(template, /getRadar3dAxisHeightBounds/);
-    assert.match(template, /bounds:\s*\{[\s\S]*?zMin:\s*chartZMin,[\s\S]*?zMax:\s*chartZMax[\s\S]*?fovBounds:\s*fovHeightBounds/);
+    assert.match(template, /bounds:\s*\{[\s\S]*?zMin:\s*chartZMin,[\s\S]*?zMax:\s*chartZMax/);
+    assert.doesNotMatch(template, /fovBounds:\s*fovHeightBounds/);
     assert.match(template, /zoneModule\.mapRawZonesByAreaId\(zones\)/);
     assert.match(template, /function isRadar2dSurfaceVisible\(\)[\s\S]*?!chartElement\.hidden[\s\S]*?getClientRects\(\)\.length/);
     assert.match(template, /shouldRender2d:\s*\(\)\s*=>\s*isRadar2dSurfaceVisible\(\)/);
@@ -204,7 +206,7 @@ test('radar shell keeps the full Cartesian 2D surface beside one accessible 3D s
     assert.doesNotMatch(template, /\.chart-canvas-wrap\.radar-view-3d\s*\{/);
 });
 
-test('3D display height supports an accessible current-inventory bulk action without changing X/Y, device state, or physical FOV', () => {
+test('3D display height supports an accessible bulk action and supplies the single visible-height scene contract', () => {
     assert.match(template, /Radar Display Range \(cm\)/);
     assert.match(
         template,
@@ -251,10 +253,8 @@ test('3D display height supports an accessible current-inventory bulk action wit
     const sceneStart = template.indexOf('function buildRadar3dSceneModel()');
     const sceneEnd = template.indexOf('function refreshRadar3dScene()', sceneStart);
     const sceneSource = template.slice(sceneStart, sceneEnd);
-    assert.match(sceneSource, /const fovHeightBounds = getConfiguredRadarHeightBounds\(\);/);
     assert.match(sceneSource, /bounds:\s*\{[\s\S]*?zMin:\s*chartZMin,[\s\S]*?zMax:\s*chartZMax/);
-    assert.match(sceneSource, /fovBounds:\s*fovHeightBounds/);
-    assert.doesNotMatch(sceneSource, /chartZMin[\s\S]*?fovBounds:\s*\{\s*zMin:\s*chartZMin/);
+    assert.doesNotMatch(sceneSource, /fovBounds|getConfiguredRadarHeightBounds/);
 
     const requestedStart = template.indexOf('function getRequestedRadarDisplayHeightBounds()');
     const targetStart = template.indexOf('function getRadarDisplayHeightTargetTopics()', requestedStart);

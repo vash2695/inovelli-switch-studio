@@ -113,7 +113,8 @@
     let lastRenderedGeneration = -1;
     let lifecycleGeneration = 0;
     let renderAttemptGeneration = 0;
-    let fullRenderInFlight = false;
+    let fullRenderAttempt = null;
+    let targetRenderDeferredByFullRender = false;
     let modeInputBindings = [];
     let resetBinding = null;
     let webglLostBinding = null;
@@ -307,19 +308,27 @@
         const raw = rawModel || {};
         const displayBounds = normalizeBounds(raw.displayBounds || raw.bounds);
         const zones = raw.zones && typeof raw.zones === 'object' ? raw.zones : {};
-        const renderBounds = buildRenderBounds(displayBounds, zones);
-        const fovSource = raw.fovBounds || {};
-        let fovZMin = readBound(fovSource, 'zMin', 'z_min', DISPLAY_HEIGHT_MIN);
-        let fovZMax = readBound(fovSource, 'zMax', 'z_max', DISPLAY_HEIGHT_MAX);
-        if (fovZMin > fovZMax) [fovZMin, fovZMax] = [fovZMax, fovZMin];
-        if (fovZMin === fovZMax) fovZMax = fovZMin + 1;
+        const detectionAreas = zones?.mmwave_detection_areas;
+        const primaryDetection = Array.isArray(detectionAreas)
+            ? detectionAreas.find((zone, index) => areaNumberFrom(zone, index) === 1)
+            : detectionAreas?.area1;
+        // The renderer uses global only as area1's fallback. Apply the same
+        // rule to bounds fitting so an invisible stale/global duplicate cannot
+        // expand the axes behind the visible primary volume.
+        const boundsZones = primaryDetection
+            ? { ...zones, global: null }
+            : zones;
+        const renderBounds = buildRenderBounds(displayBounds, boundsZones);
         return {
             zones,
             visibility: normalizeVisibility(raw.visibility),
             bounds: displayBounds,
             displayBounds,
             renderBounds,
-            fovBounds: { zMin: fovZMin, zMax: fovZMax },
+            // Kept out of the render contract intentionally: the FOV is a
+            // horizontal reference envelope, not a second physical Z scale.
+            // It spans the visible scene height while configured zone cuboids
+            // retain their exact device-authored height limits.
         };
     }
 
@@ -462,6 +471,20 @@
         return normalizeMode(requestedMode) === '3d'
             ? sanitizePerspectiveCamera(camera)
             : sanitizeOrthographicCamera(camera);
+    }
+
+    function copyLiveSceneCamera(mode) {
+        try {
+            const scene = chart3dEl?._fullLayout?.scene?._scene;
+            if (!scene || typeof scene.getCamera !== 'function') return null;
+            const source = scene.getCamera();
+            if (!source || typeof source !== 'object') return null;
+            return coerceCamera(source, cameraForMode(mode || activeMode));
+        } catch (error) {
+            // Plotly can briefly dispose/recreate its GL scene during a React.
+            // Fall back to its persisted layout camera until the new scene is ready.
+            return null;
+        }
     }
 
     function defaultIsMobile() {
@@ -1650,23 +1673,48 @@
         return [origin];
     }
 
-    function buildFloorGridTrace(bounds) {
-        const divisions = 5;
+    function getNiceGridStep(span) {
+        const safeSpan = Math.max(1, Math.abs(toFinite(span, 1)));
+        const rawStep = safeSpan / 6;
+        const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)));
+        const normalized = rawStep / magnitude;
+        const nice = normalized <= 1.5 ? 1 : normalized <= 3 ? 2 : normalized <= 7 ? 5 : 10;
+        return nice * magnitude;
+    }
+
+    function getGridCoordinates(minValue, maxValue) {
+        const min = Math.min(minValue, maxValue);
+        const max = Math.max(minValue, maxValue);
+        const step = getNiceGridStep(max - min);
+        const values = [min];
+        const first = Math.ceil(min / step) * step;
+        for (let value = first, count = 0; value <= max && count < 24; value += step, count += 1) {
+            if (value > min + 1e-6 && value < max - 1e-6) {
+                values.push(Number(value.toFixed(6)));
+            }
+        }
+        if (max > min + 1e-6) values.push(max);
+        return values;
+    }
+
+    function buildFloorGridTrace(displayBounds, renderBounds) {
+        const coverage = renderBounds || displayBounds;
         const x = [];
         const y = [];
         const z = [];
+        const zSpan = Math.max(1, coverage.zMax - coverage.zMin);
+        const floorZ = displayBounds.zMin + Math.max(0.25, zSpan * 0.0005);
         const appendLine = (x1, y1, x2, y2) => {
             x.push(x1, x2, null);
             y.push(y1, y2, null);
-            z.push(bounds.zMin, bounds.zMin, null);
+            z.push(floorZ, floorZ, null);
         };
-        for (let index = 0; index <= divisions; index += 1) {
-            const ratio = index / divisions;
-            const xValue = bounds.xMin + ((bounds.xMax - bounds.xMin) * ratio);
-            const yValue = bounds.yMin + ((bounds.yMax - bounds.yMin) * ratio);
-            appendLine(xValue, bounds.yMin, xValue, bounds.yMax);
-            appendLine(bounds.xMin, yValue, bounds.xMax, yValue);
-        }
+        getGridCoordinates(coverage.xMin, coverage.xMax).forEach((xValue) => {
+            appendLine(xValue, coverage.yMin, xValue, coverage.yMax);
+        });
+        getGridCoordinates(coverage.yMin, coverage.yMax).forEach((yValue) => {
+            appendLine(coverage.xMin, yValue, coverage.xMax, yValue);
+        });
         return {
             type: 'scatter3d',
             mode: 'lines',
@@ -1676,6 +1724,7 @@
             // GL3D line shaders emphasize RGB luminance even at tiny alpha
             // values, so use a deliberately dark slate for a quiet floor cue.
             line: { color: 'rgb(42, 61, 72)', width: 1 },
+            opacity: 0.72,
             hoverinfo: 'skip',
             showlegend: false,
             connectgaps: false,
@@ -1685,16 +1734,16 @@
 
     function buildStaticTraces(model) {
         const traces = [];
-        const { zones, visibility, fovBounds } = model;
+        const { zones, visibility } = model;
         const displayBounds = model.displayBounds || model.bounds;
-        if (visibility.grid) traces.push(buildFloorGridTrace(displayBounds));
+        const renderBounds = model.renderBounds || model.bounds;
         if (visibility.fov && zonesApi && typeof zonesApi.buildFov3DTraces === 'function') {
             traces.push(...(zonesApi.buildFov3DTraces({
                 xMin: displayBounds.xMin,
                 xMax: displayBounds.xMax,
                 yMax: Math.min(600, Math.max(0, displayBounds.yMax)),
-                zMin: fovBounds.zMin,
-                zMax: fovBounds.zMax,
+                zMin: renderBounds.zMin,
+                zMax: renderBounds.zMax,
                 innerHalfAngleDegrees: 60,
                 outerHalfAngleDegrees: 75,
                 visible: true,
@@ -1710,6 +1759,10 @@
         traces.push(...(structured
             ? buildStructuredZoneTraces(zones, visibility)
             : buildFlatZoneTraces(zones, visibility)));
+        // Render the deterministic floor after translucent volumes so WebGL
+        // blending cannot bury the reference lattice. Native GL3D grids are
+        // camera-face dependent and intentionally disabled below.
+        if (visibility.grid) traces.push(buildFloorGridTrace(displayBounds, renderBounds));
         traces.push(...buildSensorTraces());
         return traces;
     }
@@ -1769,15 +1822,16 @@
         };
     }
 
-    function axisLayout(title, range, showGrid, options) {
-        const opts = options || {};
-        const showPlane = opts.showPlane !== false;
+    function axisLayout(title, range) {
         return {
             title: { text: title, font: { color: '#a8bac8', size: 11 } },
             range: range.slice(),
-            showgrid: showGrid && showPlane,
+            // Plotly chooses GL3D wall faces according to the camera, which
+            // makes native grids jump between the floor, walls, and ceiling.
+            // A single explicit floor trace provides a stable reference.
+            showgrid: false,
             showline: true,
-            zeroline: showGrid && showPlane,
+            zeroline: false,
             // Plotly's GL3D axes flatten translucent colors differently across
             // GPUs. Low-luminance opaque colors stay consistently subdued.
             gridcolor: 'rgb(45, 64, 76)',
@@ -1786,7 +1840,7 @@
             tickfont: { color: '#8ea4b4', size: 9 },
             nticks: mobileFn() ? 5 : 7,
             ticksuffix: ' cm',
-            showbackground: showGrid && showPlane,
+            showbackground: false,
             backgroundcolor: 'rgb(12, 20, 28)',
             showspikes: false,
             spikesides: false,
@@ -1795,13 +1849,10 @@
 
     function buildLayout(options) {
         const opts = options || {};
-        const { visibility } = sceneModel;
         const bounds = sceneModel.renderBounds || sceneModel.bounds;
         const revision = getUiRevision();
         const mobile = mobileFn();
-        const zAxis = axisLayout('Height (cm)', [bounds.zMin, bounds.zMax], visibility.grid, {
-            showPlane: false,
-        });
+        const zAxis = axisLayout('Height (cm)', [bounds.zMin, bounds.zMax]);
         return {
             autosize: true,
             paper_bgcolor: 'rgba(0, 0, 0, 0)',
@@ -1822,8 +1873,8 @@
                 aspectratio: getSceneAspectRatio(),
                 dragmode: activeMode === '3d' ? 'turntable' : false,
                 camera: opts.camera || cameraForMode(activeMode),
-                xaxis: axisLayout('Width (cm)', [bounds.xMin, bounds.xMax], visibility.grid),
-                yaxis: axisLayout('Depth (cm)', [bounds.yMin, bounds.yMax], visibility.grid),
+                xaxis: axisLayout('Width (cm)', [bounds.xMin, bounds.xMax]),
+                yaxis: axisLayout('Depth (cm)', [bounds.yMin, bounds.yMax]),
                 zaxis: zAxis,
             },
         };
@@ -1865,7 +1916,8 @@
         cancelCameraGesture({ captureCamera: false, clearDeferred: true });
         chartCreationPromise = null;
         chartInitialized = false;
-        fullRenderInFlight = false;
+        fullRenderAttempt = null;
+        targetRenderDeferredByFullRender = false;
         plotlyUnavailable = true;
         cancelScheduledRender();
         syncModeControls();
@@ -1911,7 +1963,7 @@
             }
             const perspectiveGenerationAtStart = perspectiveCameraGeneration;
             const requestedCamera = layoutOptions.camera ? cloneCamera(layoutOptions.camera) : null;
-            fullRenderInFlight = true;
+            fullRenderAttempt = renderAttempt;
             const result = renderer.react(
                 chart3dEl,
                 assembleTraces(),
@@ -1919,18 +1971,21 @@
                 buildConfig(),
             );
             const finalizeRender = () => {
+                if (fullRenderAttempt === renderAttempt) fullRenderAttempt = null;
                 if (
                     destroyed
                     || renderLifecycle !== lifecycleGeneration
                     || renderAttempt !== renderAttemptGeneration
                 ) return null;
-                fullRenderInFlight = false;
                 pruneStaleSceneCanvases();
                 if (reason === 'targets') lastTargetRenderAt = nowFn();
                 renderedCameraMode = resultingCameraMode;
                 lastModePathProgress = resultingCameraMode === '3d' ? 1 : 0;
                 lastModePathProgressValid = true;
                 lastRenderedGeneration = renderedGeneration;
+                const needsDeferredTargetRender = targetRenderDeferredByFullRender;
+                targetRenderDeferredByFullRender = false;
+                let cameraRestoreResult = null;
                 if (
                     resultingCameraMode === '3d'
                     && !cameraTransitioning
@@ -1938,19 +1993,31 @@
                 ) {
                     const latestCamera = cameraForMode('3d');
                     if (!requestedCamera || !cameraNearlyEqual(requestedCamera, latestCamera)) {
-                        issueCameraRelayout(latestCamera, null, { fatal: false, includeProjection: false });
+                        cameraRestoreResult = issueCameraRelayout(
+                            latestCamera,
+                            null,
+                            { fatal: false, includeProjection: false },
+                        );
                     }
+                }
+                const finishDeferredTargetRender = () => {
+                    if (needsDeferredTargetRender && !destroyed) scheduleTargetRender(true);
+                };
+                if (cameraRestoreResult && typeof cameraRestoreResult.then === 'function') {
+                    cameraRestoreResult.then(finishDeferredTargetRender, finishDeferredTargetRender);
+                } else {
+                    finishDeferredTargetRender();
                 }
                 return chart3dEl;
             };
             if (result && typeof result.then === 'function') {
                 return result.then(finalizeRender, (error) => {
+                    if (fullRenderAttempt === renderAttempt) fullRenderAttempt = null;
                     if (
                         !destroyed
                         && renderLifecycle === lifecycleGeneration
                         && renderAttempt === renderAttemptGeneration
                     ) {
-                        fullRenderInFlight = false;
                         handleRenderFailure(error);
                     }
                     return null;
@@ -1959,7 +2026,7 @@
             finalizeRender();
             return true;
         } catch (error) {
-            fullRenderInFlight = false;
+            fullRenderAttempt = null;
             handleRenderFailure(error);
             return false;
         }
@@ -1967,7 +2034,11 @@
 
     function restyleTargets() {
         if (!canRenderScene() || !chartInitialized || cameraTransitioning) return false;
-        if (cameraGestureActive && cameraGestureDeferredRender) return false;
+        if (cameraGestureActive) return false;
+        if (fullRenderAttempt !== null) {
+            targetRenderDeferredByFullRender = true;
+            return false;
+        }
         const renderer = resolvePlotly();
         if (!renderer || typeof renderer.restyle !== 'function') {
             return reactCurrentScene('targets');
@@ -2028,6 +2099,13 @@
         plotlyUnavailable = false;
         syncModeControls();
         try {
+            // A saved 3D preference is initialized only after the workspace is
+            // opened. Keep the WebGL surface visually transparent, but make it
+            // measurable before newPlot; creating GL3D under display:none can
+            // leave its drag hit geometry at zero size after navigation.
+            if (visible && activeMode === '3d' && !editing && chart3dEl) {
+                setSurfaceState(chart3dEl, 'incoming', false);
+            }
             // Plotly.newPlot purges graphDiv emitter listeners. Clear our
             // bookkeeping first so finalize always binds plotly_relayout to
             // the newly created scene (not a listener removed by the purge).
@@ -2059,18 +2137,33 @@
                     syncSurfaceVisibility();
                     return chart3dEl;
                 }
-                syncSurfaceVisibility();
-                if (canRenderScene()) resizeChart();
                 if (canRenderScene() && creationGeneration !== renderGeneration) {
                     // Device, zone, or target state may have changed while
                     // WebGL initialized. Reconcile before the prepared scene
-                    // is allowed to fade in, while preserving its bridge
-                    // camera and logical 2D rendered state.
-                    return reactCurrentScene('post-create', {
+                    // is made interactive, while preserving its bridge camera
+                    // and logical rendered state.
+                    const postCreateResult = reactCurrentScene('post-create', {
                         camera: creationCamera,
                         renderedMode: opts.renderedMode || creationMode,
                     });
+                    const revealReconciledScene = () => {
+                        if (destroyed || creationLifecycle !== lifecycleGeneration) return null;
+                        if (activeMode !== '3d' || editing || !visible) {
+                            settleSurfaceTransition('2d');
+                            syncSurfaceVisibility();
+                            return chart3dEl;
+                        }
+                        syncSurfaceVisibility();
+                        if (canRenderScene()) resizeChart();
+                        return chart3dEl;
+                    };
+                    if (postCreateResult && typeof postCreateResult.then === 'function') {
+                        return postCreateResult.then(revealReconciledScene, () => null);
+                    }
+                    return revealReconciledScene();
                 }
+                syncSurfaceVisibility();
+                if (canRenderScene()) resizeChart();
                 return chart3dEl;
             };
             if (result && typeof result.then === 'function') {
@@ -2164,7 +2257,8 @@
         const renderer = resolvePlotly();
         try {
             if (renderer?.Plots && typeof renderer.Plots.resize === 'function') {
-                renderer.Plots.resize(chart3dEl);
+                const result = renderer.Plots.resize(chart3dEl);
+                if (result && typeof result.catch === 'function') result.catch(() => {});
             }
         } catch (error) {
             // A resize can race with Plotly teardown while navigating devices.
@@ -2316,7 +2410,10 @@
     function rememberGestureCamera(rawCamera) {
         if (!rawCamera || activeMode !== '3d') return null;
         const remembered = rememberPerspectiveCamera(rawCamera);
-        cameraGestureCamera = cloneCamera(remembered.corrected);
+        // Keep Plotly's observed camera as well as the sanitized authoritative
+        // camera. A safe native orbit needs no app-authored relayout on release;
+        // only a genuinely corrected pole/center/up value should be rewritten.
+        cameraGestureCamera = cloneCamera(remembered.observed);
         return remembered;
     }
 
@@ -2337,7 +2434,6 @@
         if (cameraTransitioning) return;
         if (cameraGestureActive && activeMode === '3d') {
             rememberGestureCamera(observed);
-            scheduleCameraGestureEnd();
             return;
         }
 
@@ -2386,7 +2482,7 @@
         const opts = options || {};
         const hadGesture = cameraGestureActive || cameraGestureEndTimer !== null;
         if (hadGesture && opts.captureCamera !== false && activeMode === '3d' && chartInitialized) {
-            const captured = cameraGestureCamera || copyRenderedCamera('3d');
+            const captured = copyLiveSceneCamera('3d') || cameraGestureCamera || copyRenderedCamera('3d');
             if (captured) rememberPerspectiveCamera(captured);
         }
         cameraGestureGeneration += 1;
@@ -2405,9 +2501,8 @@
         cameraGestureGeneration += 1;
         setCameraGestureState(true);
         cameraGestureCamera = null;
-        if (fullRenderInFlight) {
+        if (fullRenderAttempt !== null) {
             cameraGestureDeferredRender = true;
-            fullRenderInFlight = false;
         }
         // A React that started just before pointer-down may settle after the
         // orbit has moved. Its finalizer must not restore that earlier camera.
@@ -2427,7 +2522,8 @@
             || destroyed
         ) return false;
         clearCameraGestureEndTimer();
-        const captured = cameraGestureCamera
+        const captured = copyLiveSceneCamera('3d')
+            || cameraGestureCamera
             || copyRenderedCamera('3d')
             || lastPerspectiveCamera
             || DEFAULT_CAMERA;
@@ -2442,18 +2538,48 @@
         cameraGestureDeferredResize = false;
 
         if (!canRenderScene() || activeMode !== '3d' || !chartInitialized) return false;
+        const finishDeferredWork = () => {
+            if (
+                generation !== cameraGestureGeneration
+                || destroyed
+                || !canRenderScene()
+                || activeMode !== '3d'
+                || !chartInitialized
+            ) return;
+            if (needsTargetRender) scheduleTargetRender(true);
+            if (needsResize) resizeChart();
+        };
+
         if (needsFullRender) {
-            reactCurrentScene('gesture-reconcile', {
+            const result = reactCurrentScene('gesture-reconcile', {
                 camera: corrected,
                 renderedMode: '3d',
             });
+            if (result && typeof result.then === 'function') {
+                result.then(finishDeferredWork, () => {});
+            } else {
+                finishDeferredWork();
+            }
         } else {
-            // Reassert the sanitized fixed-center, world-Z-up camera only after
-            // Plotly has finished its native orbit gesture.
-            issueCameraRelayout(corrected, null, { fatal: false, includeProjection: false });
-            if (needsTargetRender) scheduleTargetRender(true);
+            // GL3D can update its private live camera without committing the
+            // same value to Plotly's public input layout (notably after touch
+            // and releases outside the canvas). A later scatter3d restyle is
+            // a full scene plot and would then restore that stale input
+            // camera. Persist the live, sanitized endpoint on every completed
+            // gesture and await it before reconciling targets or resizing.
+            // Writing the exact live camera is visually inert but makes the
+            // next Plotly operation deterministic.
+            const correctionResult = issueCameraRelayout(
+                corrected,
+                null,
+                { fatal: false, includeProjection: false },
+            );
+            if (correctionResult && typeof correctionResult.then === 'function') {
+                correctionResult.then(finishDeferredWork, finishDeferredWork);
+            } else {
+                finishDeferredWork();
+            }
         }
-        if (needsResize) resizeChart();
         return true;
     }
 
@@ -2479,6 +2605,13 @@
     }
 
     function handleCameraMouseDown(event) {
+        if (fullRenderAttempt !== null && canRenderScene() && activeMode === '3d') {
+            // Plotly.react cannot be cancelled once it begins. Do not let a
+            // native orbit start under that pending scene rewrite, because its
+            // stale layout camera could land midway through the gesture.
+            stopCameraGesture(event);
+            return;
+        }
         if (!cameraInteractionEnabled()) return;
         if (Number(event?.button) === 2 || event?.ctrlKey) {
             stopCameraGesture(event);
@@ -2488,6 +2621,13 @@
     }
 
     function handleCameraWheel(event) {
+        if (fullRenderAttempt !== null && canRenderScene() && activeMode === '3d') {
+            // Keep Plotly APIs serialized: relayout during an unresolved React
+            // can clear Plotly's promise queue and leave either the scene or
+            // camera in a stale state.
+            stopCameraGesture(event);
+            return;
+        }
         if (!cameraInteractionEnabled()) return;
         const deltaX = toFinite(event?.deltaX, 0);
         const deltaY = toFinite(event?.deltaY, 0);
@@ -2519,7 +2659,11 @@
         if (cameraInteractionEnabled()) stopCameraGesture(event);
     }
 
-    function handleCameraTouchStart() {
+    function handleCameraTouchStart(event) {
+        if (fullRenderAttempt !== null && canRenderScene() && activeMode === '3d') {
+            stopCameraGesture(event);
+            return;
+        }
         if (cameraInteractionEnabled()) beginCameraGesture();
     }
 
@@ -2534,7 +2678,7 @@
             { eventName: 'mousedown', handler: handleCameraMouseDown, options: { capture: true } },
             { eventName: 'wheel', handler: handleCameraWheel, options: { capture: true, passive: false } },
             { eventName: 'contextmenu', handler: handleCameraContextMenu, options: { capture: true } },
-            { eventName: 'touchstart', handler: handleCameraTouchStart, options: { capture: true, passive: true } },
+            { eventName: 'touchstart', handler: handleCameraTouchStart, options: { capture: true, passive: false } },
         ].map((binding) => ({ element: chart3dEl, ...binding }));
         const endTargets = [chart3dEl, getWindow()]
             .filter((element, index, values) => (
@@ -2672,7 +2816,8 @@
         }
         chartInitialized = false;
         chartCreationPromise = null;
-        fullRenderInFlight = false;
+        fullRenderAttempt = null;
+        targetRenderDeferredByFullRender = false;
         lastRenderedGeneration = -1;
     }
 
@@ -2711,7 +2856,8 @@
         renderGeneration = 0;
         lastRenderedGeneration = -1;
         renderAttemptGeneration = 0;
-        fullRenderInFlight = false;
+        fullRenderAttempt = null;
+        targetRenderDeferredByFullRender = false;
         mobileInteractionLocked = true;
         lastMobileState = null;
         lastPerspectiveCamera = copyCamera();

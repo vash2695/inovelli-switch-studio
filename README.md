@@ -1,135 +1,212 @@
-﻿# :sparkles: Inovelli Switch Studio
+# Inovelli Switch Studio
 
-A modern Home Assistant add-on for monitoring and configuring Inovelli Zigbee devices through Zigbee2MQTT.
+Inovelli Switch Studio is a community Home Assistant App (formerly add-on) for discovering, monitoring, and configuring Inovelli Blue Series Zigbee devices through Zigbee2MQTT.
 
-## :pray: Original Project Credit
+It combines a multi-device dashboard with a full VZM32-SN configuration workspace: live 2D/3D presence radar, visual zone editing, LED-bar previews and notification effects, schema-driven device settings, and Zigbee2MQTT OTA controls.
 
-This project is built on the original `mmwave_vis` foundation by **Nick D**.
+> This is a community project, not an official Inovelli, Home Assistant, or Zigbee2MQTT product.
 
-Huge thanks for creating the initial tooling that made this expanded Switch Studio experience possible.
+## Highlights
 
-## :rocket: What We Added Since `mmwave_vis`
+- Discover eligible Inovelli `VZM*` devices from Zigbee2MQTT inventory and monitor them from one dashboard.
+- Use confirmed power and brightness quick controls without changing the active device.
+- Open the complete six-section VZM32-SN editor for Presence & Zones, Load & Dimming, LED & Notifications, Buttons & Scenes, Power & Device (including firmware), and Advanced settings.
+- Track live XYZ targets in a full-size Cartesian 2D radar or an orbitable 3D scene.
+- Draw detection, stay, and interference zones in 2D, then inspect their exact volumes in 3D.
+- Preview separate On and Off LED defaults, customize all seven physical segments, and animate all-bar or individual notification effects locally before sending them.
+- Stage configuration fields safely, validate them, publish them in one MQTT payload, and wait for matching device reports before considering them confirmed.
+- Use a responsive Home Assistant Ingress interface with a compact mobile section menu, touch-sized controls, and opt-in 3D interaction that does not trap page scrolling.
 
-- Expanded from a radar visualizer into a broader configuration studio
-- Added a polished multi-tab workflow (`Presence & Zones`, `Load & Dimming`, `LED & Notifications`, `Buttons & Scenes`, `Power & Device`, `Advanced`)
-- Added an all-device dashboard with live status plus immediate power and dimming controls
-- Added schema-driven configuration rendering with friendlier naming and grouping
-- Added a confirmation-aware pending-changes workflow with explicit `Apply Changes` and `Discard`
-- Added session-scoped device selection so multiple sessions can safely monitor different devices
-- Added reconnect-safe device inventory, availability, and command recovery
-- Added stronger mobile responsiveness for Home Assistant app usage
-- Added richer Presence & Zones tooling (zone editor, inline zone status, live target telemetry)
-- Added a full-size Cartesian 2D radar plus a fixed-center 3D perspective view with a prepared camera handoff, target trails, zone volumes, and subdued 120°/150° field-of-view reference envelopes
-- Added an interactive VZM32-SN LED-bar editor with a product preview, segment controls, and custom hue selection
-- Added in-strip `Target Reporting` control with optional auto-off on disconnect
-- Added Zigbee2MQTT OTA status, update checks, and catalog-only installation controls
+## Compatibility
 
-## Current UI
-<img width="3516" height="1986" alt="image" src="https://github.com/user-attachments/assets/8cac3ba6-b850-4cf6-8b25-5f9fef140c5c" />
+| Device or platform | Support |
+|---|---|
+| Inovelli Blue Series `VZM32-SN` | Full editor, 2D/3D radar, target telemetry, zone tools, LED editor, configuration, and OTA workspace |
+| Other eligible Inovelli `VZM*` models | Dashboard discovery and only the unambiguous writable quick controls exposed by Zigbee2MQTT |
+| ZHA | Not supported |
+| Home Assistant installation | Home Assistant Operating System on `amd64` or `aarch64` |
 
-## :dart: Current Scope
+Switch Studio ignores inventory entries marked disabled, unsupported, or interview-incomplete. Remaining entries must be identified by Zigbee2MQTT as Inovelli and use a `VZM*` model ID. The full editor is intentionally restricted to the exact `VZM32-SN` model until other models have verified field and command mappings.
 
-Primary full-editor target today:
-- Inovelli Blue Series `VZM32-SN` (mmWave presence model)
+## Requirements
 
-Other discovered Blue Series devices use conservative, expose-derived dashboard controls. Models without a verified full-editor mapping remain quick-controls only.
+- [Home Assistant Operating System](https://www.home-assistant.io/installation/)
+- [Zigbee2MQTT](https://www.zigbee2mqtt.io/) and its MQTT broker
+- At least one eligible Inovelli Blue Series Zigbee device
+- A browser able to open the App through Home Assistant Ingress
+- Outbound browser access to the currently CDN-hosted Socket.IO, Plotly, and DM Sans assets
+- Outbound internet access from the App for firmware-reference lookup and from Zigbee2MQTT for OTA downloads
 
-## :jigsaw: Core Capabilities
+Switch Studio and Zigbee2MQTT must connect to the same MQTT broker. Zigbee2MQTT must publish its normal device inventory at `<mqtt_base_topic>/bridge/devices`; `core-mosquitto` is only the default broker hostname, and blank credentials work only when the broker permits them.
 
-- Inventory-driven discovery from Zigbee2MQTT, with a conservative traffic fallback for VZM32-SN
-- Dashboard cards for every discovered device, including availability and supported quick controls
-- Session-scoped device selection per browser session
-- Live Presence & Zones workflow with a canonical Cartesian 2D radar/editor and a complementary fixed-center 3D visualization
-- Tabbed configuration for frequent-use and advanced settings
-- Visual VZM32-SN LED editor with blended On/Off defaults, seven individually selectable segments, and integrated all-bar/per-segment notification effects
-- Conditional section support for model-specific parameters (for example, shared fan-related fields)
-- Sticky pending-changes action bar that appears only when changes exist
-- Matching reported-state confirmation for staged configuration writes, with retry-safe timeout and reconnect behavior
+## Installation
 
-## :white_check_mark: Requirements
+Home Assistant renamed add-ons to **Apps** in 2026.2. Apps are available on Home Assistant Operating System under **Settings → Apps**.
 
-- Home Assistant OS or Home Assistant Supervised
-- Zigbee2MQTT (ZHA is not currently supported by this add-on)
-- Inovelli Zigbee switch(es)
-- For radar/zone presence features: `VZM32-SN`
+### Choose a channel
 
-## :hammer_and_wrench: Installation
+| Channel | Repository URL | Intended use |
+|---|---|---|
+| Stable | `https://github.com/vash2695/inovelli-switch-studio` | Recommended for normal use; follows `main` |
+| Development | `https://github.com/vash2695/inovelli-switch-studio#dev` | Preview and QA builds; may change quickly |
 
-1. In Home Assistant, open `Settings -> Add-ons`.
-2. Open the Add-on Store.
-3. Add this repository URL under `Repositories`: `https://github.com/vash2695/inovelli-switch-studio`.
-4. Install `Inovelli Switch Studio`.
+Feature descriptions follow the branch you are reading, so `dev` may be ahead of the stable App. Install only the channel you intend to use; both repositories expose an App with the same display name.
 
-## :gear: Add-on Options
+### Add and start the App
+
+1. In Home Assistant, open **Settings → Apps → Install app**.
+2. Open the three-dot menu, choose **Repositories**, and add the repository URL for your chosen channel.
+3. Select **Inovelli Switch Studio** and choose **Install**.
+4. Open the App's **Configuration** tab and enter the MQTT settings described below.
+5. Save, then start or restart the App.
+6. Choose **Open Web UI**. Optionally enable **Show in sidebar**.
+
+The web interface is exposed through Home Assistant Ingress; the App does not publish a separate host port. Configuration options are read when the App starts, so restart it after changing them.
+
+## App configuration
 
 | Option | Description | Default |
 |---|---|---|
-| `mqtt_broker` | MQTT broker hostname | `core-mosquitto` |
+| `mqtt_broker` | MQTT broker hostname reachable from the App | `core-mosquitto` |
 | `mqtt_port` | MQTT broker port | `1883` |
-| `mqtt_username` | MQTT username (if required) | `""` |
-| `mqtt_password` | MQTT password (if required) | `""` |
-| `mqtt_base_topic` | Zigbee2MQTT base topic | `"zigbee2mqtt"` |
-| `switch_studio_ui` | Enables the modern tabbed UI (`false` keeps legacy fallback behavior) | `true` |
+| `mqtt_username` | MQTT username, if required | `""` |
+| `mqtt_password` | MQTT password, if required | `""` |
+| `mqtt_base_topic` | Zigbee2MQTT base topic | `zigbee2mqtt` |
+| `switch_studio_ui` | Enable the modern dashboard and tabbed workspace; `false` keeps the limited legacy layout | `true` |
 
-## :satellite: Zigbee2MQTT Notes for VZM32-SN
+If discovery remains empty, confirm the broker credentials, base topic, Zigbee2MQTT bridge status, and App logs before changing device settings.
 
-For live target coordinates and radar updates:
+## VZM32-SN target reporting
 
-1. Bind `manuSpecificInovelliMMWave` on source endpoint `1` in Zigbee2MQTT.
-2. Use the in-app `Target Reporting` control when live target streaming is needed.
+Current Zigbee2MQTT normally creates the endpoint-1 `manuSpecificInovelliMMWave` binding while configuring a VZM32-SN. To receive live coordinates:
 
-## :desktop_computer: UI Overview
+1. Pair or reconfigure the switch with a current Zigbee2MQTT release and confirm its interview completed.
+2. Open the switch in Switch Studio.
+3. Enable **Target Reporting** in the live status strip.
 
-### Presence & Zones
+If occupancy arrives but target coordinates do not, reconfigure the device in Zigbee2MQTT or verify that endpoint 1 is bound to `manuSpecificInovelliMMWave`, then try Target Reporting again.
 
-- Top live strip for packet/telemetry status, illuminance, and target-reporting state
-- Persistent 2D/3D radar views: use the full-size top-down Cartesian map for scanning and zone edits, then switch through a prepared crossfade and fixed-axis camera orbit to the 3D visualization
-- Zone status row directly below the map (optimized for desktop and mobile)
-- Right panel views: `Controls & Zones`, `Configuration`, and `View`
+Target reports can add substantial Zigbee traffic while a target is present. Disable reporting when it is not needed, or enable **Auto-off reporting on disconnect** in the View panel. Auto-off is opt-in and waits until the last Switch Studio session using that device disconnects.
 
-### Other Tabs
+## Using Switch Studio
 
-- `Load & Dimming`: daily dimming/load behavior
-- `LED & Notifications`: interactive LED-bar defaults, custom colors, and immediate notification effects with a local animated preview
-- `Buttons & Scenes`: scene and paddle behavior
-- `Power & Device`: device-level power and operational settings
-- `Advanced`: lower-frequency settings plus conditional model-specific sections
+### Dashboard and device selection
 
-## :arrows_counterclockwise: Change Handling Model
+The dashboard is the first view and keeps one stable card per eligible device. Cards show availability and known telemetry, use `—` rather than false zeroes for unknown values, and expose only controls that Zigbee2MQTT identifies unambiguously.
 
-- Field edits are staged locally as pending changes
-- `Apply Changes` sends one atomic batch and waits for the device echo
-- `Discard` reverts staged edits to latest known device state
-- Zone edits have their own immediate `Apply Zone` action and also participate in the main apply action
-- Switching devices prompts before discarding staged configuration or a zone draft
-- Dashboard power/dimming, target reporting, and zone maintenance commands apply immediately
-- `Target Reporting` from the live strip applies immediately for fast troubleshooting
+Power and brightness commands target the card's exact MQTT topic. Each browser session keeps its own selected device, so separate sessions can monitor different switches without changing one another's workspace.
 
-## :world_map: Roadmap
+### Presence, radar, and zones
 
-- Add a local firmware-upload workflow for internet-independent updates
-- Expand verified full-editor coverage to additional Inovelli Blue Series models
-- Continue improving parameter presentation (naming, grouping, contextual guidance, and clarity)
-- Add more conditional UI behavior as model-specific capabilities are introduced
+- **2D is the canonical editor.** It shows the top-down Cartesian map, live target trails, unsupported-space shading outside X ±600 cm and Y 0–600 cm, and draggable zone geometry.
+- **3D is visualization-only.** It renders exact target XYZ positions and authored detection, stay, and interference cuboids. Starting a zone draft temporarily returns to 2D and restores the preferred view afterward.
+- **The transition is reversible.** The selected radar mode is remembered in the browser, and the 3D camera orbits, changes elevation, and zooms around a fixed focus while keeping world Z upright.
+- **Zones are never visually truncated.** The rendered axes expand with padding when necessary to show complete configured cuboids beyond the saved display envelope; the underlying coordinates are not stretched or rewritten.
+- **The FOV is a reference, not a zone.** In 3D, borderless 120° and 150° horizontal envelopes show the sensor's forward reference area and span the visible height. They do not imply a vertical beam angle or replace the switch's authored zone limits.
+- **The grid is deterministic.** 3D uses one subdued floor-only lattice across the rendered X/Y area, with no camera-selected wall or ceiling grids. The switch itself remains the origin at `(0, 0, 0)`.
 
-## :test_tube: Development and Validation
+The View panel controls zone visibility and the radar display envelope. X/Y display bounds affect both views. Z display bounds affect 3D, are stored per device in the current browser, and do not change the switch configuration. **Apply Height to All Switches** copies only the current Z display bounds to compatible switches already discovered in that browser; it sends no MQTT command and does not become a default for future devices.
 
-Backend tests:
+### Configuration sections
+
+- **Presence & Zones** — live telemetry, target reporting, zone editing, presence behavior, room configuration, and maintenance commands
+- **Load & Dimming** — dimming levels, ramp timing, paddle response, and linked timing controls
+- **LED & Notifications** — persistent LED defaults, per-segment customization, and notification effects
+- **Buttons & Scenes** — tap, scene, and paddle behavior
+- **Power & Device** — OTA status, electrical reporting, protection, and device operation
+- **Advanced** — lower-frequency fields and conditionally relevant model settings
+
+The controls are schema-driven, with friendlier names and grouping layered over the Zigbee2MQTT definition. Read-only diagnostics stay read-only, and unsupported or ambiguous device controls are not guessed.
+
+### LED defaults and notification effects
+
+The VZM32-SN visual editor owns the switch's all-LED defaults and seven physical segments:
+
+- Preview separate **On** and **Off** states.
+- Choose a preset or custom hue and set brightness for the full bar.
+- Let a segment follow the all-LED defaults, or customize its color, brightness, and lit state.
+- See adjacent segment colors blend across the rendered diffuser.
+- Select an all-bar or individual effect to start a local preview immediately, even when physical commands are unavailable.
+- Use **Send effect** for the immediate device command. Selecting or previewing an effect does not stage persistent defaults or send on its own.
+- Treat **Clear effect** and **Off** as distinct device actions.
+
+Persistent LED defaults follow the normal staged-change workflow. Notification effects are immediate commands. Local animations follow Inovelli's published simulator patterns and physical LED direction; exact pacing can vary with installed firmware.
+
+### Firmware updates
+
+The Power & Device section can check and request standard Zigbee2MQTT catalog OTA updates for the selected VZM32-SN. It shows installed, official-reference, catalog, progress, timeout, and error information, and requires confirmation before starting an update.
+
+The installable image is always the one Zigbee2MQTT reports through its OTA catalog. Custom URLs and local firmware files are not supported. Switch Studio warns when reference metadata appears older than the installed image, but it currently uses only Zigbee2MQTT's standard update topics and does not implement Zigbee2MQTT's separate downgrade endpoints. Keep the switch powered and within reliable Zigbee range until an update finishes.
+
+## Change and command safety
+
+Switch Studio deliberately separates staged configuration from immediate actions:
+
+- Configuration fields and persistent LED defaults are staged in the current page until **Apply Changes**.
+- Apply validates the staged fields and publishes them together in one MQTT `/set` payload.
+- Publish success is not treated as device confirmation. Requested fields stay in flight until matching device reports confirm every value; failures and timeouts return values to a retryable state.
+- **Discard** removes unsent staged values and zone drafts and restores the latest authoritative device snapshot. It cannot cancel a write that was already published.
+- The zone editor panel's **Apply Changes** sends that zone immediately. The bottom action bar's **Apply Changes** can also submit an active zone draft, but the zone remains a separate write from the configuration payload.
+- Dashboard controls, Target Reporting, maintenance commands, notification effects, and OTA actions are immediate operations.
+- Controls disable while Socket.IO, MQTT, inventory, or the target device is unavailable. There is no durable offline command queue or delayed replay.
+
+Pending edits live only in page memory and are lost on reload. Browser preferences such as the active section, radar mode, per-device display height, and reporting auto-off are local UI state rather than device configuration.
+
+## Mobile and accessibility behavior
+
+- The device selector stays in the header; quick controls move to a second row when space is tight.
+- A hamburger disclosure replaces the desktop tab strip while preserving one keyboard-accessible six-section tab set.
+- Touch targets remain usable at phone and coarse-pointer tablet sizes.
+- On touch devices, **Explore 3D** unlocks orbit/zoom and **Done** restores normal page scrolling.
+- The target table remains the textual equivalent of the radar canvas.
+- Reduced-motion preferences skip camera animation while preserving the same final state.
+
+## Known limitations
+
+- Full-editor and radar support are currently verified only for `VZM32-SN`.
+- ZHA is not supported; Switch Studio communicates through Zigbee2MQTT and MQTT.
+- The 3D scene is for inspection only; zone drawing and editing remain in 2D.
+- Pending edits are not persisted across page reloads.
+- The UI currently loads Socket.IO, Plotly, and DM Sans from public CDNs, so it is not fully offline even when MQTT is local.
+- Firmware installation is limited to the standard Zigbee2MQTT catalog update path.
+- LED preview timing is simulator-based and may differ slightly from device firmware.
+
+## Roadmap
+
+- Add a local/manual firmware-upload workflow for internet-independent updates.
+- Expand verified full-editor support to additional Inovelli Blue Series models.
+- Continue improving model-aware naming, grouping, contextual guidance, and conditional controls.
+
+## Development and validation
+
+### Python environment
+
+Create a virtual environment and install the App's runtime dependencies before running backend tests:
 
 ```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r switch_studio/requirements.txt
 python -m unittest discover -s tests/python -p "test_*.py" -v
 ```
 
-Frontend tests:
+### Frontend tests
+
+The frontend tests use Node's built-in test runner and do not require an npm install:
 
 ```powershell
 node --test tests/frontend/*.test.js
 ```
 
-Manual QA checklist:
+Manual release validation is tracked in the [Home Assistant Ingress QA checklist](docs/HOME_ASSISTANT_INGRESS_QA_CHECKLIST.md).
 
-- `docs/HOME_ASSISTANT_INGRESS_QA_CHECKLIST.md`
+The App version advertised by a branch is defined in [`switch_studio/config.yaml`](switch_studio/config.yaml). Home Assistant repository channels are branch-driven rather than release-tag-driven.
 
-## :page_facing_up: License
+## Acknowledgments
 
-GNU General Public License v3.0
+Switch Studio grew from Nick D's original [`mmwave_vis`](https://github.com/nickduvall921/mmwave_vis) project. Many thanks for the live-radar and zone-visualization foundation that made this broader configuration studio possible.
+
+## License
+
+GNU General Public License v3.0.

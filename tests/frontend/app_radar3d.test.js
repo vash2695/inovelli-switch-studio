@@ -429,6 +429,27 @@ function finishCameraTransition(setup, targetMode) {
     setup.clock.advance(targetMode === '2d' ? 760 : 800);
 }
 
+function traceLineSegments(trace) {
+    assert.equal(trace.x.length, trace.y.length);
+    assert.equal(trace.x.length, trace.z.length);
+    assert.equal(trace.x.length % 3, 0, 'each grid line should use two endpoints and one separator');
+    const segments = [];
+    for (let index = 0; index < trace.x.length; index += 3) {
+        assert.equal(trace.x[index + 2], null);
+        assert.equal(trace.y[index + 2], null);
+        assert.equal(trace.z[index + 2], null);
+        segments.push({
+            x1: trace.x[index],
+            y1: trace.y[index],
+            z1: trace.z[index],
+            x2: trace.x[index + 1],
+            y2: trace.y[index + 1],
+            z2: trace.z[index + 1],
+        });
+    }
+    return segments;
+}
+
 function createGestureEvent(overrides) {
     const state = {
         defaultPrevented: false,
@@ -476,6 +497,152 @@ test('native Cartesian 2D stays active without creating WebGL until 3D is reques
     assertCameraClose(plain(plots[0].layout.scene.camera), TOP_DOWN_CAMERA);
     assert.equal(setup.elements.chart3d.dataset.interactionLocked, 'true');
     assert.match(setup.elements.chart3d.getAttribute('aria-label'), /Three-dimensional live presence radar/);
+});
+
+test('a stored 3D preference creates a measurable scene that remains orbitable across hidden navigation', () => {
+    const storage = createStorage({ 'switchStudio.radarViewMode': '3d' });
+    const plotly = createPlotly();
+    const originalNewPlot = plotly.newPlot;
+    let surfaceAtCreation = null;
+    plotly.newPlot = (element, traces, layout, config) => {
+        surfaceAtCreation = {
+            hidden: element.hidden,
+            state: element.dataset.radarSurfaceState,
+        };
+        return originalNewPlot(element, traces, layout, config);
+    };
+    const setup = loadController({
+        storage,
+        plotly,
+        visible: false,
+        activeDevice: 'unselected',
+        sceneModel: scene(),
+    });
+    const firstCamera = {
+        eye: { x: -1.55, y: -1.3, z: 1.1 },
+        center: { x: 0, y: 0, z: 0 },
+        up: { x: 0, y: 0, z: 1 },
+        projection: { type: 'perspective' },
+    };
+    const secondCamera = {
+        eye: { x: 1.25, y: -1.85, z: 0.75 },
+        center: { x: 0, y: 0, z: 0 },
+        up: { x: 0, y: 0, z: 1 },
+        projection: { type: 'perspective' },
+    };
+
+    assert.equal(setup.controller.getMode(), '3d');
+    assert.equal(plotly.calls.some((call) => call.kind === 'newPlot'), false);
+    setup.controller.setActiveDevice('device-a');
+    setup.controller.setSceneModel(scene({
+        bounds: { xMin: -620, xMax: 620, yMin: 0, yMax: 720, zMin: -300, zMax: 420 },
+    }));
+    setup.controller.setVisible(true);
+
+    const created = plotly.calls.find((call) => call.kind === 'newPlot');
+    assert.ok(created);
+    assert.deepEqual(surfaceAtCreation, { hidden: false, state: 'incoming' });
+    assert.equal(created.layout.scene.dragmode, 'turntable');
+    assert.equal(setup.elements.chart3d.hidden, false);
+    assert.equal(setup.elements.chart3d.dataset.radarSurfaceState, 'active');
+    assert.equal(setup.elements.chart3d.dataset.transitioning, 'false');
+    assert.equal(setup.elements.chart3d.dataset.interactionLocked, 'false');
+
+    const relayoutCount = cameraRelayouts(setup).length;
+    setup.elements.chart3d.dispatch('pointerdown', createGestureEvent({ button: 0 }));
+    setup.elements.chart3d.emit('plotly_relayouting', { 'scene.camera': firstCamera });
+    setup.elements.chart3d.emit('plotly_relayout', { 'scene.camera': firstCamera });
+    setup.elements.chart3d._fullLayout = {
+        scene: {
+            camera: firstCamera,
+            uirevision: created.layout.scene.uirevision,
+        },
+    };
+    setup.clock.advance(250);
+    assert.equal(setup.elements.chart3d.dataset.cameraGesture, 'active', 'Plotly relayout must not impersonate a physical release');
+    setup.elements.chart3d.dispatch('pointerup', createGestureEvent());
+    setup.clock.advance(0);
+    assert.equal(setup.elements.chart3d.dataset.cameraGesture, 'idle');
+    assert.equal(cameraRelayouts(setup).length, relayoutCount + 1, 'the safe live camera is persisted before future scene writes');
+    assertCameraClose(cameraFromRelayout(cameraRelayouts(setup).at(-1)), firstCamera);
+
+    setup.controller.setVisible(false);
+    assert.equal(setup.elements.chart3d.hidden, true);
+    setup.controller.setVisible(true);
+    assert.equal(plotly.calls.filter((call) => call.kind === 'newPlot').length, 1);
+    assert.equal(setup.elements.chart3d.hidden, false);
+    assert.equal(setup.elements.chart3d.dataset.radarSurfaceState, 'active');
+    assert.equal(setup.elements.chart3d.dataset.interactionLocked, 'false');
+
+    setup.elements.chart3d.dispatch('pointerdown', createGestureEvent({ button: 0 }));
+    setup.elements.chart3d.emit('plotly_relayouting', { 'scene.camera': secondCamera });
+    setup.elements.chart3d._fullLayout = {
+        scene: {
+            camera: secondCamera,
+            uirevision: created.layout.scene.uirevision,
+        },
+    };
+    setup.windowObject.dispatch('pointerup', createGestureEvent());
+    setup.clock.advance(0);
+    assert.equal(setup.elements.chart3d.dataset.cameraGesture, 'idle');
+    assert.equal(cameraRelayouts(setup).length, relayoutCount + 2);
+    assertCameraClose(cameraFromRelayout(cameraRelayouts(setup).at(-1)), secondCamera);
+});
+
+test('a stored 3D scene stays prepared but noninteractive until async post-create state is reconciled', async () => {
+    const storage = createStorage({ 'switchStudio.radarViewMode': '3d' });
+    const plotly = createPlotly();
+    const creation = createDeferred();
+    const reconciliation = createDeferred();
+    plotly.newPlot = (element, traces, layout, config) => {
+        plotly.calls.push({ kind: 'newPlot', element, traces, layout, config });
+        return creation.promise;
+    };
+    plotly.react = (element, traces, layout, config) => {
+        plotly.calls.push({ kind: 'react', element, traces, layout, config });
+        return reconciliation.promise;
+    };
+    const setup = loadController({
+        storage,
+        plotly,
+        visible: false,
+        activeDevice: 'device-a',
+        sceneModel: scene(),
+    });
+
+    setup.controller.setVisible(true);
+    assert.equal(setup.elements.chart3d.hidden, false, 'newPlot receives a measurable prepared surface');
+    assert.equal(setup.elements.chart3d.dataset.radarSurfaceState, 'incoming');
+    assert.equal(setup.elements.chart3d.getAttribute('aria-hidden'), 'true');
+
+    setup.zonesApi.emitSnapshot({
+        reason: 'creation-dirty',
+        targets: [{ id: 1, x: 44, y: 128, z: 26 }],
+        history: {},
+    });
+    creation.resolve(setup.elements.chart3d);
+    await flushPromises();
+
+    const postCreate = plotly.calls.filter((call) => call.kind === 'react').at(-1);
+    assert.ok(postCreate, 'the latest target state must reconcile after WebGL creation');
+    assert.deepEqual(Array.from(postCreate.traces.at(-2).x), [44]);
+    assert.equal(setup.elements.chart3d.dataset.radarSurfaceState, 'incoming');
+    assert.equal(setup.elements.chart3d.getAttribute('aria-hidden'), 'true');
+    assert.equal(
+        plotly.calls.filter((call) => call.kind === 'resize').length,
+        0,
+        'the prepared surface must not resize before it is display-active',
+    );
+
+    reconciliation.resolve(setup.elements.chart3d);
+    await flushPromises();
+    assert.equal(setup.elements.chart3d.dataset.radarSurfaceState, 'active');
+    assert.equal(setup.elements.chart3d.getAttribute('aria-hidden'), 'false');
+    assert.equal(setup.elements.chart3d.dataset.interactionLocked, 'false');
+    assert.equal(plotly.calls.filter((call) => call.kind === 'resize').length, 1);
+
+    setup.elements.chart3d.dispatch('pointerdown', createGestureEvent({ button: 0 }));
+    assert.equal(setup.elements.chart3d.dataset.cameraGesture, 'active', 'the first orbit is accepted immediately after reveal');
 });
 
 test('mode controls crossfade native 2D with one perspective scene and a fixed world frame', () => {
@@ -1020,18 +1187,16 @@ test('bulk display height persistence reports partial and total local-storage fa
     assert.equal(allFailedSetup.controller.getMode(), '3d');
 });
 
-test('display-only height changes stay dormant in native 2D and preserve physical FOV bounds', () => {
+test('display-only height changes stay dormant in native 2D while rebuilding full-height FOV geometry', () => {
     const storage = createStorage({ 'switchStudio.radarViewMode': '2d' });
     const initial = scene({
         bounds: { xMin: -500, xMax: 500, yMin: 0, yMax: 600, zMin: -600, zMax: 600 },
-        fovBounds: { zMin: -120, zMax: 180 },
     });
     const setup = loadController({ storage, sceneModel: initial, activeDevice: 'device-a' });
     const plotCount = setup.plotly.calls.filter((call) => call.kind === 'newPlot').length;
 
     setup.controller.setSceneModel(scene({
         bounds: { xMin: -500, xMax: 500, yMin: 0, yMax: 600, zMin: -180, zMax: 420 },
-        fovBounds: { zMin: -120, zMax: 180 },
     }));
 
     assert.equal(setup.controller.getMode(), '2d');
@@ -1040,11 +1205,11 @@ test('display-only height changes stay dormant in native 2D and preserve physica
     assert.equal(setup.elements.chart2d.hidden, false);
     assert.equal(setup.elements.chart2d.dataset.radarSurfaceState, 'active');
     assert.equal(setup.elements.chart3d.hidden, true);
-    assert.equal(setup.zonesApi.calls.fov.at(-1).zMin, -120);
-    assert.equal(setup.zonesApi.calls.fov.at(-1).zMax, 180);
+    assert.equal(setup.zonesApi.calls.fov.at(-1).zMin, -180);
+    assert.equal(setup.zonesApi.calls.fov.at(-1).zMax, 420);
 });
 
-test('zone cuboids expand only Plotly render bounds while persisted display bounds and floor grid stay configured', () => {
+test('zone cuboids expand render bounds, FOV, and deterministic floor coverage without rewriting authored data', () => {
     const deviceKey = 'zigbee2mqtt/office switch';
     const displayStorageKey = `switchStudio.radarDisplayHeight:${encodeURIComponent(deviceKey)}`;
     const storage = createStorage({
@@ -1098,7 +1263,6 @@ test('zone cuboids expand only Plotly render bounds while persisted display boun
         sceneModel: scene({
             zones,
             bounds: displayBounds,
-            fovBounds: { zMin: -90, zMax: 140 },
         }),
         initialMode: '3d',
         activeDevice: deviceKey,
@@ -1130,9 +1294,47 @@ test('zone cuboids expand only Plotly render bounds while persisted display boun
     const finiteFloorX = Array.from(floorGrid.x).filter(Number.isFinite);
     const finiteFloorY = Array.from(floorGrid.y).filter(Number.isFinite);
     const finiteFloorZ = Array.from(floorGrid.z).filter(Number.isFinite);
-    assert.deepEqual([Math.min(...finiteFloorX), Math.max(...finiteFloorX)], [-300, 300]);
-    assert.deepEqual([Math.min(...finiteFloorY), Math.max(...finiteFloorY)], [0, 600]);
-    assert.equal(finiteFloorZ.every((value) => value === -120), true, 'the floor grid stays at the configured display floor');
+    assert.deepEqual([Math.min(...finiteFloorX), Math.max(...finiteFloorX)], [-762, 722]);
+    assert.deepEqual([Math.min(...finiteFloorY), Math.max(...finiteFloorY)], [-114, 724]);
+    const expandedFloorZ = -120 + ((604 - (-574)) * 0.0005);
+    assert.equal(
+        finiteFloorZ.every((value) => Math.abs(value - expandedFloorZ) < 1e-12),
+        true,
+        'the complete render-bound lattice stays just above the configured floor',
+    );
+    const expandedSegments = traceLineSegments(floorGrid);
+    const verticalSegments = expandedSegments.filter((segment) => segment.x1 === segment.x2);
+    const horizontalSegments = expandedSegments.filter((segment) => segment.y1 === segment.y2);
+    assert.deepEqual(
+        verticalSegments.map((segment) => segment.x1),
+        [-762, -600, -400, -200, 0, 200, 400, 600, 722],
+        'X grid lines should use stable nice-number ticks plus both render boundaries',
+    );
+    assert.equal(
+        verticalSegments.every((segment) => segment.y1 === -114 && segment.y2 === 724),
+        true,
+    );
+    assert.deepEqual(
+        horizontalSegments.map((segment) => segment.y1),
+        [-114, -100, 0, 100, 200, 300, 400, 500, 600, 700, 724],
+        'Y grid lines should use stable nice-number ticks plus both render boundaries',
+    );
+    assert.equal(
+        horizontalSegments.every((segment) => segment.x1 === -762 && segment.x2 === 722),
+        true,
+    );
+    assert.equal(setup.zonesApi.calls.fov.at(-1).zMin, -574);
+    assert.equal(setup.zonesApi.calls.fov.at(-1).zMax, 604);
+    const authoredZoneBounds = setup.zonesApi.calls.zones.map((call) => ({
+        name: call.options.name,
+        zMin: call.zone.z_min,
+        zMax: call.zone.z_max,
+    }));
+    assert.deepEqual(plain(authoredZoneBounds), [
+        { name: 'Primary detection area', zMin: -540, zMax: -300 },
+        { name: 'Stay area 1', zMin: 100, zMax: 570 },
+        { name: 'Interference area 1', zMin: -40, zMax: 80 },
+    ], 'semantic cuboids must retain exact device-authored heights while the FOV fills the scene');
     assert.deepEqual(plain(setup.controller.loadDisplayHeightBounds(deviceKey)), { zMin: -120, zMax: 160 });
     assert.equal(storage.value(displayStorageKey), '{"zMin":-120,"zMax":160}');
     assert.equal(storage.writes.length, 0, 'expanding render axes must not rewrite the saved per-device display range');
@@ -1145,7 +1347,6 @@ test('zone cuboids expand only Plotly render bounds while persisted display boun
             mmwave_interference_areas: [],
         },
         bounds: displayBounds,
-        fovBounds: { zMin: -90, zMax: 140 },
     }));
     const withoutOutliers = setup.plotly.calls.filter((call) => call.kind === 'react').at(-1);
     assert.deepEqual(Array.from(withoutOutliers.layout.scene.xaxis.range), [-300, 300]);
@@ -1155,9 +1356,15 @@ test('zone cuboids expand only Plotly render bounds while persisted display boun
     assertVectorClose(withoutOutliers.layout.scene.aspectratio, { x: 1, y: 1, z: 1 });
     const restoredFloorGrid = withoutOutliers.traces.find((trace) => trace.name === 'Floor grid');
     assert.equal(
-        Array.from(restoredFloorGrid.z).filter(Number.isFinite).every((value) => value === -120),
+        Array.from(restoredFloorGrid.z).filter(Number.isFinite).every((value) => value === -119.75),
         true,
     );
+    const restoredFloorX = Array.from(restoredFloorGrid.x).filter(Number.isFinite);
+    const restoredFloorY = Array.from(restoredFloorGrid.y).filter(Number.isFinite);
+    assert.deepEqual([Math.min(...restoredFloorX), Math.max(...restoredFloorX)], [-300, 300]);
+    assert.deepEqual([Math.min(...restoredFloorY), Math.max(...restoredFloorY)], [0, 600]);
+    assert.equal(setup.zonesApi.calls.fov.at(-1).zMin, -120);
+    assert.equal(setup.zonesApi.calls.fov.at(-1).zMax, 160);
     assert.deepEqual(plain(setup.controller.loadDisplayHeightBounds(deviceKey)), { zMin: -120, zMax: 160 });
     assert.equal(storage.value(displayStorageKey), '{"zMin":-120,"zMax":160}');
     assert.equal(storage.writes.length, 0);
@@ -1193,9 +1400,9 @@ test('a sensor origin outside the display envelope expands render axes to zero w
     const finiteFloorX = Array.from(floorGrid.x).filter(Number.isFinite);
     const finiteFloorY = Array.from(floorGrid.y).filter(Number.isFinite);
     const finiteFloorZ = Array.from(floorGrid.z).filter(Number.isFinite);
-    assert.deepEqual([Math.min(...finiteFloorX), Math.max(...finiteFloorX)], [50, 300]);
-    assert.deepEqual([Math.min(...finiteFloorY), Math.max(...finiteFloorY)], [100, 600]);
-    assert.equal(finiteFloorZ.every((value) => value === 20), true);
+    assert.deepEqual([Math.min(...finiteFloorX), Math.max(...finiteFloorX)], [0, 300]);
+    assert.deepEqual([Math.min(...finiteFloorY), Math.max(...finiteFloorY)], [0, 600]);
+    assert.equal(finiteFloorZ.every((value) => value === 20.25), true);
 });
 
 test('scene assembly uses exact XYZ bounds, one primary cuboid, slot visibility, and separate zone colors', () => {
@@ -1211,11 +1418,11 @@ test('scene assembly uses exact XYZ bounds, one primary cuboid, slot visibility,
     assert.equal(newPlot.config.scrollZoom, false);
     assertCameraClose(plain(newPlot.layout.scene.camera), DEFAULT_PERSPECTIVE_CAMERA);
 
-    ['xaxis', 'yaxis'].forEach((axisName) => {
+    ['xaxis', 'yaxis', 'zaxis'].forEach((axisName) => {
         const axis = newPlot.layout.scene[axisName];
-        assert.equal(axis.showgrid, true);
-        assert.equal(axis.zeroline, true);
-        assert.equal(axis.showbackground, true);
+        assert.equal(axis.showgrid, false, 'native camera-dependent grid planes must stay disabled');
+        assert.equal(axis.zeroline, false);
+        assert.equal(axis.showbackground, false, 'native wall and ceiling backgrounds must stay disabled');
         assert.equal(axis.showspikes, false);
         assert.equal(axis.spikesides, false);
         assert.equal(axis.gridcolor, 'rgb(45, 64, 76)');
@@ -1223,12 +1430,6 @@ test('scene assembly uses exact XYZ bounds, one primary cuboid, slot visibility,
         assert.equal(axis.linecolor, 'rgb(52, 72, 84)');
         assert.equal(axis.backgroundcolor, 'rgb(12, 20, 28)');
     });
-    assert.equal(newPlot.layout.scene.zaxis.showgrid, false, 'height must not add a third grid plane');
-    assert.equal(newPlot.layout.scene.zaxis.zeroline, false);
-    assert.equal(newPlot.layout.scene.zaxis.showbackground, false);
-    assert.equal(newPlot.layout.scene.zaxis.showspikes, false);
-    assert.equal(newPlot.layout.scene.zaxis.spikesides, false);
-
     const floorGrids = newPlot.traces.filter((trace) => trace.name === 'Floor grid');
     assert.equal(floorGrids.length, 1, 'grid visibility should add one explicit floor-only trace');
     const floorGrid = floorGrids[0];
@@ -1236,6 +1437,7 @@ test('scene assembly uses exact XYZ bounds, one primary cuboid, slot visibility,
     assert.equal(floorGrid.mode, 'lines');
     assert.equal(floorGrid.line.color, 'rgb(42, 61, 72)');
     assert.equal(floorGrid.line.width, 1);
+    assert.equal(floorGrid.opacity, 0.72);
     assert.equal(floorGrid.hoverinfo, 'skip');
     assert.equal(floorGrid.showlegend, false);
     assert.equal(floorGrid.connectgaps, false);
@@ -1246,15 +1448,20 @@ test('scene assembly uses exact XYZ bounds, one primary cuboid, slot visibility,
             assert.equal(floorGrid.y[index], null);
             return;
         }
-        assert.equal(value, -250, 'every finite floor-grid point must use bounds.zMin');
+        assert.equal(value, -249.75, 'every finite floor-grid point must sit just above bounds.zMin');
         assert.notEqual(value, 250, 'the floor grid must never mirror onto bounds.zMax');
     });
+    const floorSegments = traceLineSegments(floorGrid);
+    assert.equal(
+        floorSegments.every((segment) => segment.z1 === -249.75 && segment.z2 === -249.75),
+        true,
+    );
 
     assert.equal(setup.zonesApi.calls.fov.length, 1);
     assert.equal(setup.zonesApi.calls.fov[0].innerHalfAngleDegrees, 60);
     assert.equal(setup.zonesApi.calls.fov[0].outerHalfAngleDegrees, 75);
-    assert.equal(setup.zonesApi.calls.fov[0].zMin, -600);
-    assert.equal(setup.zonesApi.calls.fov[0].zMax, 600);
+    assert.equal(setup.zonesApi.calls.fov[0].zMin, -250);
+    assert.equal(setup.zonesApi.calls.fov[0].zMax, 250);
 
     const labels = setup.zonesApi.calls.zones.map((call) => call.options.name);
     assert.deepEqual(labels, [
@@ -1319,27 +1526,28 @@ test('FOV remains capped at the supported six metre depth while axes can extend 
     assert.equal(setup.zonesApi.calls.fov[0].yMax, 600);
 });
 
-test('FOV height stays authoritative while the scene axis changes and the sensor remains only at the origin', () => {
+test('FOV spans the complete visible Z axis while the sensor remains only at the origin', () => {
     const model = scene();
     model.bounds.zMin = -420;
     model.bounds.zMax = 510;
+    // Legacy physical-height metadata must not create a second, partial Z
+    // scale for the informational reference volume.
     model.fovBounds = { zMin: -120, zMax: 180 };
     const setup = loadController({ sceneModel: model, initialMode: '3d' });
     const newPlot = setup.plotly.calls.find((call) => call.kind === 'newPlot');
 
     assert.deepEqual(Array.from(newPlot.layout.scene.zaxis.range), [-420, 510]);
-    assert.equal(setup.zonesApi.calls.fov[0].zMin, -120);
-    assert.equal(setup.zonesApi.calls.fov[0].zMax, 180);
+    assert.equal(setup.zonesApi.calls.fov[0].zMin, -420);
+    assert.equal(setup.zonesApi.calls.fov[0].zMax, 510);
     const sensorOrigin = newPlot.traces.find((trace) => trace.name === 'Sensor');
     assert.equal(newPlot.traces.some((trace) => trace.name === 'Sensor height reference'), false);
     assert.deepEqual(Array.from(sensorOrigin.z), [0]);
 });
 
-test('per-device display height updates the 3D axis without adding a sensor span or changing FOV, mode, or camera', () => {
+test('per-device display height updates the 3D axis and full-height FOV without changing zones, mode, or camera', () => {
     const storage = createStorage({ 'switchStudio.radarViewMode': '3d' });
     const initialModel = scene({
         bounds: { xMin: -500, xMax: 500, yMin: 0, yMax: 600, zMin: -600, zMax: 600 },
-        fovBounds: { zMin: -120, zMax: 180 },
     });
     const setup = loadController({
         storage,
@@ -1367,7 +1575,6 @@ test('per-device display height updates the 3D axis without adding a sensor span
 
     setup.controller.setSceneModel(scene({
         bounds: { xMin: -500, xMax: 500, yMin: 0, yMax: 600, zMin: -180, zMax: 420 },
-        fovBounds: { zMin: -120, zMax: 180 },
     }));
 
     const render = setup.plotly.calls.filter((call) => call.kind === 'react').at(-1);
@@ -1384,18 +1591,102 @@ test('per-device display height updates the 3D axis without adding a sensor span
     const sensorOrigin = render.traces.find((trace) => trace.name === 'Sensor');
     assert.equal(render.traces.some((trace) => trace.name === 'Sensor height reference'), false);
     assert.deepEqual(Array.from(sensorOrigin.z), [0]);
-    assert.equal(setup.zonesApi.calls.fov.at(-1).zMin, -120, 'physical FOV height remains device-authored');
-    assert.equal(setup.zonesApi.calls.fov.at(-1).zMax, 180);
+    assert.equal(setup.zonesApi.calls.fov.at(-1).zMin, -180);
+    assert.equal(setup.zonesApi.calls.fov.at(-1).zMax, 420);
+    assert.equal(
+        setup.zonesApi.calls.zones.every((call) => call.zone.z_min === -40 && call.zone.z_max === 180),
+        true,
+        'changing the display envelope must not stretch authored semantic zones',
+    );
     assert.deepEqual(Array.from(render.traces.slice(-2), (trace) => trace.name), ['Live targets', 'Target trails']);
 });
 
-test('global detection bounds are used only when area1 is absent', () => {
-    const model = scene();
-    delete model.zones.mmwave_detection_areas.area1;
-    const setup = loadController({ sceneModel: model, initialMode: '3d' });
-    const primaryCalls = setup.zonesApi.calls.zones.filter((call) => call.options.name === 'Primary detection area');
-    assert.equal(primaryCalls.length, 1);
-    assert.equal(primaryCalls[0].zone.area_id, 'area1');
+test('a hidden global detection fallback cannot expand area1 bounds but becomes authoritative when area1 is absent', () => {
+    const displayBounds = { xMin: -300, xMax: 300, yMin: 0, yMax: 600, zMin: -120, zMax: 160 };
+    const hiddenGlobal = {
+        area_id: 'area1',
+        x_min: -900,
+        x_max: -800,
+        y_min: -150,
+        y_max: 750,
+        z_min: -500,
+        z_max: 550,
+    };
+    const visibleArea1 = {
+        area_id: 'area1',
+        x_min: -100,
+        x_max: 100,
+        y_min: 20,
+        y_max: 200,
+        z_min: -40,
+        z_max: 80,
+    };
+    const zones = {
+        global: hiddenGlobal,
+        mmwave_detection_areas: { area1: visibleArea1 },
+        mmwave_stay_areas: {},
+        mmwave_interference_areas: [],
+    };
+    const setup = loadController({
+        sceneModel: scene({ zones, bounds: displayBounds }),
+        initialMode: '3d',
+    });
+    const initialPlot = setup.plotly.calls.find((call) => call.kind === 'newPlot');
+
+    assert.deepEqual(Array.from(initialPlot.layout.scene.xaxis.range), [-300, 300]);
+    assert.deepEqual(Array.from(initialPlot.layout.scene.yaxis.range), [0, 600]);
+    assert.deepEqual(Array.from(initialPlot.layout.scene.zaxis.range), [-120, 160]);
+    const visiblePrimary = setup.zonesApi.calls.zones
+        .filter((call) => call.options.name === 'Primary detection area')
+        .at(-1);
+    assert.deepEqual(
+        plain({
+            xMin: visiblePrimary.zone.x_min,
+            xMax: visiblePrimary.zone.x_max,
+            yMin: visiblePrimary.zone.y_min,
+            yMax: visiblePrimary.zone.y_max,
+            zMin: visiblePrimary.zone.z_min,
+            zMax: visiblePrimary.zone.z_max,
+        }),
+        { xMin: -100, xMax: 100, yMin: 20, yMax: 200, zMin: -40, zMax: 80 },
+        'the semantic primary cuboid must keep area1\'s authored XYZ limits',
+    );
+    assert.deepEqual(
+        plain({ zMin: setup.zonesApi.calls.fov.at(-1).zMin, zMax: setup.zonesApi.calls.fov.at(-1).zMax }),
+        { zMin: -120, zMax: 160 },
+        'only the informational FOV should span the final render height',
+    );
+
+    setup.controller.setSceneModel(scene({
+        zones: {
+            ...zones,
+            mmwave_detection_areas: {},
+        },
+        bounds: displayBounds,
+    }));
+    const fallbackRender = setup.plotly.calls.filter((call) => call.kind === 'react').at(-1);
+    assert.deepEqual(Array.from(fallbackRender.layout.scene.xaxis.range), [-936, 300]);
+    assert.deepEqual(Array.from(fallbackRender.layout.scene.yaxis.range), [-177, 777]);
+    assert.deepEqual(Array.from(fallbackRender.layout.scene.zaxis.range), [-532, 582]);
+    const fallbackPrimary = setup.zonesApi.calls.zones
+        .filter((call) => call.options.name === 'Primary detection area')
+        .at(-1);
+    assert.deepEqual(
+        plain({
+            xMin: fallbackPrimary.zone.x_min,
+            xMax: fallbackPrimary.zone.x_max,
+            yMin: fallbackPrimary.zone.y_min,
+            yMax: fallbackPrimary.zone.y_max,
+            zMin: fallbackPrimary.zone.z_min,
+            zMax: fallbackPrimary.zone.z_max,
+        }),
+        { xMin: -900, xMax: -800, yMin: -150, yMax: 750, zMin: -500, zMax: 550 },
+        'global should retain its authored cuboid only when it is the rendered fallback',
+    );
+    assert.deepEqual(
+        plain({ zMin: setup.zonesApi.calls.fov.at(-1).zMin, zMax: setup.zonesApi.calls.fov.at(-1).zMax }),
+        { zMin: -532, zMax: 582 },
+    );
 });
 
 test('equivalent scene models do not rebuild FOV or zone geometry', () => {
@@ -1802,7 +2093,7 @@ test('perspective gesture guards block pan and roll while vertical wheel zoom ke
         ));
 });
 
-test('an active camera drag invalidates stale React and reconciles deferred scene, targets, and resize once on global release', async () => {
+test('an in-flight full React blocks pointerdown before a later drag reconciles deferred scene work once', async () => {
     const plotly = createPlotly();
     const setup = loadController({
         initialMode: '3d',
@@ -1835,7 +2126,26 @@ test('an active camera drag invalidates stale React and reconciles deferred scen
         bounds: { xMin: -540, xMax: 620, yMin: -20, yMax: 710, zMin: -300, zMax: 440 },
     }));
     assert.equal(pendingRenders.length, 1);
-    const staleRequestedCamera = plain(pendingRenders[0].layout.scene.camera);
+    const blockedPointerDown = createGestureEvent({ button: 0 });
+    setup.elements.chart3d.dispatch('pointerdown', blockedPointerDown);
+    assert.equal(blockedPointerDown.state.defaultPrevented, true);
+    assert.equal(blockedPointerDown.state.immediatePropagationStopped, true);
+    assert.equal(blockedPointerDown.state.propagationStopped, true);
+    assert.equal(setup.elements.chart3d.dataset.cameraGesture, 'idle');
+    assert.equal(cameraRelayouts(setup).length, 0, 'the pending React must settle before a native orbit can begin');
+    const blockedWheel = createGestureEvent({ deltaX: 0, deltaY: 100 });
+    setup.elements.chart3d.dispatch('wheel', blockedWheel);
+    assert.equal(blockedWheel.state.defaultPrevented, true);
+    assert.equal(cameraRelayouts(setup).length, 0, 'wheel relayout must not race the pending React');
+
+    pendingRenders[0].deferred.resolve(setup.elements.chart3d);
+    await flushPromises();
+    setup.elements.chart3d._fullLayout = {
+        scene: {
+            camera: plain(pendingRenders[0].layout.scene.camera),
+            uirevision: pendingRenders[0].layout.scene.uirevision,
+        },
+    };
     const restylesBeforeDrag = plotly.calls.filter((call) => call.kind === 'restyle').length;
     const resizesBeforeDrag = plotly.calls.filter((call) => call.kind === 'resize').length;
     const relayoutsBeforeDrag = cameraRelayouts(setup).length;
@@ -1844,6 +2154,13 @@ test('an active camera drag invalidates stale React and reconciles deferred scen
     assert.equal(setup.elements.chart3d.dataset.cameraGesture, 'active');
     setup.elements.chart3d.emit('plotly_relayouting', { 'scene.camera': cameraB });
     setup.elements.chart3d.emit('plotly_relayouting', { 'scene.camera': cameraC });
+    setup.elements.chart3d.emit('plotly_relayout', { 'scene.camera': cameraC });
+    setup.clock.advance(0);
+    assert.equal(
+        setup.elements.chart3d.dataset.cameraGesture,
+        'active',
+        'Plotly relayout is camera telemetry, not evidence that the pointer was physically released',
+    );
     assert.equal(cameraRelayouts(setup).length, relayoutsBeforeDrag, 'live native orbit events must not fight the drag');
 
     setup.controller.setSceneModel(scene({
@@ -1869,16 +2186,17 @@ test('an active camera drag invalidates stale React and reconciles deferred scen
     assertCameraClose(plain(reconciled.layout.scene.camera), cameraC);
     assert.deepEqual(Array.from(reconciled.layout.scene.zaxis.range), [-360, 500]);
     assert.deepEqual(Array.from(reconciled.traces.at(-2).x), [83]);
-    assert.equal(plotly.calls.filter((call) => call.kind === 'resize').length, resizesBeforeDrag + 1);
+    assert.equal(
+        plotly.calls.filter((call) => call.kind === 'resize').length,
+        resizesBeforeDrag,
+        'resize should wait for the reconciled scene promise',
+    );
     assert.equal(cameraRelayouts(setup).length, relayoutsBeforeDrag);
 
-    pendingRenders[0].deferred.resolve(setup.elements.chart3d);
-    await flushPromises();
-    assert.equal(cameraRelayouts(setup).length, relayoutsBeforeDrag, 'the invalidated React camera must never reappear');
-    assert.notDeepEqual(staleRequestedCamera.eye, cameraC.eye);
     pendingRenders[1].deferred.resolve(setup.elements.chart3d);
     await flushPromises();
     assert.equal(cameraRelayouts(setup).length, relayoutsBeforeDrag);
+    assert.equal(plotly.calls.filter((call) => call.kind === 'resize').length, resizesBeforeDrag + 1);
 
     setup.controller.setSceneModel(scene({
         bounds: { xMin: -640, xMax: 700, yMin: -60, yMax: 800, zMin: -400, zMax: 540 },
@@ -1890,39 +2208,107 @@ test('an active camera drag invalidates stale React and reconciles deferred scen
     assert.equal(projectionRelayouts(setup).length, 0);
 });
 
-test('target-only updates keep restyling during a drag and global cancel settles the latest live camera', () => {
-    const setup = loadController({ initialMode: '3d', sceneModel: scene() });
-    const camera = {
+test('a global touch cancellation captures the live GL camera, persists it, then reconciles only the latest held target', async () => {
+    const plotly = createPlotly();
+    const setup = loadController({ initialMode: '3d', sceneModel: scene(), plotly });
+    const liveCamera = {
         eye: { x: -1.6, y: -1.25, z: 1.05 },
         center: { x: 0, y: 0, z: 0 },
         up: { x: 0, y: 0, z: 1 },
         projection: { type: 'perspective' },
     };
+    const initialPlot = plotly.calls.find((call) => call.kind === 'newPlot');
+    setup.elements.chart3d._fullLayout = {
+        scene: {
+            camera: plain(initialPlot.layout.scene.camera),
+            uirevision: initialPlot.layout.scene.uirevision,
+            _scene: { getCamera: () => liveCamera },
+        },
+    };
+    const persistence = createDeferred();
+    plotly.relayout = (element, update) => {
+        const call = { kind: 'relayout', element, update, deferred: persistence };
+        plotly.calls.push(call);
+        return persistence.promise;
+    };
     const reactCount = setup.plotly.calls.filter((call) => call.kind === 'react').length;
     const restyleCount = setup.plotly.calls.filter((call) => call.kind === 'restyle').length;
     const relayoutCount = cameraRelayouts(setup).length;
 
-    setup.elements.chart3d.dispatch('pointerdown', createGestureEvent({ button: 0 }));
-    setup.elements.chart3d.emit('plotly_relayouting', { 'scene.camera': camera });
+    setup.elements.chart3d.dispatch('touchstart', createGestureEvent());
+    assert.equal(setup.elements.chart3d.dataset.cameraGesture, 'active');
     setup.zonesApi.emitSnapshot({
         reason: 'drag-target-only',
         targets: [{ id: 1, x: 31, y: 72, z: 14 }],
         history: {},
     });
-    setup.clock.advance(125);
+    setup.zonesApi.emitSnapshot({
+        reason: 'drag-target-latest',
+        targets: [{ id: 1, x: 47, y: 91, z: 19 }],
+        history: {},
+    });
+    setup.clock.advance(500);
     assert.equal(setup.elements.chart3d.dataset.cameraGesture, 'active');
     assert.equal(setup.plotly.calls.filter((call) => call.kind === 'react').length, reactCount);
-    assert.equal(setup.plotly.calls.filter((call) => call.kind === 'restyle').length, restyleCount + 1);
+    assert.equal(setup.plotly.calls.filter((call) => call.kind === 'restyle').length, restyleCount);
     assert.equal(cameraRelayouts(setup).length, relayoutCount);
 
-    setup.windowObject.dispatch('pointercancel', createGestureEvent());
+    setup.windowObject.dispatch('touchcancel', createGestureEvent());
+    assert.equal(setup.elements.chart3d.dataset.cameraGesture, 'active');
     setup.clock.advance(0);
     assert.equal(setup.elements.chart3d.dataset.cameraGesture, 'idle');
-    const settleCalls = cameraRelayouts(setup).slice(relayoutCount);
-    assert.equal(settleCalls.length, 1);
-    assertCameraClose(plain(cameraFromRelayout(settleCalls[0])), camera);
-    assert.equal(settleCalls[0].update['scene.camera'], undefined);
-    assert.equal(settleCalls[0].update['scene.camera.projection.type'], undefined);
+    assert.equal(setup.plotly.calls.filter((call) => call.kind === 'react').length, reactCount);
+    const persistenceCalls = cameraRelayouts(setup).slice(relayoutCount);
+    assert.equal(persistenceCalls.length, 1, 'stale layout state must be brought up to the live GL camera once');
+    assertCameraClose(plain(cameraFromRelayout(persistenceCalls[0])), liveCamera);
+    assert.equal(
+        setup.plotly.calls.filter((call) => call.kind === 'restyle').length,
+        restyleCount,
+        'target reconciliation must await camera persistence',
+    );
+
+    persistence.resolve(setup.elements.chart3d);
+    await flushPromises();
+    const restyles = setup.plotly.calls.filter((call) => call.kind === 'restyle');
+    assert.equal(restyles.length, restyleCount + 1, 'release should reconcile target state exactly once');
+    assert.deepEqual(plain(restyles.at(-1).update.x[0]), [47], 'only the latest held target snapshot should render');
+    assert.ok(
+        setup.plotly.calls.indexOf(persistenceCalls[0]) < setup.plotly.calls.indexOf(restyles.at(-1)),
+        'camera persistence must complete before the deferred target restyle is issued',
+    );
+    assert.equal(projectionRelayouts(setup).length, 0);
+});
+
+test('an unsafe gesture camera is corrected once, and only after physical release', () => {
+    const setup = loadController({ initialMode: '3d', sceneModel: scene() });
+    const unsafeCamera = {
+        eye: { x: 1.2, y: -1.6, z: -1.1 },
+        center: { x: 4, y: -3, z: 2 },
+        up: { x: 1, y: 0, z: 0 },
+        projection: { type: 'orthographic' },
+    };
+    const before = cameraRelayouts(setup).length;
+
+    setup.elements.chart3d.dispatch('pointerdown', createGestureEvent({ button: 0 }));
+    setup.elements.chart3d.emit('plotly_relayouting', { 'scene.camera': unsafeCamera });
+    setup.elements.chart3d.emit('plotly_relayout', { 'scene.camera': unsafeCamera });
+    setup.clock.advance(1000);
+    assert.equal(setup.elements.chart3d.dataset.cameraGesture, 'active');
+    assert.equal(cameraRelayouts(setup).length, before, 'camera telemetry alone must neither finish nor correct an active drag');
+
+    setup.windowObject.dispatch('pointerup', createGestureEvent());
+    assert.equal(setup.elements.chart3d.dataset.cameraGesture, 'active');
+    setup.clock.advance(0);
+    assert.equal(setup.elements.chart3d.dataset.cameraGesture, 'idle');
+    const corrections = cameraRelayouts(setup).slice(before);
+    assert.equal(corrections.length, 1);
+    const correction = corrections[0];
+    const corrected = cameraFromRelayout(correction);
+    assertVectorClose(corrected.eye, unsafeCamera.eye);
+    assert.deepEqual(plain(corrected.center), { x: 0, y: 0, z: 0 });
+    assert.deepEqual(plain(corrected.up), { x: 0, y: 0, z: 1 });
+    assert.equal(correction.update['scene.camera'], undefined);
+    assert.equal(correction.update['scene.camera.projection.type'], undefined);
     assert.equal(projectionRelayouts(setup).length, 0);
 });
 

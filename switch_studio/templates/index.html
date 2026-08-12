@@ -3042,7 +3042,7 @@
                         <button class="radar-reset-view" id="radarResetView" type="button" hidden>Reset view</button>
                     </div>
                 </div>
-                <p class="visually-hidden" id="radarViewDescription">The live radar uses a full-size top-down Cartesian map in 2D and a fixed-center perspective camera in 3D. Zone drawing and editing stay in the Cartesian 2D view. The 3D height axis uses the selected device's display range. Sensor field-of-view height follows the primary detection range when available; otherwise the full supported height range is shown. On phones, choose Explore 3D before rotating or zooming the scene, then choose Done to resume page scrolling.</p>
+                <p class="visually-hidden" id="radarViewDescription">The live radar uses a full-size top-down Cartesian map in 2D and a fixed-center perspective camera in 3D. Zone drawing and editing stay in the Cartesian 2D view. The 3D height axis uses the selected device's display range and expands when needed to show complete zones. The informational sensor field-of-view envelopes span the visible scene height; configured detection, stay, and interference zones retain their exact heights. On phones, choose Explore 3D before rotating or zooming the scene, then choose Done to resume page scrolling.</p>
                 <div class="config-content">
                     <div class="chart-canvas-wrap">
                         <div id="chart" role="img" aria-label="Two-dimensional live presence radar map. Exact target coordinates are listed in the table below."></div>
@@ -4439,32 +4439,11 @@
             return Number.isFinite(parsed) ? parsed : null;
         }
 
-        function getConfiguredRadarHeightBounds() {
-            const preferredSources = [
-                deviceZones && deviceZones.global,
-                deviceZones && deviceZones.mmwave_detection_areas && deviceZones.mmwave_detection_areas.area1
-            ];
-            for (const source of preferredSources) {
-                const zMin = getFiniteRadarValue(source && source.z_min);
-                const zMax = getFiniteRadarValue(source && source.z_max);
-                if (zMin !== null && zMax !== null && zMin !== zMax) {
-                    return { zMin: Math.min(zMin, zMax), zMax: Math.max(zMin, zMax) };
-                }
-            }
-
-            // Until the primary range is reported, show the device's full
-            // supported height span. Never infer the FOV from live targets or
-            // subordinate zones; that would imply a beam shape the device did
-            // not report.
-            return { zMin: -600, zMax: 600 };
-        }
-
         function buildRadar3dSceneModel() {
             const xMin = Math.min(chartXMin, chartXMax);
             const xMax = Math.max(chartXMin, chartXMax);
             const yMin = Math.min(chartYMin, chartYMax);
             const yMax = Math.max(chartYMin, chartYMax);
-            const fovHeightBounds = getConfiguredRadarHeightBounds();
             return {
                 zones: deviceZones,
                 visibility: {
@@ -4483,8 +4462,7 @@
                     yMax,
                     zMin: chartZMin,
                     zMax: chartZMax
-                },
-                fovBounds: fovHeightBounds
+                }
             };
         }
 
@@ -4530,7 +4508,7 @@
                 radarViewStatus.textContent = details && details.forced
                     ? '2D view · Zone editing in progress'
                     : is3d
-                        ? '3D fixed-center view · FOV height uses the primary or full supported range'
+                        ? '3D fixed-center view · Reference FOV spans the visible height'
                         : '2D top-down view · Zone editing available';
             }
             if (!usesSceneSurface && !is3d && isRadar2dSurfaceVisible()) {
