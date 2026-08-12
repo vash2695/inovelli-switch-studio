@@ -1331,7 +1331,7 @@ test('zone cuboids expand render bounds, FOV, and deterministic floor coverage w
         zMax: call.zone.z_max,
     }));
     assert.deepEqual(plain(authoredZoneBounds), [
-        { name: 'Primary detection area', zMin: -540, zMax: -300 },
+        { name: 'Detection area 1 (default)', zMin: -540, zMax: -300 },
         { name: 'Stay area 1', zMin: 100, zMax: 570 },
         { name: 'Interference area 1', zMin: -40, zMax: 80 },
     ], 'semantic cuboids must retain exact device-authored heights while the FOV fills the scene');
@@ -1465,12 +1465,12 @@ test('scene assembly uses exact XYZ bounds, one primary cuboid, slot visibility,
 
     const labels = setup.zonesApi.calls.zones.map((call) => call.options.name);
     assert.deepEqual(labels, [
-        'Primary detection area',
+        'Detection area 1 (default)',
         'Detection area 3',
         'Stay area 1',
         'Interference area 3',
     ]);
-    assert.equal(labels.filter((label) => label === 'Primary detection area').length, 1);
+    assert.equal(labels.filter((label) => label === 'Detection area 1 (default)').length, 1);
     assert.notEqual(setup.zonesApi.calls.zones[0].options.color, setup.zonesApi.calls.zones[1].options.color);
     assert.equal(
         setup.zonesApi.calls.zones.every((call) => call.options.hoverinfo === 'skip'),
@@ -1637,7 +1637,7 @@ test('a hidden global detection fallback cannot expand area1 bounds but becomes 
     assert.deepEqual(Array.from(initialPlot.layout.scene.yaxis.range), [0, 600]);
     assert.deepEqual(Array.from(initialPlot.layout.scene.zaxis.range), [-120, 160]);
     const visiblePrimary = setup.zonesApi.calls.zones
-        .filter((call) => call.options.name === 'Primary detection area')
+        .filter((call) => call.options.name === 'Detection area 1 (default)')
         .at(-1);
     assert.deepEqual(
         plain({
@@ -1669,7 +1669,7 @@ test('a hidden global detection fallback cannot expand area1 bounds but becomes 
     assert.deepEqual(Array.from(fallbackRender.layout.scene.yaxis.range), [-177, 777]);
     assert.deepEqual(Array.from(fallbackRender.layout.scene.zaxis.range), [-532, 582]);
     const fallbackPrimary = setup.zonesApi.calls.zones
-        .filter((call) => call.options.name === 'Primary detection area')
+        .filter((call) => call.options.name === 'Detection area 1 (default)')
         .at(-1);
     assert.deepEqual(
         plain({

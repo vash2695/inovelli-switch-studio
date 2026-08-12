@@ -98,12 +98,20 @@ Power and brightness commands target the card's exact MQTT topic. Each browser s
 
 ### Presence, radar, and zones
 
-- **2D is the canonical editor.** It shows the top-down Cartesian map, live target trails, unsupported-space shading outside X ±600 cm and Y 0–600 cm, and draggable zone geometry.
+- **2D is the canonical editor.** It shows the top-down Cartesian map, live target trails, reference shading outside Zigbee2MQTT's currently documented X ±600 cm and forward Y 0–600 cm write range, and draggable zone geometry. Reported targets and configured zones remain visible beyond that reference range.
 - **3D is visualization-only.** It renders exact target XYZ positions and authored detection, stay, and interference cuboids. Starting a zone draft temporarily returns to 2D and restores the preferred view afterward.
 - **The transition is reversible.** The selected radar mode is remembered in the browser, and the 3D camera orbits, changes elevation, and zooms around a fixed focus while keeping world Z upright.
 - **Zones are never visually truncated.** The rendered axes expand with padding when necessary to show complete configured cuboids beyond the saved display envelope; the underlying coordinates are not stretched or rewritten.
 - **The FOV is a reference, not a zone.** In 3D, borderless 120° and 150° horizontal envelopes show the sensor's forward reference area and span the visible height. They do not imply a vertical beam angle or replace the switch's authored zone limits.
 - **The grid is deterministic.** 3D uses one subdued floor-only lattice across the rendered X/Y area, with no camera-selected wall or ceiling grids. The switch itself remains the origin at `(0, 0, 0)`.
+
+Zone types have distinct jobs:
+
+- **Detection Areas 1–4** are independently reported active-presence regions and may overlap. Area 1 is also controlled by the switch's basic X/Y/Z range fields; it is not a separate global or fifth zone. Overall occupancy is active when any configured detection area is occupied.
+- **Stay Areas** complement detection areas where someone may remain nearly still, such as a desk, sofa, bed, or toilet. They are normally placed inside or overlapping an active detection area and do not have separate occupancy badges.
+- **Interference Areas** are independent exclusion masks. Targets inside them do not report presence, even when the mask overlaps a detection area; their numbers are storage slots rather than pairings with detection-area numbers.
+
+Switch Studio shows selection-aware guidance and links to Inovelli's [official advanced configuration guide](https://help.inovelli.com/en/articles/12773613-blue-series-mmwave-presence-dimmer-switch-advanced-mmwave-configuration) and the community's [area configuration discussion](https://community.inovelli.com/t/presence-area-configuration-best-practice/20933). [Inovelli has confirmed](https://community.inovelli.com/t/having-trouble-understanding-blue-mmwave-vzm32-sn-stay-settings-parameters/21585/4) a switch-firmware bug can return Stay Area X coordinates mirrored or with min/max swapped, so verify the reported zone position after applying a stay-area change.
 
 The View panel controls zone visibility and the radar display envelope. X/Y display bounds affect both views. Z display bounds affect 3D, are stored per device in the current browser, and do not change the switch configuration. **Apply Height to All Switches** copies only the current Z display bounds to compatible switches already discovered in that browser; it sends no MQTT command and does not become a default for future devices.
 

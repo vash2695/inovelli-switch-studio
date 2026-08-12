@@ -564,6 +564,95 @@
             color: #8d97ad;
             line-height: 1.45;
         }
+        .zone-guidance {
+            margin: 10px 0;
+            padding: 10px;
+            border: 1px solid rgba(24, 168, 216, 0.34);
+            border-left: 3px solid #18a8d8;
+            border-radius: var(--radius-md);
+            background: rgba(24, 168, 216, 0.07);
+            color: #b8c1d4;
+            line-height: 1.45;
+        }
+        .zone-guidance[data-zone-type="stay"] {
+            border-color: rgba(240, 170, 82, 0.34);
+            border-left-color: #f0aa52;
+            background: rgba(240, 170, 82, 0.07);
+        }
+        .zone-guidance[data-zone-type="interference"] {
+            border-color: rgba(255, 98, 98, 0.34);
+            border-left-color: #ff6262;
+            background: rgba(255, 98, 98, 0.07);
+        }
+        .zone-guidance-title {
+            margin: 0 0 5px;
+            color: var(--text-primary);
+            font-size: 0.82rem;
+            font-weight: 650;
+        }
+        .zone-guidance-summary {
+            margin: 0 0 7px;
+            color: #d0d6e3;
+        }
+        .zone-guidance-details {
+            display: grid;
+            gap: 5px;
+            margin: 0;
+        }
+        .zone-guidance-details div {
+            display: grid;
+            grid-template-columns: 72px minmax(0, 1fr);
+            gap: 7px;
+        }
+        .zone-guidance-details dt {
+            color: #8d97ad;
+            font-weight: 600;
+        }
+        .zone-guidance-details dd { margin: 0; }
+        .zone-guidance-note {
+            margin: 7px 0 0;
+            padding-top: 7px;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            color: #d7b879;
+        }
+        .zone-guidance-note:empty { display: none; }
+        .zone-guidance-links {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px 12px;
+            margin-top: 8px;
+            padding-top: 7px;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .zone-guidance-links a {
+            color: #72d9e8;
+            text-underline-offset: 2px;
+        }
+        .input-row.zone-target-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr);
+            gap: 6px;
+        }
+        .zone-target-row #zoneEditorSelect {
+            width: 100%;
+            max-width: none;
+        }
+        .zone-coordinate-hint {
+            margin: 8px 0 0;
+            color: #8d97ad;
+            font-size: 0.74rem;
+            line-height: 1.45;
+        }
+        .maintenance-action {
+            margin-bottom: 9px;
+        }
+        .maintenance-action .cmd-btn { margin-top: 0; }
+        .maintenance-action-hint {
+            margin: 4px 2px 0;
+            color: #8d97ad;
+            font-size: 0.72rem;
+            line-height: 1.4;
+        }
         .config-tab-shell {
             display: flex;
             flex-direction: column;
@@ -972,6 +1061,13 @@
         .radar-legend[hidden] {
             display: none !important;
         }
+        .radar-target-note {
+            margin: 0;
+            padding: 7px 10px 9px;
+            color: #8d97ad;
+            font-size: 0.72rem;
+            line-height: 1.4;
+        }
         .radar-legend-item {
             display: inline-flex;
             align-items: center;
@@ -1215,6 +1311,9 @@
             grid-template-columns: repeat(4, minmax(0, 1fr));
             gap: 8px;
             padding: 8px;
+        }
+        .zone-status-inline .panel-lede {
+            grid-column: 1 / -1;
         }
         .zone-status-inline .sensor-row {
             margin-bottom: 0;
@@ -2764,6 +2863,11 @@
         }
 
         @media (max-width: 640px) {
+            .zones-pane #zoneEditorSelect,
+            .zones-pane .zone-input-group input,
+            .zones-pane .cmd-btn {
+                min-height: 44px;
+            }
             .header {
                 padding: 6px 8px;
             }
@@ -2970,6 +3074,11 @@
         }
 
         @media (hover: none) and (pointer: coarse) {
+            .zones-pane #zoneEditorSelect,
+            .zones-pane .zone-input-group input,
+            .zones-pane .cmd-btn {
+                min-height: 44px;
+            }
             .radar-display-range-grid .zone-input-group input {
                 min-height: 44px;
                 font-size: 16px;
@@ -3094,19 +3203,21 @@
                     </div>
                     <div class="radar-legend" id="radar3dLegend" aria-label="Live radar legend" hidden>
                         <span class="radar-legend-item"><span class="radar-legend-swatch" style="--legend-color:#1bd2dc"></span>Targets</span>
-                        <span class="radar-legend-item"><span class="radar-legend-swatch" style="--legend-color:#18a8d8"></span>Primary detection</span>
+                        <span class="radar-legend-item"><span class="radar-legend-swatch" style="--legend-color:#18a8d8"></span>Detection Area 1 (default)</span>
                         <span class="radar-legend-item"><span class="radar-legend-swatch" style="--legend-color:#4ac56d"></span>Detection</span>
                         <span class="radar-legend-item"><span class="radar-legend-swatch" style="--legend-color:#f0aa52"></span>Stay</span>
-                        <span class="radar-legend-item"><span class="radar-legend-swatch" style="--legend-color:#ff6262"></span>Interference</span>
+                        <span class="radar-legend-item"><span class="radar-legend-swatch" style="--legend-color:#ff6262"></span>Ignored / interference</span>
                         <span class="radar-legend-item" title="Sensor field-of-view reference"><span class="radar-legend-swatch radar-legend-swatch-fov" aria-hidden="true"></span>FOV 120° / 150°</span>
                         <span class="radar-axis-key">Axes: X width · Y depth · Z height (cm)</span>
                     </div>
+                    <p class="radar-target-note">Target dots show raw radar coordinates and may appear outside configured Detection Areas. A target contributes to occupancy only when it is inside an active Detection Area and outside every Interference Area.</p>
                 </div>
             </section>
 
             <section class="panel-section zone-status-inline" id="zoneStatusSection" data-tab-panels="zones" data-tab-panel-primary>
-                <div class="panel-section-title">Zone Status</div>
+                <div class="panel-section-title">Detection Area Status</div>
                 <div class="config-content">
+                    <p class="panel-lede">Each badge is the occupancy report for the matching detection area. The switch's overall occupancy becomes active when any configured detection area is occupied. Stay and interference areas do not have separate status badges.</p>
                     <div class="sensor-row">
                         <span style="color: #ccc;">Area 1:</span>
                         <span id="area1Val" class="zone-badge">CLEAR</span>
@@ -3155,37 +3266,57 @@
             <section class="panel-section" data-tab-panels="zones">
                 <div class="panel-section-title">Zone Editor</div>
                 <div class="config-content">
-                    <div style="margin-bottom: 10px; font-size: 0.9em; color: #ccc;">Select a zone to view, draw, or edit.</div>
+                    <div class="panel-lede">Select a zone to learn what it controls, then draw or edit its footprint. Selecting a zone does not write to the switch.</div>
                     
-                    <div class="input-row">
-                        <label>Target Zone:</label>
-                        <select class="control-select" id="zoneEditorSelect">
-                            <option value="mmwave_detection_areas:area1">Detection Area 1 (Primary - Blue)</option>
-                            <option value="mmwave_detection_areas:area2">Detection Area 2 (Green)</option>
-                            <option value="mmwave_detection_areas:area3">Detection Area 3 (Green)</option>
-                            <option value="mmwave_detection_areas:area4">Detection Area 4 (Green)</option>
-                            <option value="" disabled>--- Interference Areas ---</option>
-                            <option value="mmwave_interference_areas:area1">Interference Area 1 (Red)</option>
-                            <option value="mmwave_interference_areas:area2">Interference Area 2 (Red)</option>
-                            <option value="mmwave_interference_areas:area3">Interference Area 3 (Red)</option>
-                            <option value="mmwave_interference_areas:area4">Interference Area 4 (Red)</option>
-                            <option value="" disabled>--- Stay Areas ---</option>
-                            <option value="mmwave_stay_areas:area1">Stay Area 1 (Orange)</option>
-                            <option value="mmwave_stay_areas:area2">Stay Area 2 (Orange)</option>
-                            <option value="mmwave_stay_areas:area3">Stay Area 3 (Orange)</option>
-                            <option value="mmwave_stay_areas:area4">Stay Area 4 (Orange)</option>
+                    <div class="input-row zone-target-row">
+                        <label for="zoneEditorSelect">Target zone:</label>
+                        <select class="control-select" id="zoneEditorSelect" aria-describedby="zoneTypeGuidance zoneCoordinateHint">
+                            <optgroup label="Detection areas — active presence">
+                                <option value="mmwave_detection_areas:area1">Detection Area 1 (Default / Basic Range)</option>
+                                <option value="mmwave_detection_areas:area2">Detection Area 2</option>
+                                <option value="mmwave_detection_areas:area3">Detection Area 3</option>
+                                <option value="mmwave_detection_areas:area4">Detection Area 4</option>
+                            </optgroup>
+                            <optgroup label="Stay areas — stationary presence">
+                                <option value="mmwave_stay_areas:area1">Stay Area 1</option>
+                                <option value="mmwave_stay_areas:area2">Stay Area 2</option>
+                                <option value="mmwave_stay_areas:area3">Stay Area 3</option>
+                                <option value="mmwave_stay_areas:area4">Stay Area 4</option>
+                            </optgroup>
+                            <optgroup label="Interference areas — ignored regions">
+                                <option value="mmwave_interference_areas:area1">Interference Area 1</option>
+                                <option value="mmwave_interference_areas:area2">Interference Area 2</option>
+                                <option value="mmwave_interference_areas:area3">Interference Area 3</option>
+                                <option value="mmwave_interference_areas:area4">Interference Area 4</option>
+                            </optgroup>
                         </select>
                     </div>
 
+                    <aside class="zone-guidance" id="zoneTypeGuidance" data-zone-type="detection" role="note" aria-live="polite" aria-atomic="true">
+                        <h3 class="zone-guidance-title" id="zoneTypeGuidanceTitle">Detection Area 1</h3>
+                        <p class="zone-guidance-summary" id="zoneTypeGuidanceSummary">An active region where the switch reports movement or occupancy.</p>
+                        <dl class="zone-guidance-details">
+                            <div><dt>Best for</dt><dd id="zoneTypeGuidanceUse">The parts of the room where presence should count.</dd></div>
+                            <div><dt>Combines</dt><dd id="zoneTypeGuidanceInteraction">Detection areas may overlap. Area 1 is the same zone controlled by the basic room-range fields—not an extra global zone.</dd></div>
+                        </dl>
+                        <p class="zone-guidance-note" id="zoneTypeGuidanceNote"></p>
+                        <div class="zone-guidance-links">
+                            <a href="https://help.inovelli.com/en/articles/12773613-blue-series-mmwave-presence-dimmer-switch-advanced-mmwave-configuration" target="_blank" rel="noopener noreferrer">Official zone guide<span class="visually-hidden"> (opens in a new tab)</span></a>
+                            <a id="zoneTypeGuidanceCommunityLink" href="https://community.inovelli.com/t/presence-area-configuration-best-practice/20933" target="_blank" rel="noopener noreferrer">Community setup discussion<span class="visually-hidden"> (opens in a new tab)</span></a>
+                        </div>
+                    </aside>
+                    <p class="zone-coordinate-hint" id="zoneCoordinateHint"><strong>Coordinates:</strong> Viewed from the switch looking into the room, negative X is left, positive X is right, Y is depth in front, and negative/positive Z is below/above the switch. Values are centimeters.</p>
+
                     <div id="zoneEditorRawData" style="display: none; border: 1px solid #444; padding: 10px; border-radius: 4px; background: #222; margin-bottom: 10px;">
                         <div style="font-size: 0.85em; font-weight: bold; margin-bottom: 5px; color: #00bcd4;">Raw Zone Data (cm)</div>
+                        <p class="zone-coordinate-hint" id="zoneEditHint">Drag in the 2D map to change width and depth; enter height here. <strong>Apply Changes sends this zone immediately</strong>, separately from the bottom action bar.</p>
                         <div class="zone-data-grid">
-                            <div class="zone-input-group"><label>X Min (Width)</label><input type="number" id="editXMin" onchange="manualZoneUpdate()"></div>
-                            <div class="zone-input-group"><label>X Max (Width)</label><input type="number" id="editXMax" onchange="manualZoneUpdate()"></div>
-                            <div class="zone-input-group"><label>Y Min (Depth)</label><input type="number" id="editYMin" onchange="manualZoneUpdate()"></div>
-                            <div class="zone-input-group"><label>Y Max (Depth)</label><input type="number" id="editYMax" onchange="manualZoneUpdate()"></div>
-                            <div class="zone-input-group"><label>Z Min (Height)</label><input type="number" id="editZMin" onchange="manualZoneUpdate()"></div>
-                            <div class="zone-input-group"><label>Z Max (Height)</label><input type="number" id="editZMax" onchange="manualZoneUpdate()"></div>
+                            <div class="zone-input-group"><label for="editXMin">X Min (Width)</label><input type="number" id="editXMin" aria-describedby="zoneEditHint" onchange="manualZoneUpdate()"></div>
+                            <div class="zone-input-group"><label for="editXMax">X Max (Width)</label><input type="number" id="editXMax" aria-describedby="zoneEditHint" onchange="manualZoneUpdate()"></div>
+                            <div class="zone-input-group"><label for="editYMin">Y Min (Depth)</label><input type="number" id="editYMin" aria-describedby="zoneEditHint" onchange="manualZoneUpdate()"></div>
+                            <div class="zone-input-group"><label for="editYMax">Y Max (Depth)</label><input type="number" id="editYMax" aria-describedby="zoneEditHint" onchange="manualZoneUpdate()"></div>
+                            <div class="zone-input-group"><label for="editZMin">Z Min (Height)</label><input type="number" id="editZMin" aria-describedby="zoneEditHint" onchange="manualZoneUpdate()"></div>
+                            <div class="zone-input-group"><label for="editZMax">Z Max (Height)</label><input type="number" id="editZMax" aria-describedby="zoneEditHint" onchange="manualZoneUpdate()"></div>
                         </div>
                         <div style="display:flex; gap: 5px;">
                             <button class="cmd-btn btn-danger" id="btnCancelZoneEdit" style="flex:1;" onclick="cancelZoneEdit()">Cancel Editing</button>
@@ -3225,11 +3356,23 @@
             <section class="panel-section">
                 <div class="panel-section-title">Maintenance Tools</div>
                 <div class="config-content">
-                    <button class="cmd-btn btn-full" id="btnZoneCommandAutoConfig" data-zone-maintenance-command="1" onclick="sendCommand(1)">Auto-Config Interference</button>
-                    <button class="cmd-btn btn-full btn-danger" id="btnZoneCommandClearInterference" data-zone-maintenance-command="3" onclick="sendCommand(3)">Clear Interference</button>
-                    <div style="height: 10px;"></div>
-                    <button class="cmd-btn btn-full btn-danger" id="btnZoneCommandResetDetection" data-zone-maintenance-command="4" onclick="sendCommand(4)">Reset Detection Zones</button>
-                    <button class="cmd-btn btn-full btn-danger" id="btnZoneCommandClearStay" data-zone-maintenance-command="5" onclick="sendCommand(5)">Clear Stay Zones</button>
+                    <div class="panel-lede">These commands run immediately on the sensor; they are not staged with other settings. Use them only after reviewing the descriptions below.</div>
+                    <div class="maintenance-action">
+                        <button class="cmd-btn btn-full" id="btnZoneCommandAutoConfig" data-zone-maintenance-command="1" aria-describedby="zoneAutoConfigHelp" onclick="sendCommand(1)">Auto-Config Interference</button>
+                        <p class="maintenance-action-hint" id="zoneAutoConfigHelp">With the room empty and the false-trigger source running, ask the sensor to write Interference Area 1 (the first interference slot). This may replace that slot's existing coordinates.</p>
+                    </div>
+                    <div class="maintenance-action">
+                        <button class="cmd-btn btn-full btn-danger" id="btnZoneCommandClearInterference" data-zone-maintenance-command="3" aria-describedby="zoneClearInterferenceHelp" onclick="sendCommand(3)">Clear Interference</button>
+                        <p class="maintenance-action-hint" id="zoneClearInterferenceHelp">Remove all ignored interference masks so those regions can report presence again.</p>
+                    </div>
+                    <div class="maintenance-action">
+                        <button class="cmd-btn btn-full btn-danger" id="btnZoneCommandResetDetection" data-zone-maintenance-command="4" aria-describedby="zoneResetDetectionHelp" onclick="sendCommand(4)">Reset Detection Zones</button>
+                        <p class="maintenance-action-hint" id="zoneResetDetectionHelp">Restore the sensor's detection-area defaults. Reapply your basic room range and custom detection areas afterward.</p>
+                    </div>
+                    <div class="maintenance-action">
+                        <button class="cmd-btn btn-full btn-danger" id="btnZoneCommandClearStay" data-zone-maintenance-command="5" aria-describedby="zoneClearStayHelp" onclick="sendCommand(5)">Clear Stay Zones</button>
+                        <p class="maintenance-action-hint" id="zoneClearStayHelp">Remove every stationary-presence zone. Detection areas remain configured.</p>
+                    </div>
                     <div class="config-title" style="margin-top: 12px;">Command Feedback</div>
                     <div id="commandLog" class="command-log">
                         <div class="command-log-empty">No command activity yet.</div>
@@ -3271,19 +3414,19 @@
                         <!-- Individual Detection Toggles -->
                         <div id="detectionSubOptions" style="margin-left: 20px; display: block; border-left: 1px solid #444; padding-left: 10px;">
                             <div class="input-row" style="margin-bottom: 2px;">
-                                <label style="font-size: 0.85em;">Area 1 (Primary)</label>
+                                <label style="font-size: 0.85em;" for="vizToggleDetection1">Area 1 (Default / Basic Range)</label>
                                 <input type="checkbox" id="vizToggleDetection1" checked>
                             </div>
                             <div class="input-row" style="margin-bottom: 2px;">
-                                <label style="font-size: 0.85em;">Area 2</label>
+                                <label style="font-size: 0.85em;" for="vizToggleDetection2">Area 2</label>
                                 <input type="checkbox" id="vizToggleDetection2" checked>
                             </div>
                             <div class="input-row" style="margin-bottom: 2px;">
-                                <label style="font-size: 0.85em;">Area 3</label>
+                                <label style="font-size: 0.85em;" for="vizToggleDetection3">Area 3</label>
                                 <input type="checkbox" id="vizToggleDetection3" checked>
                             </div>
                             <div class="input-row">
-                                <label style="font-size: 0.85em;">Area 4</label>
+                                <label style="font-size: 0.85em;" for="vizToggleDetection4">Area 4</label>
                                 <input type="checkbox" id="vizToggleDetection4" checked>
                             </div>
                         </div>
@@ -3466,6 +3609,7 @@
     <script src="{{ ingress_path }}/static/js/app_devices.js"></script>
     <script src="{{ ingress_path }}/static/js/app_firmware.js"></script>
     <script src="{{ ingress_path }}/static/js/app_load_dimming.js"></script>
+    <script src="{{ ingress_path }}/static/js/app_zone_guidance.js"></script>
     <script src="{{ ingress_path }}/static/js/app_zones.js"></script>
     <script src="{{ ingress_path }}/static/js/app_radar3d.js"></script>
     <script>
@@ -3604,6 +3748,9 @@
         const zoneEditorSelect = document.getElementById('zoneEditorSelect');
         const zoneEditorRawData = document.getElementById('zoneEditorRawData');
         const btnStartEdit = document.getElementById('btnStartEdit');
+        const zoneGuidanceModule = window.SwitchStudioZoneGuidance && typeof window.SwitchStudioZoneGuidance.init === 'function'
+            ? window.SwitchStudioZoneGuidance.init({ selectEl: zoneEditorSelect })
+            : null;
 
         // Inputs for Raw Data
         const editXMin = document.getElementById('editXMin');
@@ -5353,12 +5500,12 @@
 
         const concisePresenceDescriptions = {
             mmwaveControlWiredDevice: 'Choose how presence controls the wired load.',
-            mmWaveRoomSizePreset: 'Pick a room profile, or use Custom for manual zone tuning.',
-            mmWaveHoldTime: 'How long occupancy stays active after motion stops.',
-            mmWaveDetectSensitivity: 'Sensitivity for movement detection.',
-            mmWaveDetectTrigger: 'How quickly movement triggers occupancy.',
-            mmWaveTargetInfoReport: 'Streams live target coordinates to the radar map.',
-            mmWaveStayLife: 'Tuning value for stationary-presence retention.',
+            mmWaveRoomSizePreset: 'Sets predefined dimensions for Detection Area 1; choose Custom to edit its basic X/Y/Z range manually.',
+            mmWaveHoldTime: 'How long the sensor waits to report vacancy after presence ends.',
+            mmWaveDetectSensitivity: 'How sensitive the sensor is to presence.',
+            mmWaveDetectTrigger: 'How quickly detected presence becomes occupied.',
+            mmWaveTargetInfoReport: 'Streams live target coordinates up to once per second while a target is present and increases Zigbee traffic; disable it when not needed.',
+            mmWaveStayLife: 'Extra retention when stationary tracking weakens inside a Stay Area. Stored in 50 ms steps (20 = 1 second; 300 = 15 seconds). Vacancy Timeout still applies after presence ends.',
             mmWaveVersion: 'Current firmware version of the mmWave module.'
         };
 
@@ -6987,7 +7134,7 @@
                     if (isVisible) {
                         const isArea1 = areaId === 'area1';
                         const num = areaId.replace('area', '');
-                        const label = isArea1 ? "D1 (Primary)" : `D${num}`;
+                        const label = `D${num}`;
                         // Use Blue for Area 1 label background
                         const color = isArea1 ? 'rgba(0, 188, 212, 0.8)' : 'rgba(76, 175, 80, 0.8)';
                         addLabel(config, label, color);
@@ -7030,11 +7177,14 @@
             const disabled = !isActiveDeviceCommandReady() || pendingCommandId !== null;
             zoneMaintenanceCommandButtons.forEach((button) => {
                 button.disabled = disabled;
-                if (pendingCommandId !== null) {
-                    button.setAttribute('aria-describedby', 'commandLog');
-                } else {
-                    button.removeAttribute('aria-describedby');
-                }
+                const helpId = button.dataset.zoneHelpId || button.getAttribute('aria-describedby') || '';
+                if (helpId) button.dataset.zoneHelpId = helpId;
+                const describedBy = [helpId, pendingCommandId !== null ? 'commandLog' : '']
+                    .filter(Boolean)
+                    .filter((id, index, values) => values.indexOf(id) === index)
+                    .join(' ');
+                if (describedBy) button.setAttribute('aria-describedby', describedBy);
+                else button.removeAttribute('aria-describedby');
             });
         }
 
@@ -7875,7 +8025,7 @@
                     statusBox.innerText = 'Scan complete: no active interference found.';
                 } else {
                     statusBox.style.background = 'rgba(255, 82, 82, 0.9)';
-                    statusBox.innerText = `Auto-config complete: found ${zones.length} zone(s).`;
+                    statusBox.innerText = `Auto-config complete. ${zones.length} interference zone(s) now reported.`;
                 }
                 setTimeout(() => { statusBox.style.display = 'none'; }, 5000);
                 lastCommandId = null;

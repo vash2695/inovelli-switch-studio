@@ -1597,7 +1597,7 @@
             if (visibility.detectionAreas[0]) {
                 const primaryFallback = primaryZone || zonesFromCollection(zones.global)[0];
                 if (primaryFallback) {
-                    traces.push(...zoneTraces(primaryFallback, 'global', 'Primary detection area'));
+                    traces.push(...zoneTraces(primaryFallback, 'global', 'Detection area 1 (default)'));
                 }
             }
             detectionZones.forEach((zone, fallbackIndex) => {

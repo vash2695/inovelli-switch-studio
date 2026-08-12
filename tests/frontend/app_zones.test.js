@@ -242,7 +242,7 @@ test('hidden 2D radar keeps canonical data current and catches up when shown', (
 
     assert.equal(plotlyCalls.some((entry) => entry.kind === 'react'), false);
     assert.equal(snapshots.at(-1).targets[0].z, 18);
-    assert.ok(tableEl.innerHTML.includes('D1 (Primary)'));
+    assert.ok(tableEl.innerHTML.includes('Target 1'));
 
     renderTargets = false;
     zones.handleNewData({
@@ -454,6 +454,11 @@ test('2D unsupported-range masks cover only the disjoint space outside the senso
 test('interference command lifecycle reports completion and clears pending command id', () => {
     const { zones, events } = loadZonesModule();
 
+    assert.equal(zones.setPendingCommand(1), true);
+    zones.handleInterferenceZones([{}, {}]);
+    assert.equal(zones.getPendingCommandId(), null);
+    assert.ok(events.status.some((entry) => entry.message === 'Auto-config complete. 2 interference zones now reported.'));
+
     assert.equal(zones.setPendingCommand(3), true);
     assert.equal(zones.setPendingCommand(5), false, 'a second command must not replace pending work');
     assert.equal(zones.getPendingCommandId(), 3);
@@ -463,7 +468,7 @@ test('interference command lifecycle reports completion and clears pending comma
     assert.equal(zones.getPendingCommandId(), null);
     assert.ok(events.status.some((entry) => entry.message.includes('Interference cleared')));
     assert.ok(events.toast.some((entry) => entry.message.includes('Interference cleared')));
-    assert.deepEqual(events.pending, [3, null]);
+    assert.deepEqual(events.pending, [1, null, 3, null]);
 });
 
 test('maintenance command timeout and explicit disconnect cleanup release the duplicate lock', async () => {
@@ -650,8 +655,8 @@ test('2D rendering remains scatter-based while canonical height state feeds 3D',
     assert.deepEqual(plain(targets.y), [44, 90]);
     assert.equal(Object.hasOwn(targets, 'z'), false);
     assert.deepEqual(plain(targets.marker.size), [8, 10]);
-    assert.ok(tableEl.innerHTML.includes('D1 (Primary)'));
-    assert.ok(tableEl.innerHTML.includes('D2 (Secondary)'));
+    assert.ok(tableEl.innerHTML.includes('Target 1'));
+    assert.ok(tableEl.innerHTML.includes('Target 2'));
     assert.ok(tableEl.innerHTML.includes('aria-label="Unavailable"'));
     assert.ok(tableEl.innerHTML.includes('&mdash;'));
 });

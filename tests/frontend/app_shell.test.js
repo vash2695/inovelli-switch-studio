@@ -105,6 +105,44 @@ test('destructive zone maintenance commands require named confirmation and block
     assert.match(template, /function updateZoneMaintenanceCommandState\(\)[\s\S]*?pendingCommandId !== null[\s\S]*?button\.disabled = disabled/);
 });
 
+test('zone editor presents sourced, selection-aware guidance without a write path', () => {
+    assert.match(template, /<script src="\{\{ ingress_path \}\}\/static\/js\/app_zone_guidance\.js"><\/script>[\s\S]*?<script src="\{\{ ingress_path \}\}\/static\/js\/app_zones\.js"><\/script>/);
+    assert.match(template, /<label for="zoneEditorSelect">Target zone:<\/label>/);
+    assert.match(template, /id="zoneEditorSelect" aria-describedby="zoneTypeGuidance zoneCoordinateHint"/);
+    assert.match(template, /<optgroup label="Detection areas — active presence">/);
+    assert.match(template, /Detection Area 1 \(Default \/ Basic Range\)/);
+    assert.match(template, /<optgroup label="Stay areas — stationary presence">/);
+    assert.match(template, /<optgroup label="Interference areas — ignored regions">/);
+    assert.match(template, /id="zoneTypeGuidance"[^>]*role="note"[^>]*aria-live="polite"[^>]*aria-atomic="true"/);
+    assert.match(template, /Area 1 is the same zone controlled by the basic room-range fields—not an extra global zone/);
+    assert.match(template, /href="https:\/\/help\.inovelli\.com\/en\/articles\/12773613-blue-series-mmwave-presence-dimmer-switch-advanced-mmwave-configuration" target="_blank" rel="noopener noreferrer"/);
+    assert.match(template, /id="zoneTypeGuidanceCommunityLink" href="https:\/\/community\.inovelli\.com\/t\/presence-area-configuration-best-practice\/20933" target="_blank" rel="noopener noreferrer"/);
+    assert.match(template, /window\.SwitchStudioZoneGuidance\.init\(\{ selectEl: zoneEditorSelect \}\)/);
+    assert.match(template, /Target dots show raw radar coordinates and may appear outside configured Detection Areas[\s\S]*?inside an active Detection Area and outside every Interference Area/);
+    assert.match(template, /<label[^>]*for="vizToggleDetection1"[^>]*>Area 1 \(Default \/ Basic Range\)<\/label>/);
+
+    for (const id of ['editXMin', 'editXMax', 'editYMin', 'editYMax', 'editZMin', 'editZMax']) {
+        assert.match(template, new RegExp(`<label for="${id}">[^<]+<\\/label><input type="number" id="${id}" aria-describedby="zoneEditHint"`));
+    }
+    assert.match(template, /Apply Changes sends this zone immediately/);
+    assert.match(template, /These commands run immediately on the sensor; they are not staged with other settings/);
+    assert.match(template, /id="btnZoneCommandAutoConfig"[^>]*aria-describedby="zoneAutoConfigHelp"/);
+    assert.match(template, /id="btnZoneCommandClearInterference"[^>]*aria-describedby="zoneClearInterferenceHelp"/);
+    assert.match(template, /id="btnZoneCommandResetDetection"[^>]*aria-describedby="zoneResetDetectionHelp"/);
+    assert.match(template, /id="btnZoneCommandClearStay"[^>]*aria-describedby="zoneClearStayHelp"/);
+    assert.match(template, /write Interference Area 1 \(the first interference slot\)[\s\S]*?may replace that slot's existing coordinates/);
+    assert.match(template, /mmWaveRoomSizePreset:\s*'Sets predefined dimensions for Detection Area 1/);
+    assert.match(template, /mmWaveTargetInfoReport:\s*'Streams live target coordinates up to once per second[\s\S]*?increases Zigbee traffic/);
+    assert.match(template, /\.zones-pane #zoneEditorSelect,[\s\S]*?min-height:\s*44px/);
+    assert.match(template, /\.input-row\.zone-target-row\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\)[\s\S]*?\.zone-target-row #zoneEditorSelect\s*\{[\s\S]*?width:\s*100%[\s\S]*?max-width:\s*none/);
+    assert.match(template, /\.zone-status-inline \.panel-lede\s*\{[\s\S]*?grid-column:\s*1\s*\/\s*-1/);
+    assert.match(template, /const helpId = button\.dataset\.zoneHelpId \|\| button\.getAttribute\('aria-describedby'\)[\s\S]*?pendingCommandId !== null \? 'commandLog'[\s\S]*?button\.setAttribute\('aria-describedby', describedBy\)/);
+
+    const selectionGuard = template.indexOf("input.id.startsWith('zoneEditor')");
+    const delegatedEmit = template.indexOf("socket.emit('update_parameter'", selectionGuard);
+    assert.ok(selectionGuard >= 0 && delegatedEmit > selectionGuard, 'zone guidance selection must remain ahead of the generic write path');
+});
+
 test('firmware workspace is informative and delegates every OTA action to Zigbee2MQTT', () => {
     assert.match(template, /id="firmwareSectionTitle">Firmware Information</);
     assert.match(template, /Installed switch firmware/);

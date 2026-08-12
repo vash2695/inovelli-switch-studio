@@ -510,7 +510,7 @@
                 message = 'Scan complete: no active interference found.';
                 type = 'saved';
             } else {
-                message = `Auto-config complete: found ${zoneCount} interference zone${zoneCount === 1 ? '' : 's'}.`;
+                message = `Auto-config complete. ${zoneCount} interference zone${zoneCount === 1 ? '' : 's'} now reported.`;
                 type = 'info';
             }
         } else if (lastCommandId === 3) {
@@ -660,9 +660,7 @@
 
     function getFriendlyTargetLabel(idValue) {
         const id = Number(idValue) || 0;
-        const prefix = `D${id}`;
-        if (id === 1) return `${prefix} (Primary)`;
-        return `${prefix} (Secondary)`;
+        return `Target ${id}`;
     }
 
     function normalizeHistoryPoint(point) {
