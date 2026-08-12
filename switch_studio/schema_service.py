@@ -1,7 +1,18 @@
 import json
+import math
 import os
+import re
 import time
 from copy import deepcopy
+from decimal import Decimal, InvalidOperation
+
+
+MAX_PARAMETER_NAME_LENGTH = 128
+MAX_NUMERIC_LITERAL_LENGTH = 128
+MAX_UNKNOWN_STRING_BYTES = 1024
+MAX_JSON_NUMBER_MAGNITUDE = (2 ** 53) - 1
+UNKNOWN_FIELD_NAME_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*\Z")
+NUMERIC_LITERAL_PATTERN = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?\Z")
 
 
 MMWAVE_PRESENCE_FIELDS = [
@@ -39,10 +50,22 @@ class SchemaService:
         return deepcopy(self.schema)
 
     def validate_update(self, param, value):
+        if type(param) is not str:
+            return False, "Parameter name must be a string", None, False
+        if not param or len(param) > MAX_PARAMETER_NAME_LENGTH:
+            return False, f"Parameter name must contain 1-{MAX_PARAMETER_NAME_LENGTH} characters", None, False
+
         field = self.field_map.get(param)
         if not field:
-            # Allow unknown fields for forward compatibility with new firmware/Z2M mappings.
-            return True, None, value, True
+            # Unknown top-level fields are an intentional, bounded escape hatch for
+            # newer firmware/Zigbee2MQTT mappings. Structured values must first be
+            # represented in a known schema so their children can be validated.
+            if not UNKNOWN_FIELD_NAME_PATTERN.fullmatch(param):
+                return False, f"Unknown field name '{param}' is not allowed", None, True
+            normalized, error = self._normalize_unknown_scalar(param, value)
+            if error:
+                return False, error, None, True
+            return True, None, normalized, True
 
         if not field.get("can_write", False):
             return False, f"Field '{param}' is read-only", None, False
@@ -103,6 +126,8 @@ class SchemaService:
             "category": entry.get("category") or "none",
             "source": source,
             "access": access,
+            "can_state": bool(access & 1),
+            "can_get": bool(access & 4),
             "can_read": bool(access & 1 or access & 4),
             "can_write": bool(access & 2),
             "value_min": entry.get("value_min"),
@@ -130,6 +155,8 @@ class SchemaService:
             "description": feature.get("description", ""),
             "type": feature.get("type"),
             "access": access,
+            "can_state": bool(access & 1),
+            "can_get": bool(access & 4),
             "can_read": bool(access & 1 or access & 4),
             "can_write": bool(access & 2),
             "value_min": feature.get("value_min"),
@@ -139,6 +166,7 @@ class SchemaService:
             "values": feature.get("values", []),
             "value_on": feature.get("value_on"),
             "value_off": feature.get("value_off"),
+            "item_type": self._normalize_feature(feature.get("item_type")) if isinstance(feature.get("item_type"), dict) else None,
             "features": normalized_children,
         }
 
@@ -329,6 +357,10 @@ class SchemaService:
                 "section": "Presence Diagnostics",
             },
         ]
+        for field in fields:
+            access = int(field.get("access", 0) or 0)
+            field["can_state"] = bool(access & 1)
+            field["can_get"] = bool(access & 4)
         return {
             "source": "fallback",
             "source_path": None,
@@ -424,90 +456,238 @@ class SchemaService:
             return "Power & Device Settings"
         return "Advanced"
 
-    def _normalize_value(self, field, value):
+    def _normalize_unknown_scalar(self, param, value):
+        if value is None or isinstance(value, bool):
+            return value, None
+
+        if isinstance(value, str):
+            try:
+                byte_length = len(value.encode("utf-8"))
+            except UnicodeEncodeError:
+                return None, f"Unknown field '{param}' requires a valid UTF-8 string"
+            if byte_length > MAX_UNKNOWN_STRING_BYTES:
+                return None, (
+                    f"Unknown field '{param}' string exceeds "
+                    f"{MAX_UNKNOWN_STRING_BYTES} UTF-8 bytes"
+                )
+            return value, None
+
+        if isinstance(value, int):
+            if abs(value) > MAX_JSON_NUMBER_MAGNITUDE:
+                return None, (
+                    f"Unknown field '{param}' number exceeds the interoperable JSON limit "
+                    f"{MAX_JSON_NUMBER_MAGNITUDE}"
+                )
+            return value, None
+
+        if isinstance(value, float):
+            if not math.isfinite(value):
+                return None, f"Unknown field '{param}' requires a finite number"
+            if abs(value) > MAX_JSON_NUMBER_MAGNITUDE:
+                return None, (
+                    f"Unknown field '{param}' number exceeds the interoperable JSON limit "
+                    f"{MAX_JSON_NUMBER_MAGNITUDE}"
+                )
+            return value, None
+
+        return None, (
+            f"Unknown field '{param}' accepts only a JSON scalar "
+            "(string, number, boolean, or null)"
+        )
+
+    def _normalize_value(self, field, value, path=None):
+        field_path = path or field.get("property") or field.get("name") or "unknown"
         field_type = field.get("type")
         if field_type == "numeric":
-            return self._normalize_numeric(field, value)
+            return self._normalize_numeric(field, value, field_path)
         if field_type == "enum":
-            return self._normalize_enum(field, value)
+            return self._normalize_enum(field, value, field_path)
         if field_type == "binary":
-            return self._normalize_binary(field, value)
+            return self._normalize_binary(field, value, field_path)
         if field_type == "composite":
-            if not isinstance(value, dict):
-                return None, "Composite value must be an object"
             if field.get("name") in {"led_effect", "individual_led_effect"}:
-                return self._normalize_led_effect(field, value)
-            return value, None
+                return self._normalize_led_effect(field, value, field_path)
+            return self._normalize_composite(field, value, field_path)
         if field_type == "list":
-            if not isinstance(value, list):
-                return None, "List value must be an array"
-            return value, None
-        return value, None
+            return self._normalize_list(field, value, field_path)
+        return None, f"Field '{field_path}' has unsupported schema type '{field_type}'"
 
-    def _normalize_led_effect(self, field, value):
-        field_name = field.get("name")
+    def _normalize_led_effect(self, field, value, path):
         required = ["effect", "color", "level", "duration"]
-        if field_name == "individual_led_effect":
+        if field.get("name") == "individual_led_effect":
             required.insert(0, "led")
+        return self._normalize_composite(field, value, path, required_features=required)
 
-        missing = [name for name in required if name not in value]
-        if missing:
-            return None, f"Field '{field_name}' is missing {', '.join(missing)}"
-        unexpected = [name for name in value if name not in required]
+    def _normalize_composite(self, field, value, path, required_features=None):
+        if not isinstance(value, dict):
+            return None, f"Field '{path}' requires an object"
+
+        features = [feature for feature in (field.get("features") or []) if isinstance(feature, dict)]
+        if not features:
+            return None, f"Field '{path}' has no child schema"
+
+        aliases = {}
+        canonical_keys = {}
+        features_by_name = {}
+        for feature in features:
+            name = feature.get("name")
+            property_name = feature.get("property")
+            canonical = property_name or name
+            if not isinstance(canonical, str) or not canonical:
+                return None, f"Field '{path}' contains an unnamed child schema"
+            canonical_keys[id(feature)] = canonical
+            if isinstance(name, str) and name:
+                features_by_name[name] = feature
+            for alias in {name, property_name}:
+                if not isinstance(alias, str) or not alias:
+                    continue
+                previous = aliases.get(alias)
+                if previous is not None and previous is not feature:
+                    return None, f"Field '{path}' schema has duplicate child key '{alias}'"
+                aliases[alias] = feature
+
+        supplied = []
+        unexpected = []
+        seen_features = set()
+        for key, child_value in value.items():
+            feature = aliases.get(key) if isinstance(key, str) else None
+            if feature is None:
+                unexpected.append(key if isinstance(key, str) else repr(key))
+                continue
+            feature_id = id(feature)
+            if feature_id in seen_features:
+                return None, (
+                    f"Field '{path}' supplies multiple aliases for "
+                    f"'{canonical_keys[feature_id]}'"
+                )
+            seen_features.add(feature_id)
+            supplied.append((feature, child_value))
+
         if unexpected:
-            return None, f"Field '{field_name}' has unexpected keys: {', '.join(unexpected)}"
+            return None, f"Field '{path}' has unexpected keys: {', '.join(unexpected)}"
 
-        features = {
-            feature.get("name"): feature
-            for feature in (field.get("features") or [])
-            if isinstance(feature, dict) and feature.get("name")
-        }
+        if required_features:
+            missing = []
+            for required_name in required_features:
+                feature = features_by_name.get(required_name)
+                if feature is None:
+                    return None, f"Field '{path}' schema is missing feature '{required_name}'"
+                if id(feature) not in seen_features:
+                    missing.append(required_name)
+            if missing:
+                return None, f"Field '{path}' is missing {', '.join(missing)}"
+        elif not supplied:
+            return None, f"Field '{path}' requires at least one child value"
+
         normalized = {}
-        for name in required:
-            feature = features.get(name)
-            if not feature:
-                return None, f"Field '{field_name}' schema is missing feature '{name}'"
-            if name in {"color", "level", "duration"}:
-                try:
-                    numeric_value = float(value[name])
-                except (TypeError, ValueError):
-                    return None, f"Field '{field_name}.{name}' requires a whole number"
-                if not numeric_value.is_integer():
-                    return None, f"Field '{field_name}.{name}' requires a whole number"
-            normalized_value, error = self._normalize_value(feature, value[name])
+        for feature, child_value in supplied:
+            canonical = canonical_keys[id(feature)]
+            child_path = f"{path}.{canonical}"
+            # Composite access describes the container in Zigbee2MQTT. Some zone
+            # containers are state-only while their declared leaf coordinates are
+            # writable, so access is enforced at the supplied leaves instead.
+            if feature.get("type") != "composite" and not feature.get("can_write", False):
+                return None, f"Field '{child_path}' is read-only"
+            normalized_value, error = self._normalize_value(feature, child_value, child_path)
             if error:
                 return None, error
-            normalized[name] = normalized_value
+            normalized[canonical] = normalized_value
         return normalized, None
 
-    def _normalize_numeric(self, field, value):
+    def _normalize_list(self, field, value, path):
+        if not isinstance(value, list):
+            return None, f"Field '{path}' requires an array"
+
+        item_type = field.get("item_type")
+        if not isinstance(item_type, dict):
+            return None, f"Field '{path}' has no item schema"
+        if not item_type.get("can_write", False):
+            return None, f"Field '{path}' item schema is read-only"
+
+        normalized = []
+        for index, item in enumerate(value):
+            normalized_item, error = self._normalize_value(item_type, item, f"{path}[{index}]")
+            if error:
+                return None, error
+            normalized.append(normalized_item)
+        return normalized, None
+
+    def _normalize_numeric(self, field, value, path):
+        if isinstance(value, bool) or not isinstance(value, (str, int, float, Decimal)):
+            return None, f"Field '{path}' requires a numeric value"
+
         try:
-            numeric_value = float(value)
-        except (TypeError, ValueError):
-            return None, f"Field '{field.get('name')}' requires a numeric value"
+            numeric_text = value.strip() if isinstance(value, str) else str(value)
+            if (
+                not numeric_text
+                or len(numeric_text) > MAX_NUMERIC_LITERAL_LENGTH
+                or not NUMERIC_LITERAL_PATTERN.fullmatch(numeric_text)
+            ):
+                raise InvalidOperation
+            numeric_value = Decimal(numeric_text)
+        except (InvalidOperation, ValueError):
+            return None, f"Field '{path}' requires a numeric value"
+
+        if not numeric_value.is_finite():
+            return None, f"Field '{path}' requires a finite numeric value"
+        if numeric_value.copy_abs() > Decimal(MAX_JSON_NUMBER_MAGNITUDE):
+            return None, (
+                f"Field '{path}' exceeds the interoperable JSON limit "
+                f"{MAX_JSON_NUMBER_MAGNITUDE}"
+            )
 
         min_value = field.get("value_min")
         max_value = field.get("value_max")
         step_value = field.get("value_step")
 
-        if min_value is not None and numeric_value < float(min_value):
-            return None, f"Field '{field.get('name')}' is below min {min_value}"
-        if max_value is not None and numeric_value > float(max_value):
-            return None, f"Field '{field.get('name')}' is above max {max_value}"
+        try:
+            min_decimal = Decimal(str(min_value)) if min_value is not None else None
+            max_decimal = Decimal(str(max_value)) if max_value is not None else None
+            step_decimal = Decimal(str(step_value)) if step_value is not None else None
+        except InvalidOperation:
+            return None, f"Field '{path}' has invalid numeric schema constraints"
 
-        if step_value is None or float(step_value).is_integer():
-            return int(round(numeric_value)), None
-        return float(numeric_value), None
+        schema_numbers = (number for number in (min_decimal, max_decimal, step_decimal) if number is not None)
+        if any(not number.is_finite() for number in schema_numbers):
+            return None, f"Field '{path}' has invalid numeric schema constraints"
+        if step_decimal is not None and step_decimal <= 0:
+            return None, f"Field '{path}' has invalid numeric step {step_value}"
 
-    def _normalize_enum(self, field, value):
+        if min_decimal is not None and numeric_value < min_decimal:
+            return None, f"Field '{path}' is below min {min_value}"
+        if max_decimal is not None and numeric_value > max_decimal:
+            return None, f"Field '{path}' is above max {max_value}"
+
+        integer_semantics = step_decimal is None or step_decimal == step_decimal.to_integral_value()
+        if integer_semantics and numeric_value != numeric_value.to_integral_value():
+            return None, f"Field '{path}' requires a whole number"
+
+        if step_decimal is not None:
+            base = min_decimal if min_decimal is not None else Decimal(0)
+            try:
+                step_remainder = (numeric_value - base) % step_decimal
+            except InvalidOperation:
+                return None, f"Field '{path}' value is not aligned to step {step_value}"
+            if step_remainder != 0:
+                return None, f"Field '{path}' value is not aligned to step {step_value}"
+
+        if integer_semantics:
+            return int(numeric_value), None
+
+        normalized = float(numeric_value)
+        if not math.isfinite(normalized):
+            return None, f"Field '{path}' requires a finite representable numeric value"
+        return normalized, None
+
+    def _normalize_enum(self, field, value, path):
         values = field.get("values") or []
         if not isinstance(value, str):
-            return None, f"Field '{field.get('name')}' requires an enum string"
+            return None, f"Field '{path}' requires an enum string"
         if values and value not in values:
-            return None, f"Field '{field.get('name')}' value '{value}' is not allowed"
+            return None, f"Field '{path}' value '{value}' is not allowed"
         return value, None
 
-    def _normalize_binary(self, field, value):
+    def _normalize_binary(self, field, value, path):
         if isinstance(value, bool):
             return value, None
 
@@ -526,4 +706,4 @@ class SchemaService:
         if value == value_off:
             return value, None
 
-        return None, f"Field '{field.get('name')}' requires a binary value"
+        return None, f"Field '{path}' requires a binary value"

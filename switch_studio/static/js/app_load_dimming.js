@@ -658,11 +658,15 @@
     }
 
     function hydrateFromStateApi() {
-        if (!stateApi || typeof stateApi.getLatestValue !== 'function') return;
+        if (!stateApi) return;
+        const valueReader = typeof stateApi.getCurrentValue === 'function'
+            ? stateApi.getCurrentValue.bind(stateApi)
+            : (typeof stateApi.getLatestValue === 'function' ? stateApi.getLatestValue.bind(stateApi) : null);
+        if (!valueReader) return;
         CONTROLLED_PARAMS.forEach((param) => {
-            const latestValue = stateApi.getLatestValue(param);
-            if (latestValue !== undefined) {
-                setRawValue(param, latestValue);
+            const currentValue = valueReader(param);
+            if (currentValue !== undefined) {
+                setRawValue(param, currentValue);
             }
         });
     }
@@ -855,6 +859,11 @@
             clearTimingInteractionDraftForTest: (groupId) => {
                 clearTimingInteractionDraft(groupId);
             },
+            hydrateFromStateApiForTest: (api) => {
+                stateApi = api || null;
+                hydrateFromStateApi();
+            },
+            getRawValueForTest: (param) => rawValues[param],
         },
     };
 })();

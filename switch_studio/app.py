@@ -11,16 +11,26 @@ import time
 import threading 
 import copy
 import hashlib
+import math
+import re
 from flask import Flask, render_template, request
 from flask_socketio import SocketIO
 import paho.mqtt.client as mqtt
 import logging
 try:
     from .schema_service import SchemaService
-    from .firmware_reference import get_vzm32sn_reference_data, resolve_vzm32sn_firmware_reference
+    from .firmware_reference import (
+        get_vzm32sn_reference_data,
+        refresh_vzm32sn_reference_data,
+        resolve_vzm32sn_firmware_reference,
+    )
 except ImportError:
     from schema_service import SchemaService
-    from firmware_reference import get_vzm32sn_reference_data, resolve_vzm32sn_firmware_reference
+    from firmware_reference import (
+        get_vzm32sn_reference_data,
+        refresh_vzm32sn_reference_data,
+        resolve_vzm32sn_firmware_reference,
+    )
 
 # Suppress the Werkzeug development server warning
 log = logging.getLogger('werkzeug')
@@ -37,6 +47,7 @@ MQTT_CONNACK_REASON = {
     5: "Not authorized",
 }
 TEST_MODE = str(os.environ.get("SWITCH_STUDIO_TEST_MODE", "")).strip().lower() in {"1", "true", "yes", "on"}
+FIRMWARE_PROCESS_EPOCH = f"{os.getpid()}-{time.time_ns()}"
 
 
 def _config_first(config_obj, keys, default_value):
@@ -253,12 +264,27 @@ session_reporting_auto_off_lock = threading.Lock()
 pending_writes = {}
 pending_writes_lock = threading.Lock()
 PENDING_WRITE_TIMEOUT_SECONDS = 10.0
+MAX_PENDING_WRITES_PER_SID = 16
+MAX_PENDING_WRITES_GLOBAL = 256
 
-# Correlates Zigbee2MQTT OTA responses (including responses with empty data on
-# failure) back to the device that initiated the request.
-ota_requests = {}
-ota_requests_lock = threading.Lock()
-OTA_REQUEST_RETENTION_SECONDS = 86400.0
+# Firmware state reported by Zigbee2MQTT and public firmware-reference metadata
+# are intentionally separate domains. Reference refreshes run in one background
+# worker and may never replace the device's live OTA record.
+firmware_reference_refresh_lock = threading.Lock()
+firmware_reference_refresh_active = False
+firmware_reference_refresh_thread = None
+
+# Socket.IO command envelopes are intentionally small. Bound them before they
+# reach schema validation, pending-write tracking, or MQTT serialization so a
+# connected browser cannot grow memory/thread usage without limit.
+MAX_REQUEST_ID_LENGTH = 128
+MAX_PARAMETER_NAME_LENGTH = 128
+MAX_CHANGE_COUNT = 128
+MAX_VALUE_DEPTH = 8
+MAX_CONTAINER_ITEMS = 128
+MAX_STRING_LENGTH = 4096
+MAX_COMMAND_PAYLOAD_BYTES = 65536
+REQUEST_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 
 mqtt_state = {
     'connected': False,
@@ -526,6 +552,130 @@ def resolve_command_topic(sid, data=None):
     return topic, None
 
 
+def get_command_readiness_error(topic, require_full_editor=True):
+    """Return a retryable reason when a device command is not safe to publish."""
+    device = get_device_by_topic(topic)
+    if not device:
+        return 'Device is no longer in the discovered inventory; refresh and retry'
+    if require_full_editor and not device_supports_full_editor(topic):
+        return 'Full configuration is not supported for this model yet'
+
+    state = get_mqtt_state()
+    if not state.get('broker_connected'):
+        return 'MQTT broker is disconnected; wait for reconnection and retry'
+    if state.get('zigbee2mqtt_connected') is not True:
+        if state.get('zigbee2mqtt_connected') is False:
+            return 'Zigbee2MQTT is offline; wait for it to reconnect and retry'
+        return 'Zigbee2MQTT readiness is not confirmed yet; wait and retry'
+    if not state.get('inventory_ready'):
+        return 'Zigbee2MQTT device inventory is still loading; wait and retry'
+
+    availability = str(device.get('availability') or '').strip().lower()
+    if availability == 'offline':
+        return 'Device is offline; wait for it to reconnect and retry'
+    return None
+
+
+def resolve_ready_command_topic(sid, data=None, require_full_editor=True):
+    if require_full_editor:
+        topic, error = resolve_command_topic(sid, data)
+    else:
+        requested_topic = data.get('topic') if isinstance(data, dict) else None
+        if requested_topic:
+            topic = get_device_topic_from_identifier(requested_topic)
+            error = None if topic else 'Unknown device topic'
+        else:
+            topic = get_valid_session_topic(sid)
+            error = None if topic else 'No device selected'
+    if not topic:
+        return None, error
+    readiness_error = get_command_readiness_error(topic, require_full_editor=require_full_editor)
+    return (None, readiness_error) if readiness_error else (topic, None)
+
+
+def normalize_command_request_id(data, prefix):
+    raw = data.get('request_id') if isinstance(data, dict) else None
+    if raw is None:
+        return f"{prefix}-{time.time_ns()}", None
+    if not isinstance(raw, str):
+        return None, 'Request ID must be a string'
+    normalized = raw.strip()
+    if not REQUEST_ID_PATTERN.fullmatch(normalized):
+        return None, (
+            f'Request ID must contain 1-{MAX_REQUEST_ID_LENGTH} letters, numbers, dots, colons, underscores, or hyphens'
+        )
+    return normalized, None
+
+
+def validate_bounded_command_value(value, depth=0):
+    if depth > MAX_VALUE_DEPTH:
+        return f'Payload nesting exceeds the {MAX_VALUE_DEPTH}-level limit'
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        if isinstance(value, float) and not math.isfinite(value):
+            return 'Payload numbers must be finite'
+        return None
+    if isinstance(value, str):
+        try:
+            encoded_value = value.encode('utf-8')
+        except UnicodeEncodeError:
+            return 'Payload strings must contain valid UTF-8 text'
+        if len(encoded_value) > MAX_STRING_LENGTH:
+            return f'Payload strings must be at most {MAX_STRING_LENGTH} UTF-8 bytes'
+        return None
+    if isinstance(value, list):
+        if len(value) > MAX_CONTAINER_ITEMS:
+            return f'Payload lists must contain at most {MAX_CONTAINER_ITEMS} items'
+        for item in value:
+            error = validate_bounded_command_value(item, depth + 1)
+            if error:
+                return error
+        return None
+    if isinstance(value, dict):
+        if len(value) > MAX_CONTAINER_ITEMS:
+            return f'Payload objects must contain at most {MAX_CONTAINER_ITEMS} fields'
+        for key, item in value.items():
+            if not isinstance(key, str) or not key or len(key) > MAX_PARAMETER_NAME_LENGTH:
+                return f'Payload field names must contain 1-{MAX_PARAMETER_NAME_LENGTH} characters'
+            try:
+                key.encode('utf-8')
+            except UnicodeEncodeError:
+                return 'Payload field names must contain valid UTF-8 text'
+            error = validate_bounded_command_value(item, depth + 1)
+            if error:
+                return error
+        return None
+    return f'Payload value type {type(value).__name__} is not supported'
+
+
+def validate_command_payload(payload):
+    error = validate_bounded_command_value(payload)
+    if error:
+        return error
+    try:
+        serialized = json.dumps(payload, allow_nan=False, separators=(',', ':'))
+    except (TypeError, ValueError):
+        return 'Payload must be valid finite JSON'
+    if len(serialized.encode('utf-8')) > MAX_COMMAND_PAYLOAD_BYTES:
+        return f'Payload exceeds the {MAX_COMMAND_PAYLOAD_BYTES}-byte limit'
+    return None
+
+
+def validate_command_envelope_or_emit(sid, action, payload):
+    """Reject oversized or non-JSON Socket.IO command envelopes before parsing."""
+    error = validate_command_payload(payload)
+    if not error:
+        return True
+    emit_command_result(
+        sid,
+        action=action,
+        status='error',
+        message=error,
+    )
+    return False
+
+
 def clear_session_topic(sid):
     with session_topics_lock:
         session_topics.pop(sid, None)
@@ -592,28 +742,6 @@ def emit_backend_status(room=None):
         {'mqtt': get_mqtt_state(), 'ts': time.time()},
         room=room
     )
-
-
-def register_ota_request(topic, action):
-    transaction = f"switch-studio-{time.time_ns()}"
-    now = time.monotonic()
-    with ota_requests_lock:
-        for key, entry in list(ota_requests.items()):
-            if now - entry.get('created_at', now) > OTA_REQUEST_RETENTION_SECONDS:
-                ota_requests.pop(key, None)
-        ota_requests[transaction] = {
-            'topic': topic,
-            'action': action,
-            'created_at': now,
-        }
-    return transaction
-
-
-def remove_ota_request(transaction):
-    if not transaction:
-        return None
-    with ota_requests_lock:
-        return ota_requests.pop(str(transaction), None)
 
 
 def _pending_write_key(sid, request_id):
@@ -685,9 +813,15 @@ def register_pending_write(sid, request_id, topic, action, expected):
         entry['timer'] = timer
 
     with pending_writes_lock:
-        previous = pending_writes.pop(key, None)
+        existing = pending_writes.get(key)
+        if existing is not None:
+            return None
+        sid_count = sum(1 for item in pending_writes.values() if item.get('sid') == sid)
+        if sid_count >= MAX_PENDING_WRITES_PER_SID:
+            return None
+        if len(pending_writes) >= MAX_PENDING_WRITES_GLOBAL:
+            return None
         pending_writes[key] = entry
-    _cancel_pending_timer(previous)
 
     if entry['timer'] is not None:
         entry['timer'].start()
@@ -775,19 +909,17 @@ def reconcile_pending_writes(topic, config_payload):
 
 def default_ota_status():
     return {
+        'revision': 0,
+        'observed_at': None,
+        'observed_source': 'zigbee2mqtt',
         'available': None,
         'downgrade': None,
         'installed_version': None,
-        'installed_version_detail': None,
         'latest_version': None,
-        'latest_version_detail': None,
-        'official_versions': None,
         'state': None,
         'progress': None,
         'remaining': None,
-        'last_checked': None,
         'last_error': None,
-        'bridge_status': None,
     }
 
 
@@ -795,29 +927,219 @@ def ensure_ota_status(device_data):
     ota_status = device_data.get('ota_status')
     if not isinstance(ota_status, dict):
         ota_status = default_ota_status()
-        device_data['ota_status'] = ota_status
+    else:
+        ota_status = copy_live_ota_status(ota_status)
+    device_data['ota_status'] = ota_status
     return ota_status
 
 
-def enrich_ota_status(ota_status):
-    if not isinstance(ota_status, dict):
-        return ota_status
+LIVE_OTA_FIELDS = (
+    'revision',
+    'observed_at',
+    'observed_source',
+    'available',
+    'downgrade',
+    'installed_version',
+    'latest_version',
+    'state',
+    'progress',
+    'remaining',
+    'last_error',
+)
 
-    enriched = copy.deepcopy(ota_status)
-    reference_data = get_vzm32sn_reference_data(allow_network=not TEST_MODE)
-    enriched['installed_version_detail'] = resolve_vzm32sn_firmware_reference(
-        enriched.get('installed_version'),
-        allow_network=not TEST_MODE,
-        reference_data=reference_data
+
+def copy_live_ota_status(ota_status):
+    source = ota_status if isinstance(ota_status, dict) else {}
+    live = default_ota_status()
+    for key in LIVE_OTA_FIELDS:
+        if key in source:
+            live[key] = copy.deepcopy(source.get(key))
+    try:
+        live['revision'] = max(0, int(live.get('revision') or 0))
+    except (TypeError, ValueError):
+        live['revision'] = 0
+    return live
+
+
+def get_firmware_reference_snapshot():
+    """Return reference metadata immediately; this function never performs I/O."""
+    try:
+        snapshot = get_vzm32sn_reference_data(allow_network=False)
+    except Exception as reference_error:
+        print(f"Firmware reference snapshot failed: {reference_error}", flush=True)
+        snapshot = {}
+    return copy.deepcopy(snapshot) if isinstance(snapshot, dict) else {}
+
+
+def _reference_status_name(reference_data):
+    raw_status = str(
+        reference_data.get('status')
+        or reference_data.get('reference_status')
+        or ''
+    ).strip().lower()
+    if raw_status in {'ready', 'fresh'}:
+        return 'fresh'
+    if raw_status in {'partial', 'stale', 'refreshing', 'loading', 'unavailable'}:
+        return raw_status
+    if reference_data.get('fetched_at'):
+        return 'stale' if reference_data.get('reference_stale') else 'fresh'
+    return 'unavailable'
+
+
+def _is_firmware_reference_refresh_active():
+    with firmware_reference_refresh_lock:
+        return bool(firmware_reference_refresh_active)
+
+
+def _nonnegative_int(value, default=0):
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
+def compose_firmware_status(topic, ota_status=None, schedule_refresh=True):
+    live = copy_live_ota_status(ota_status)
+    reference_data = None
+    if schedule_refresh:
+        # Scheduling advances the reference service to a distinct, visible
+        # refresh-start generation before we take the snapshot below. This
+        # lets long-lived pages distinguish a legitimate refresh from a
+        # delayed replay of the preceding terminal generation.
+        started_reference = schedule_firmware_reference_refresh()
+        if isinstance(started_reference, dict):
+            reference_data = copy.deepcopy(started_reference)
+    if reference_data is None:
+        reference_data = get_firmware_reference_snapshot()
+    refreshing = bool(
+        reference_data.get('refreshing')
+        or reference_data.get('reference_refreshing')
+        or _is_firmware_reference_refresh_active()
     )
-    enriched['latest_version_detail'] = resolve_vzm32sn_firmware_reference(
-        enriched.get('latest_version'),
-        allow_network=not TEST_MODE,
-        reference_data=reference_data
-    )
-    current_versions = reference_data.get('current_versions') if isinstance(reference_data, dict) else {}
-    enriched['official_versions'] = copy.deepcopy(current_versions) if isinstance(current_versions, dict) else {}
-    return enriched
+    status = _reference_status_name(reference_data)
+    if refreshing and status == 'unavailable':
+        status = 'loading'
+
+    current_versions = reference_data.get('current_versions')
+    reference = {
+        'generation': _nonnegative_int(
+            reference_data.get('generation') or reference_data.get('reference_generation') or 0
+        ),
+        'status': status,
+        'refreshing': refreshing,
+        'partial': bool(reference_data.get('partial') or status == 'partial'),
+        'stale': bool(reference_data.get('stale') or reference_data.get('reference_stale') or status == 'stale'),
+        'fetched_at': reference_data.get('fetched_at'),
+        'last_attempt_at': reference_data.get('last_attempt_at'),
+        'next_retry_at': reference_data.get('next_retry_at') or reference_data.get('retry_at'),
+        'error': reference_data.get('error') or reference_data.get('reference_error'),
+        'official_versions': copy.deepcopy(current_versions) if isinstance(current_versions, dict) else {},
+        'installed_version_detail': resolve_vzm32sn_firmware_reference(
+            live.get('installed_version'),
+            allow_network=False,
+            reference_data=reference_data,
+        ),
+        'latest_version_detail': resolve_vzm32sn_firmware_reference(
+            live.get('latest_version'),
+            allow_network=False,
+            reference_data=reference_data,
+        ),
+        'sources': copy.deepcopy(reference_data.get('sources')) if isinstance(reference_data.get('sources'), dict) else {},
+    }
+    payload = {
+        'schema_version': 1,
+        'epoch': FIRMWARE_PROCESS_EPOCH,
+        'topic': topic,
+        'live': live,
+        'reference': reference,
+        'management': {
+            'owner': 'zigbee2mqtt',
+            'local_actions': False,
+        },
+    }
+    return payload
+
+
+def _firmware_reference_refresh_worker(force_refresh=False):
+    global firmware_reference_refresh_active
+    try:
+        # The scheduler already applied force_refresh while starting the
+        # service flight. This worker must only join it; forcing again could
+        # start a second attempt if the first completes before this thread is
+        # scheduled.
+        refresh_vzm32sn_reference_data(force_refresh=False)
+    except Exception as refresh_error:
+        print(f"Firmware reference refresh failed: {refresh_error}", flush=True)
+    finally:
+        with firmware_reference_refresh_lock:
+            firmware_reference_refresh_active = False
+
+    with device_list_lock:
+        topics = [
+            data.get('topic')
+            for data in device_list.values()
+            if data.get('topic')
+            and isinstance(data.get('ota_status'), dict)
+            and bool((data.get('capabilities') or {}).get('full_editor'))
+        ]
+    for topic in topics:
+        emit_firmware_status(topic)
+
+
+def schedule_firmware_reference_refresh(force_refresh=False, allow_in_test=False):
+    """Start at most one reference worker without delaying MQTT/socket handlers."""
+    global firmware_reference_refresh_active, firmware_reference_refresh_thread
+    if TEST_MODE and not allow_in_test:
+        return False
+
+    reference_data = get_firmware_reference_snapshot()
+    status = _reference_status_name(reference_data)
+    if not force_refresh and status == 'fresh' and not reference_data.get('reference_stale'):
+        return False
+    retry_at = reference_data.get('next_retry_at') or reference_data.get('retry_at')
+    try:
+        if not force_refresh and retry_at is not None and time.time() < float(retry_at):
+            return False
+    except (TypeError, ValueError, OverflowError):
+        pass
+
+    with firmware_reference_refresh_lock:
+        if firmware_reference_refresh_active:
+            return False
+        firmware_reference_refresh_active = True
+
+    try:
+        # This call is nonblocking. It atomically records refresh-start as a
+        # new reference generation and launches the service's single-flight
+        # worker. The app worker below only joins that flight and emits the
+        # completed generation.
+        started_reference = get_vzm32sn_reference_data(
+            allow_network=True,
+            force_refresh=bool(force_refresh),
+        )
+    except Exception as refresh_start_error:
+        with firmware_reference_refresh_lock:
+            firmware_reference_refresh_active = False
+        print(f"Firmware reference refresh could not start: {refresh_start_error}", flush=True)
+        return False
+
+    with firmware_reference_refresh_lock:
+        worker = threading.Thread(
+            target=_firmware_reference_refresh_worker,
+            args=(bool(force_refresh),),
+            daemon=True,
+            name='firmware-reference-refresh',
+        )
+        firmware_reference_refresh_thread = worker
+    try:
+        worker.start()
+    except Exception as worker_start_error:
+        with firmware_reference_refresh_lock:
+            firmware_reference_refresh_active = False
+            firmware_reference_refresh_thread = None
+        print(f"Firmware reference completion worker could not start: {worker_start_error}", flush=True)
+        return False
+    return copy.deepcopy(started_reference) if isinstance(started_reference, dict) else True
 
 
 def get_device_id_from_topic(topic):
@@ -858,12 +1180,7 @@ def emit_firmware_status(topic, room=None):
     ota_status = device_data.get('ota_status')
     if not isinstance(ota_status, dict):
         return
-    ota_payload = enrich_ota_status(ota_status)
-    with device_list_lock:
-        for item in device_list.values():
-            if item.get('topic') == topic:
-                item['ota_status'] = copy.deepcopy(ota_payload)
-                break
+    ota_payload = compose_firmware_status(topic, ota_status)
     socketio.emit(
         'firmware_status',
         {
@@ -886,11 +1203,21 @@ def update_device_ota_status(topic, values):
                 continue
 
             ota_status = ensure_ota_status(device_data)
-            ota_status.update(values)
+            for key in LIVE_OTA_FIELDS:
+                if key in {'revision', 'observed_at', 'observed_source'}:
+                    continue
+                if key in values:
+                    ota_status[key] = copy.deepcopy(values.get(key))
+
+            ota_status['revision'] = _nonnegative_int(ota_status.get('revision')) + 1
+            ota_status['observed_at'] = time.time()
+            ota_status['observed_source'] = 'zigbee2mqtt'
 
             if ota_status.get('state'):
                 normalized_state = str(ota_status.get('state')).strip().lower()
                 terminal_states = {'idle', 'available', 'up_to_date', 'completed', 'success', 'done', 'checked'}
+                if normalized_state not in {'error', 'failed', 'failure'} and 'last_error' not in values:
+                    ota_status['last_error'] = None
                 if normalized_state in terminal_states and 'progress' not in values:
                     ota_status['progress'] = None
                 if normalized_state in {'idle', 'available', 'up_to_date', 'checked'}:
@@ -903,16 +1230,10 @@ def update_device_ota_status(topic, values):
     if ota_payload is None:
         return None
 
-    ota_payload = enrich_ota_status(ota_payload)
-    with device_list_lock:
-        for device_data in device_list.values():
-            if device_data.get('topic') == topic:
-                device_data['ota_status'] = copy.deepcopy(ota_payload)
-                break
-
-    socketio.emit('firmware_status', {'topic': topic, 'payload': ota_payload, 'ts': time.time()})
-    emit_device_delta('firmware_status', ota_payload, topic=topic)
-    return ota_payload
+    firmware_payload = compose_firmware_status(topic, ota_payload)
+    socketio.emit('firmware_status', {'topic': topic, 'payload': firmware_payload, 'ts': time.time()})
+    emit_device_delta('firmware_status', firmware_payload, topic=topic)
+    return copy_live_ota_status(ota_payload)
 
 
 def extract_ota_status_from_payload(payload):
@@ -957,6 +1278,15 @@ def extract_ota_status_from_payload(payload):
         if key in update_info and update_info.get(key) is not None:
             result['state'] = str(update_info.get(key))
             break
+
+    # Zigbee2MQTT 2.x removed the legacy update_available property. Its nested
+    # update lifecycle is now the availability signal for passive consumers.
+    if 'available' not in result and result.get('state') is not None:
+        normalized_update_state = str(result.get('state') or '').strip().lower()
+        if normalized_update_state == 'available':
+            result['available'] = True
+        elif normalized_update_state in {'idle', 'up_to_date'}:
+            result['available'] = False
 
     if 'progress' in update_info:
         raw_progress = update_info.get('progress')
@@ -1022,12 +1352,7 @@ def build_device_snapshot(topic):
     if not device_data:
         return None
 
-    ota_status = enrich_ota_status(device_data.get('ota_status'))
-    with device_list_lock:
-        for item in device_list.values():
-            if item.get('topic') == topic:
-                item['ota_status'] = copy.deepcopy(ota_status)
-                break
+    ota_status = compose_firmware_status(topic, device_data.get('ota_status'))
 
     payload = {
         'friendly_name': device_data.get('friendly_name'),
@@ -1067,40 +1392,54 @@ def emit_command_result(sid, action, status, topic=None, request_id=None, messag
     socketio.emit('command_result', result, room=sid)
 
 
+def reserve_pending_write_or_emit(sid, request_id, topic, action, expected):
+    entry = register_pending_write(sid, request_id, topic, action, expected)
+    if entry is not None:
+        return True
+    emit_command_result(
+        sid,
+        action=action,
+        status='error',
+        topic=topic,
+        request_id=request_id,
+        payload=copy.deepcopy(expected),
+        message='This request is already pending or too many device writes await confirmation; wait and retry',
+    )
+    return False
+
+
 def emit_schema_model(room=None):
     socketio.emit('schema_model', schema_service.get_schema(), room=room)
+
+
+def _iter_schema_fields(fields):
+    for field in fields or []:
+        if not isinstance(field, dict):
+            continue
+        yield field
+        yield from _iter_schema_fields(field.get('features'))
+
+
+def _schema_field_can_get(field):
+    if not isinstance(field, dict):
+        return False
+    if 'can_get' in field:
+        return bool(field.get('can_get'))
+    access = field.get('access')
+    return isinstance(access, int) and not isinstance(access, bool) and bool(access & 4)
 
 
 def build_force_sync_payload():
     schema = schema_service.get_schema() or {}
     payload = {}
-    for field in schema.get('fields', []) or []:
-        if not isinstance(field, dict):
-            continue
-        name = field.get('name')
+    for field in _iter_schema_fields(schema.get('fields')):
+        name = field.get('property') or field.get('name')
         if not name:
             continue
-        if not field.get('can_read'):
+        if not _schema_field_can_get(field):
             continue
-        payload[name] = ""
-
-    # The Zigbee2MQTT definition can expose light controls through nested features.
-    # Keep these keys explicitly requested so quick controls stay in sync.
-    payload.setdefault("state", "")
-    payload.setdefault("brightness", "")
-
-    if payload:
-        return payload
-
-    # Conservative fallback if schema is unavailable.
-    return {
-        "state": "", "brightness": "", "occupancy": "", "illuminance": "",
-        "mmWaveDepthMax": "", "mmWaveDepthMin": "", "mmWaveWidthMax": "", "mmWaveWidthMin": "",
-        "mmWaveHeightMax": "", "mmWaveHeightMin": "", "mmWaveDetectSensitivity": "",
-        "mmWaveDetectTrigger": "", "mmWaveHoldTime": "", "mmWaveStayLife": "",
-        "mmWaveRoomSizePreset": "", "mmWaveTargetInfoReport": "", "mmWaveVersion": "",
-        "mmwaveControlWiredDevice": ""
-    }
+        payload[str(name)] = ""
+    return payload
 
 
 def on_connect(client, userdata, flags, rc):
@@ -1264,58 +1603,6 @@ def on_message(client, userdata, msg):
 
         # Zigbee2MQTT bridge topics may publish arrays/literals; this app only processes object payloads.
         if not isinstance(payload, dict):
-            return
-
-        bridge_check_topic = f"{MQTT_BASE_TOPIC}/bridge/response/device/ota_update/check"
-        bridge_update_topic = f"{MQTT_BASE_TOPIC}/bridge/response/device/ota_update/update"
-        if topic in {bridge_check_topic, bridge_update_topic}:
-            bridge_data = payload.get('data') if isinstance(payload.get('data'), dict) else payload
-            transaction = payload.get('transaction')
-            if not transaction and isinstance(bridge_data, dict):
-                transaction = bridge_data.get('transaction')
-            ota_request = remove_ota_request(transaction)
-            target_identifier = None
-            if isinstance(bridge_data, dict):
-                target_identifier = bridge_data.get('id') or bridge_data.get('device') or bridge_data.get('friendly_name')
-            if not target_identifier:
-                target_identifier = payload.get('id') or payload.get('device')
-
-            target_topic = get_device_topic_from_identifier(target_identifier)
-            if not target_topic and ota_request:
-                target_topic = ota_request.get('topic')
-            if target_topic:
-                status_payload = extract_ota_status_from_payload(bridge_data if isinstance(bridge_data, dict) else payload) or {}
-                bridge_status = str(payload.get('status') or '').strip().lower() or None
-                if bridge_status:
-                    status_payload['bridge_status'] = bridge_status
-                if bridge_status == 'ok' and 'last_error' not in status_payload:
-                    status_payload['last_error'] = None
-                if topic == bridge_check_topic:
-                    status_payload['last_checked'] = time.time()
-                    if status_payload.get('state') is None and bridge_status == 'ok':
-                        status_payload['state'] = 'checked'
-                elif topic == bridge_update_topic and bridge_status == 'ok':
-                    status_payload.update({
-                        'state': 'completed',
-                        'available': False,
-                        'progress': 100,
-                        'remaining': None,
-                    })
-                    to_version = bridge_data.get('to') if isinstance(bridge_data.get('to'), dict) else {}
-                    completed_version = (
-                        to_version.get('file_version')
-                        or to_version.get('fileVersion')
-                        or to_version.get('version')
-                    )
-                    if completed_version is not None:
-                        status_payload['installed_version'] = str(completed_version)
-                        status_payload['latest_version'] = str(completed_version)
-
-                if bridge_status and bridge_status != 'ok':
-                    status_payload['last_error'] = str(payload.get('error') or payload.get('message') or 'OTA request failed')
-                    status_payload['state'] = 'error'
-
-                update_device_ota_status(target_topic, status_payload)
             return
 
         # --- DEVICE DISCOVERY ---
@@ -1502,6 +1789,7 @@ def on_message(client, userdata, msg):
             # Update Standard Global Zone (Attributes 103-106)
             needs_emit = False
             zone_payload = None
+            capabilities_changed = False
             ota_status_update = extract_ota_status_from_payload(config_payload)
 
             with device_list_lock:
@@ -1511,10 +1799,40 @@ def on_message(client, userdata, msg):
                         device_data['last_config'] = {}
                     device_data['last_config'].update(config_payload)
                     capabilities = device_data.setdefault('capabilities', {})
-                    if 'state' in config_payload and 'state' not in capabilities:
-                        capabilities['state'] = True
-                    if 'brightness' in config_payload and 'brightness' not in capabilities:
-                        capabilities['brightness'] = True
+                    # Signature-only discovery starts conservatively because its
+                    # first sparse report may omit load controls. Later explicit
+                    # state reports may safely upgrade those inferred mappings;
+                    # inventory-derived expose metadata remains authoritative.
+                    may_upgrade_signature_controls = (
+                        not device_data.get('inventory_present')
+                        and str(device_data.get('model') or '').strip().upper() == 'VZM32-SN'
+                        and capabilities.get('full_editor', True)
+                        and not capabilities.get('quick_controls_ambiguous')
+                    )
+                    if may_upgrade_signature_controls:
+                        if 'state' in config_payload:
+                            state_updates = {
+                                'state': True,
+                                'state_property': 'state',
+                                'readable_state_property': 'state',
+                            }
+                            capabilities_changed = capabilities_changed or any(
+                                capabilities.get(key) != value for key, value in state_updates.items()
+                            )
+                            capabilities.update(state_updates)
+                        if 'brightness' in config_payload:
+                            brightness_updates = {
+                                'brightness': True,
+                                'brightness_property': 'brightness',
+                                'readable_brightness_property': 'brightness',
+                            }
+                            capabilities_changed = capabilities_changed or any(
+                                capabilities.get(key) != value for key, value in brightness_updates.items()
+                            )
+                            capabilities.update(brightness_updates)
+                        if 'quick_controls_ambiguous' not in capabilities:
+                            capabilities['quick_controls_ambiguous'] = False
+                            capabilities_changed = True
 
                     current_zone = dict(DEFAULT_GLOBAL_ZONE_CONFIG)
                     cached_zone = device_data.get('zone_config')
@@ -1532,6 +1850,12 @@ def on_message(client, userdata, msg):
                     if needs_emit:
                         device_data['zone_config'] = current_zone
                         zone_payload = copy.deepcopy(current_zone)
+
+            if capabilities_changed:
+                # The dashboard capability model is carried by device_list, not
+                # device_config. Publish the promotion immediately so quick
+                # controls become usable without a reconnect or inventory refresh.
+                emit_device_list()
 
             if ota_status_update:
                 update_device_ota_status(device_topic, ota_status_update)
@@ -1570,7 +1894,14 @@ if not TEST_MODE:
 
 
 def publish_json(topic, payload, origin, sid=None):
-    payload_str = json.dumps(payload)
+    validation_error = validate_command_payload(payload)
+    if validation_error:
+        print(
+            f"[MQTT-PUBLISH-REJECTED] origin={origin} sid={sid or '-'} topic={topic} error={validation_error}",
+            flush=True,
+        )
+        return False, validation_error
+    payload_str = json.dumps(payload, allow_nan=False)
     print(f"[MQTT-PUBLISH] origin={origin} sid={sid or '-'} topic={topic} payload={payload_str}", flush=True)
     try:
         # QoS 0 makes a disconnected command fail immediately instead of being
@@ -1608,19 +1939,26 @@ def handle_socket_disconnect():
     clear_pending_writes_for_sid(sid)
 
     if should_auto_off and current_topic and not has_session_for_topic(current_topic):
-        disable_value = resolve_target_reporting_value(False)
-        payload = {'mmWaveTargetInfoReport': disable_value}
-        ok, rc = publish_json(f"{current_topic}/set", payload, origin='auto_disable_target_reporting', sid=sid)
-        if ok:
+        readiness_error = get_command_readiness_error(current_topic)
+        if readiness_error:
             print(
-                f"Auto-disabled mmWave target reporting on disconnect: topic={current_topic} sid={sid}",
-                flush=True
+                f"Skipped auto-disabling mmWave target reporting: topic={current_topic} sid={sid} reason={readiness_error}",
+                flush=True,
             )
         else:
-            print(
-                f"Failed to auto-disable mmWave target reporting on disconnect: topic={current_topic} sid={sid} rc={rc}",
-                flush=True
-            )
+            disable_value = resolve_target_reporting_value(False)
+            payload = {'mmWaveTargetInfoReport': disable_value}
+            ok, rc = publish_json(f"{current_topic}/set", payload, origin='auto_disable_target_reporting', sid=sid)
+            if ok:
+                print(
+                    f"Auto-disabled mmWave target reporting on disconnect: topic={current_topic} sid={sid}",
+                    flush=True
+                )
+            else:
+                print(
+                    f"Failed to auto-disable mmWave target reporting on disconnect: topic={current_topic} sid={sid} rc={rc}",
+                    flush=True
+                )
 
     print(f"WebSocket disconnected: sid={request.sid}", flush=True)
 
@@ -1687,6 +2025,8 @@ def handle_change_device(new_topic):
 
 @socketio.on('set_reporting_auto_off')
 def handle_set_reporting_auto_off(data):
+    if not validate_command_envelope_or_emit(request.sid, 'set_reporting_auto_off', data):
+        return
     enabled = False
     if isinstance(data, dict):
         enabled = _as_bool(data.get('enabled'), False)
@@ -1705,9 +2045,18 @@ def handle_set_reporting_auto_off(data):
 
 @socketio.on('set_target_reporting')
 def handle_set_target_reporting(data):
-    request_id = data.get('request_id') if isinstance(data, dict) else None
-    request_id = request_id or f"target-report-{time.time_ns()}"
-    current_topic, topic_error = resolve_command_topic(request.sid, data)
+    if not validate_command_envelope_or_emit(request.sid, 'set_target_reporting', data):
+        return
+    request_id, request_error = normalize_command_request_id(data, 'target-report')
+    if request_error:
+        emit_command_result(
+            request.sid,
+            action='set_target_reporting',
+            status='error',
+            message=request_error,
+        )
+        return
+    current_topic, topic_error = resolve_ready_command_topic(request.sid, data)
     if not current_topic:
         emit_command_result(
             request.sid,
@@ -1726,13 +2075,14 @@ def handle_set_target_reporting(data):
 
     target_value = resolve_target_reporting_value(enabled)
     payload = {'mmWaveTargetInfoReport': target_value}
-    register_pending_write(
+    if not reserve_pending_write_or_emit(
         request.sid,
         request_id,
         current_topic,
         'set_target_reporting',
         payload
-    )
+    ):
+        return
     ok, rc = publish_json(
         f"{current_topic}/set",
         payload,
@@ -1755,6 +2105,8 @@ def handle_set_target_reporting(data):
 
 @socketio.on('set_basic_control')
 def handle_set_basic_control(data):
+    if not validate_command_envelope_or_emit(request.sid, 'set_basic_control', data):
+        return
     if not isinstance(data, dict):
         emit_command_result(
             request.sid,
@@ -1765,30 +2117,29 @@ def handle_set_basic_control(data):
         )
         return
 
-    request_id = data.get('request_id') or f"basic-{time.time_ns()}"
-    requested_topic = data.get('topic')
-    if requested_topic:
-        current_topic = get_device_topic_from_identifier(requested_topic)
-        if not current_topic:
-            emit_command_result(
-                request.sid,
-                action='set_basic_control',
-                status='error',
-                request_id=request_id,
-                message='Unknown device topic'
-            )
-            return
-    else:
-        current_topic = get_valid_session_topic(request.sid)
-        if not current_topic:
-            emit_command_result(
-                request.sid,
-                action='set_basic_control',
-                status='error',
-                request_id=request_id,
-                message='No device selected'
-            )
-            return
+    request_id, request_error = normalize_command_request_id(data, 'basic')
+    if request_error:
+        emit_command_result(
+            request.sid,
+            action='set_basic_control',
+            status='error',
+            message=request_error,
+        )
+        return
+    current_topic, topic_error = resolve_ready_command_topic(
+        request.sid,
+        data,
+        require_full_editor=False,
+    )
+    if not current_topic:
+        emit_command_result(
+            request.sid,
+            action='set_basic_control',
+            status='error',
+            request_id=request_id,
+            message=topic_error,
+        )
+        return
 
     control_payload = {}
     errors = []
@@ -1837,13 +2188,14 @@ def handle_set_basic_control(data):
         )
         return
 
-    register_pending_write(
+    if not reserve_pending_write_or_emit(
         request.sid,
         request_id,
         current_topic,
         'set_basic_control',
         control_payload
-    )
+    ):
+        return
     publish_payload = {
         basic_control_mapping[control_name]: value
         for control_name, value in control_payload.items()
@@ -1868,114 +2220,29 @@ def handle_set_basic_control(data):
     )
 
 
-@socketio.on('check_firmware_update')
-def handle_check_firmware_update(data=None):
-    request_id = data.get('request_id') if isinstance(data, dict) else None
-    current_topic = get_valid_session_topic(request.sid)
-    if not current_topic:
-        emit_command_result(
-            request.sid,
-            action='check_firmware_update',
-            status='error',
-            request_id=request_id,
-            message='No device selected'
-        )
-        return
-
-    device_id = get_device_id_from_topic(current_topic)
-    transaction = register_ota_request(current_topic, 'check_firmware_update')
-    request_payload = {'id': device_id, 'transaction': transaction}
-    ok, rc = publish_json(
-        f"{MQTT_BASE_TOPIC}/bridge/request/device/ota_update/check",
-        request_payload,
-        origin='check_firmware_update',
-        sid=request.sid
-    )
-    if not ok:
-        remove_ota_request(transaction)
-
-    if ok:
-        update_device_ota_status(current_topic, {
-            'state': 'checking',
-            'last_checked': time.time(),
-            'last_error': None,
-            'bridge_status': 'pending'
-        })
-
-    emit_command_result(
-        request.sid,
-        action='check_firmware_update',
-        status='sent' if ok else 'error',
-        topic=current_topic,
-        request_id=request_id,
-        payload=request_payload,
-        rc=rc,
-        message=None if ok else 'MQTT publish failed'
-    )
-
-
-@socketio.on('start_firmware_update')
-def handle_start_firmware_update(data=None):
-    request_id = data.get('request_id') if isinstance(data, dict) else None
-    current_topic = get_valid_session_topic(request.sid)
-    if not current_topic:
-        emit_command_result(
-            request.sid,
-            action='start_firmware_update',
-            status='error',
-            request_id=request_id,
-            message='No device selected'
-        )
-        return
-
-    if isinstance(data, dict) and 'url' in data:
-        emit_command_result(
-            request.sid,
-            action='start_firmware_update',
-            status='error',
-            topic=current_topic,
-            request_id=request_id,
-            message='Custom firmware URLs are not supported'
-        )
-        return
-
-    device_id = get_device_id_from_topic(current_topic)
-    transaction = register_ota_request(current_topic, 'start_firmware_update')
-    request_payload = {'id': device_id, 'transaction': transaction}
-
-    ok, rc = publish_json(
-        f"{MQTT_BASE_TOPIC}/bridge/request/device/ota_update/update",
-        request_payload,
-        origin='start_firmware_update',
-        sid=request.sid
-    )
-    if not ok:
-        remove_ota_request(transaction)
-
-    if ok:
-        update_device_ota_status(current_topic, {
-            'state': 'requested',
-            'last_error': None,
-            'bridge_status': 'pending',
-            'progress': 0
-        })
-
-    emit_command_result(
-        request.sid,
-        action='start_firmware_update',
-        status='sent' if ok else 'error',
-        topic=current_topic,
-        request_id=request_id,
-        payload=request_payload,
-        rc=rc,
-        message=None if ok else 'MQTT publish failed'
-    )
-
-
 @socketio.on('update_parameter')
 def handle_update_parameter(data):
-    request_id = data.get('request_id') if isinstance(data, dict) else None
-    current_topic, topic_error = resolve_command_topic(request.sid, data)
+    if not validate_command_envelope_or_emit(request.sid, 'update_parameter', data):
+        return
+    if not isinstance(data, dict):
+        emit_command_result(
+            request.sid,
+            action='update_parameter',
+            status='error',
+            request_id=None,
+            message='Invalid payload'
+        )
+        return
+    request_id, request_error = normalize_command_request_id(data, 'update')
+    if request_error:
+        emit_command_result(
+            request.sid,
+            action='update_parameter',
+            status='error',
+            message=request_error,
+        )
+        return
+    current_topic, topic_error = resolve_ready_command_topic(request.sid, data)
     if not current_topic:
         emit_command_result(
             request.sid,
@@ -1986,30 +2253,31 @@ def handle_update_parameter(data):
         )
         return
 
-    if not isinstance(data, dict):
-        emit_command_result(
-            request.sid,
-            action='update_parameter',
-            status='error',
-            topic=current_topic,
-            request_id=request_id,
-            message='Invalid payload'
-        )
-        return
-
     param = data.get('param')
-    if not param:
+    if not isinstance(param, str) or not param.strip() or len(param) > MAX_PARAMETER_NAME_LENGTH:
         emit_command_result(
             request.sid,
             action='update_parameter',
             status='error',
             topic=current_topic,
             request_id=request_id,
-            message='Missing param'
+            message=f'Parameter name must contain 1-{MAX_PARAMETER_NAME_LENGTH} characters'
         )
         return
+    param = param.strip()
 
     value = data.get('value')
+    payload_error = validate_command_payload({param: value})
+    if payload_error:
+        emit_command_result(
+            request.sid,
+            action='update_parameter',
+            status='error',
+            topic=current_topic,
+            request_id=request_id,
+            message=payload_error,
+        )
+        return
 
     is_valid, validation_error, normalized_value, is_unknown_field = schema_service.validate_update(param, value)
     if not is_valid:
@@ -2025,16 +2293,16 @@ def handle_update_parameter(data):
         return
 
     control_payload = {param: normalized_value}
-    if request_id:
-        register_pending_write(
-            request.sid,
-            request_id,
-            current_topic,
-            'update_parameter',
-            control_payload
-        )
+    if not reserve_pending_write_or_emit(
+        request.sid,
+        request_id,
+        current_topic,
+        'update_parameter',
+        control_payload
+    ):
+        return
     ok, rc = publish_json(f"{current_topic}/set", control_payload, origin='update_parameter', sid=request.sid)
-    if not ok and request_id:
+    if not ok:
         remove_pending_write(request.sid, request_id)
     emit_command_result(
         request.sid,
@@ -2050,8 +2318,27 @@ def handle_update_parameter(data):
 
 @socketio.on('apply_parameters')
 def handle_apply_parameters(data):
-    request_id = data.get('request_id') if isinstance(data, dict) else None
-    current_topic, topic_error = resolve_command_topic(request.sid, data)
+    if not validate_command_envelope_or_emit(request.sid, 'apply_parameters', data):
+        return
+    if not isinstance(data, dict) or not isinstance(data.get('changes'), dict) or not data.get('changes'):
+        emit_command_result(
+            request.sid,
+            action='apply_parameters',
+            status='error',
+            request_id=None,
+            message='Changes must be a non-empty object'
+        )
+        return
+    request_id, request_error = normalize_command_request_id(data, 'apply')
+    if request_error:
+        emit_command_result(
+            request.sid,
+            action='apply_parameters',
+            status='error',
+            message=request_error,
+        )
+        return
+    current_topic, topic_error = resolve_ready_command_topic(request.sid, data)
     if not current_topic:
         emit_command_result(
             request.sid,
@@ -2061,25 +2348,39 @@ def handle_apply_parameters(data):
             message=topic_error
         )
         return
-
-    if not isinstance(data, dict) or not isinstance(data.get('changes'), dict) or not data.get('changes'):
+    changes = data.get('changes')
+    if len(changes) > MAX_CHANGE_COUNT:
         emit_command_result(
             request.sid,
             action='apply_parameters',
             status='error',
             topic=current_topic,
             request_id=request_id,
-            message='Changes must be a non-empty object'
+            message=f'At most {MAX_CHANGE_COUNT} fields may be applied at once',
         )
         return
-
-    request_id = request_id or f"apply-{time.time_ns()}"
+    payload_error = validate_command_payload(changes)
+    if payload_error:
+        emit_command_result(
+            request.sid,
+            action='apply_parameters',
+            status='error',
+            topic=current_topic,
+            request_id=request_id,
+            message=payload_error,
+        )
+        return
     normalized_changes = {}
     unknown_fields = []
     validation_errors = []
 
-    for param, value in data.get('changes', {}).items():
-        if not isinstance(param, str) or not param:
+    for param, value in changes.items():
+        if (
+            not isinstance(param, str)
+            or not param
+            or param != param.strip()
+            or len(param) > MAX_PARAMETER_NAME_LENGTH
+        ):
             validation_errors.append('Every change must have a valid parameter name')
             continue
         is_valid, validation_error, normalized_value, is_unknown_field = schema_service.validate_update(param, value)
@@ -2102,13 +2403,14 @@ def handle_apply_parameters(data):
         )
         return
 
-    register_pending_write(
+    if not reserve_pending_write_or_emit(
         request.sid,
         request_id,
         current_topic,
         'apply_parameters',
         normalized_changes
-    )
+    ):
+        return
     ok, rc = publish_json(
         f"{current_topic}/set",
         normalized_changes,
@@ -2136,15 +2438,25 @@ def handle_apply_parameters(data):
 
 @socketio.on('force_sync')
 def handle_force_sync(data=None):
-    request_id = data.get('request_id') if isinstance(data, dict) else None
-    current_topic = get_valid_session_topic(request.sid)
+    if not validate_command_envelope_or_emit(request.sid, 'force_sync', data):
+        return
+    request_id, request_error = normalize_command_request_id(data, 'force-sync')
+    if request_error:
+        emit_command_result(
+            request.sid,
+            action='force_sync',
+            status='error',
+            message=request_error,
+        )
+        return
+    current_topic, topic_error = resolve_ready_command_topic(request.sid, data)
     if not current_topic:
         emit_command_result(
             request.sid,
             action='force_sync',
             status='error',
             request_id=request_id,
-            message='No device selected'
+            message=topic_error
         )
         return
     
@@ -2159,6 +2471,16 @@ def handle_force_sync(data=None):
 
     # 2. Trigger Z2M read
     payload = build_force_sync_payload()
+    if not payload:
+        emit_command_result(
+            request.sid,
+            action='force_sync',
+            status='error',
+            topic=current_topic,
+            request_id=request_id,
+            message='No GET-capable fields are available for this device schema',
+        )
+        return
     ok_get, rc_get = publish_json(f"{current_topic}/get", payload, origin='force_sync_get', sid=request.sid)
     emit_command_result(
         request.sid,
@@ -2190,18 +2512,26 @@ def handle_force_sync(data=None):
 
 @socketio.on('send_command')
 def handle_command(cmd_action):
-    current_topic = get_valid_session_topic(request.sid)
+    if not validate_command_envelope_or_emit(request.sid, 'send_command', cmd_action):
+        return
+    current_topic, topic_error = resolve_ready_command_topic(request.sid)
     if not current_topic:
         emit_command_result(
             request.sid,
             action='send_command',
             status='error',
-            message='No device selected'
+            message=topic_error
         )
         return
 
     action_map = { 0: "reset_mmwave_module", 1: "set_interference", 2: "query_areas", 3: "clear_interference", 4: "reset_detection_area", 5: "clear_stay_areas" }
     try:
+        if isinstance(cmd_action, bool):
+            raise ValueError
+        if isinstance(cmd_action, float) and not cmd_action.is_integer():
+            raise ValueError
+        if isinstance(cmd_action, str) and not re.fullmatch(r"[0-9]+", cmd_action.strip()):
+            raise ValueError
         cmd_action_int = int(cmd_action)
     except (TypeError, ValueError):
         emit_command_result(

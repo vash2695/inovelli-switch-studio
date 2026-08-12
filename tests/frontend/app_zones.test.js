@@ -16,7 +16,7 @@ function loadZonesModule(options) {
     const opts = options || {};
     const scriptPath = path.resolve(__dirname, '../../switch_studio/static/js/app_zones.js');
     const source = fs.readFileSync(scriptPath, 'utf8');
-    const events = { status: [], toast: [] };
+    const events = { status: [], toast: [], pending: [] };
     const plotlyCalls = [];
     const snapshots = [];
     const chartEl = {};
@@ -51,6 +51,8 @@ function loadZonesModule(options) {
         },
         shouldRenderTargets: opts.shouldRenderTargets || null,
         shouldRender2d: opts.shouldRender2d || null,
+        onPendingCommandChange: (actionId) => events.pending.push(actionId),
+        maintenanceCommandTimeoutMs: opts.maintenanceCommandTimeoutMs,
         onTargetSnapshot: (snapshot) => snapshots.push(JSON.parse(JSON.stringify(snapshot))),
         limits: opts.useDefaultLimits ? undefined : {
             xMin: -200,
@@ -452,7 +454,8 @@ test('2D unsupported-range masks cover only the disjoint space outside the senso
 test('interference command lifecycle reports completion and clears pending command id', () => {
     const { zones, events } = loadZonesModule();
 
-    zones.setPendingCommand(3);
+    assert.equal(zones.setPendingCommand(3), true);
+    assert.equal(zones.setPendingCommand(5), false, 'a second command must not replace pending work');
     assert.equal(zones.getPendingCommandId(), 3);
 
     zones.handleInterferenceZones([]);
@@ -460,6 +463,145 @@ test('interference command lifecycle reports completion and clears pending comma
     assert.equal(zones.getPendingCommandId(), null);
     assert.ok(events.status.some((entry) => entry.message.includes('Interference cleared')));
     assert.ok(events.toast.some((entry) => entry.message.includes('Interference cleared')));
+    assert.deepEqual(events.pending, [3, null]);
+});
+
+test('maintenance command timeout and explicit disconnect cleanup release the duplicate lock', async () => {
+    const { zones, events } = loadZonesModule({ maintenanceCommandTimeoutMs: 5 });
+
+    assert.equal(zones.setPendingCommand(4), true);
+    assert.equal(zones.setPendingCommand(5), false);
+    await new Promise((resolve) => setTimeout(resolve, 15));
+
+    assert.equal(zones.getPendingCommandId(), null);
+    assert.ok(events.status.some((entry) => entry.message.includes('not confirmed in time')));
+    assert.ok(events.toast.some((entry) => entry.message.includes('not confirmed in time')));
+
+    assert.equal(zones.setPendingCommand(5), true);
+    zones.clearPendingCommand();
+    assert.equal(zones.getPendingCommandId(), null);
+    assert.equal(zones.setPendingCommand(3), true, 'a disconnect-style clear must allow retry');
+    zones.clearPendingCommand();
+    assert.deepEqual(events.pending, [4, null, 5, null, 3, null]);
+});
+
+test('zone write tracker restores the immutable submitted draft after not-confirmed and clears it only after retry confirmation', () => {
+    const { zones } = loadZonesModule();
+    const tracker = zones.createZoneWriteTracker();
+    const submitted = { x_min: -140, x_max: 80, y_min: 35, y_max: 275, z_min: -90, z_max: 160 };
+
+    assert.ok(tracker.begin({
+        requestId: 'zone-save-1',
+        topic: 'zigbee2mqtt/office',
+        target: 'mmwave_detection_areas:area2',
+        draft: submitted,
+    }));
+    submitted.x_min = 999;
+
+    const sent = tracker.transition({
+        request_id: 'zone-save-1',
+        topic: 'zigbee2mqtt/office',
+        status: 'sent',
+    });
+    assert.equal(sent.handled, true);
+    assert.equal(sent.record.state, 'awaiting_device');
+    assert.deepEqual(plain(sent.record.draft), {
+        x_min: -140, x_max: 80, y_min: 35, y_max: 275, z_min: -90, z_max: 160,
+    });
+
+    const failed = tracker.transition({
+        request_id: 'zone-save-1',
+        topic: 'zigbee2mqtt/office',
+        status: 'not_confirmed',
+    });
+    assert.equal(failed.handled, true);
+    assert.equal(failed.shouldRestore, true);
+    assert.equal(failed.record.failureStatus, 'not_confirmed');
+    const retryable = tracker.getRetryable('zigbee2mqtt/office', 'mmwave_detection_areas:area2');
+    assert.deepEqual(plain(retryable.draft), {
+        x_min: -140, x_max: 80, y_min: 35, y_max: 275, z_min: -90, z_max: 160,
+    });
+
+    assert.ok(tracker.begin({
+        requestId: 'zone-save-2',
+        topic: retryable.topic,
+        target: retryable.target,
+        draft: retryable.draft,
+    }));
+    assert.equal(
+        tracker.transition({ request_id: 'zone-save-1', topic: retryable.topic, status: 'confirmed' }).handled,
+        false,
+        'a stale confirmation must not clear the newer retry',
+    );
+    assert.equal(tracker.transition({ request_id: 'zone-save-2', topic: retryable.topic, status: 'confirmed' }).confirmed, true);
+    assert.equal(tracker.getRetryable(retryable.topic, retryable.target), null);
+});
+
+test('zone write tracker retains device-scoped retries across disconnect and never restores deletes', () => {
+    const { zones } = loadZonesModule();
+    const tracker = zones.createZoneWriteTracker();
+    const officeDraft = { x_min: -100, x_max: 100, y_min: 20, y_max: 220, z_min: -100, z_max: 100 };
+    const kitchenDraft = { x_min: -220, x_max: -20, y_min: 40, y_max: 340, z_min: -60, z_max: 180 };
+
+    tracker.begin({ requestId: 'zone-save-office', topic: 'zigbee2mqtt/office', target: 'mmwave_stay_areas:area1', draft: officeDraft });
+    tracker.begin({ requestId: 'zone-save-kitchen', topic: 'zigbee2mqtt/kitchen', target: 'mmwave_detection_areas:area3', draft: kitchenDraft });
+    tracker.begin({ requestId: 'zone-delete-office', topic: 'zigbee2mqtt/office', target: 'mmwave_interference_areas:area4', isDelete: true });
+
+    const interrupted = tracker.failPending('disconnected');
+    assert.equal(interrupted.length, 3);
+    assert.deepEqual(
+        plain(tracker.getRetryable('zigbee2mqtt/office', 'mmwave_stay_areas:area1').draft),
+        officeDraft,
+    );
+    assert.deepEqual(
+        plain(tracker.getRetryable('zigbee2mqtt/kitchen', 'mmwave_detection_areas:area3').draft),
+        kitchenDraft,
+    );
+    assert.equal(tracker.getRetryable('zigbee2mqtt/office', 'mmwave_interference_areas:area4'), null);
+    assert.equal(tracker.getRetryable('zigbee2mqtt/bedroom'), null);
+});
+
+test('zone write tracker isolates mismatched topics and supports explicit retry discard', () => {
+    const { zones } = loadZonesModule();
+    const tracker = zones.createZoneWriteTracker();
+    const draft = { x_min: -50, x_max: 50, y_min: 10, y_max: 110, z_min: -30, z_max: 70 };
+    tracker.begin({ requestId: 'zone-save-topic', topic: 'zigbee2mqtt/office', target: 'mmwave_detection_areas:area1', draft });
+
+    const wrongTopic = tracker.transition({ request_id: 'zone-save-topic', topic: 'zigbee2mqtt/kitchen', status: 'not_confirmed' });
+    assert.deepEqual(plain(wrongTopic), { handled: false, reason: 'topic_mismatch' });
+    assert.equal(tracker.getRetryable('zigbee2mqtt/office'), null);
+
+    tracker.transition({ request_id: 'zone-save-topic', topic: 'zigbee2mqtt/office', status: 'error' });
+    assert.ok(tracker.getRetryable('zigbee2mqtt/office', 'mmwave_detection_areas:area1'));
+    assert.equal(tracker.discardRetryable('zigbee2mqtt/office', 'mmwave_detection_areas:area1'), true);
+    assert.equal(tracker.getRetryable('zigbee2mqtt/office'), null);
+
+    tracker.begin({ requestId: 'zone-save-discarded', topic: 'zigbee2mqtt/office', target: 'mmwave_detection_areas:area1', draft });
+    assert.equal(tracker.discardRetryable('zigbee2mqtt/office', 'mmwave_detection_areas:area1'), true);
+    const discardedFailure = tracker.transition({ request_id: 'zone-save-discarded', topic: 'zigbee2mqtt/office', status: 'error' });
+    assert.equal(discardedFailure.shouldRestore, false, 'an explicit discard must suppress later recovery');
+    assert.equal(tracker.getRetryable('zigbee2mqtt/office'), null);
+});
+
+test('destructive zone maintenance confirmation names the action and device and honors cancel or accept', () => {
+    const { zones } = loadZonesModule();
+    const prompts = [];
+
+    assert.equal(zones.confirmZoneMaintenanceCommand(1, 'Office Switch', () => {
+        throw new Error('auto-config must not ask for confirmation');
+    }), true);
+    assert.equal(zones.confirmZoneMaintenanceCommand(3, 'Office Switch', (prompt) => {
+        prompts.push(prompt);
+        return false;
+    }), false);
+    assert.equal(zones.confirmZoneMaintenanceCommand(4, 'Office Switch', (prompt) => {
+        prompts.push(prompt);
+        return true;
+    }), true);
+    assert.equal(zones.confirmZoneMaintenanceCommand(5, 'Office Switch', () => false), false);
+    assert.match(prompts[0], /Clear Interference for Office Switch\?/);
+    assert.match(prompts[1], /Reset Detection Zones for Office Switch\?/);
+    assert.ok(prompts.every((prompt) => prompt.includes('cannot be undone')));
 });
 
 test('target rendering is suppressed when occupancy gate is clear', () => {

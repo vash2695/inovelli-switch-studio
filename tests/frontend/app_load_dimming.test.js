@@ -155,3 +155,34 @@ test('linked state falls back to unlinked when underlying values diverge', () =>
     assert.equal(state.localValue, 40);
     assert.equal(state.linked, false);
 });
+
+test('schema hydration preserves staged and in-flight values over stale authoritative state', () => {
+    const api = loadLoadDimmingModule();
+    const reads = [];
+
+    api.hydrateFromStateApiForTest({
+        getCurrentValue(param) {
+            reads.push(param);
+            if (param === 'dimmingSpeedUpRemote') return 42;
+            return undefined;
+        },
+        getLatestValue() {
+            assert.fail('staged-aware hydration must not read the stale authoritative-only value');
+        },
+    });
+
+    assert.ok(reads.includes('dimmingSpeedUpRemote'));
+    assert.equal(api.getRawValueForTest('dimmingSpeedUpRemote'), 42);
+});
+
+test('schema hydration retains authoritative fallback compatibility', () => {
+    const api = loadLoadDimmingModule();
+
+    api.hydrateFromStateApiForTest({
+        getLatestValue(param) {
+            return param === 'dimmingSpeedDownRemote' ? 17 : undefined;
+        },
+    });
+
+    assert.equal(api.getRawValueForTest('dimmingSpeedDownRemote'), 17);
+});

@@ -1,6 +1,6 @@
 # Home Assistant Ingress QA Checklist
 
-Last updated: 2026-08-11
+Last updated: 2026-08-12
 
 ## Test Environment
 
@@ -57,10 +57,14 @@ Last updated: 2026-08-11
 - Turn off the grid/FOV and each zone category/individual detection-area visibility option; verify both radar modes follow the same settings and hidden volumes leave no ghost traces.
 - Edit detection, interference, and stay zones using both the chart and coordinate inputs.
 - Verify invalid or zero-span coordinates are rejected with an approachable message.
-- Press the zone editor's `Apply Zone`; confirm it publishes immediately, locks the draft controls while sending, and closes only after the backend accepts the write.
+- Press the zone editor's `Apply Changes`; confirm the lifecycle reads `Sending zone update…`, then `Zone update sent; awaiting device confirmation`, and finally `Zone confirmed`. The controls must lock while sending; the editor may close only after the backend accepts the write.
 - Create another draft and use the main `Apply Changes`; confirm the zone publishes along with staged configuration.
-- Test error and not-confirmed responses; the draft must remain retryable and must not block a zone on another device.
-- Run `Auto-Config Interference` and `Clear Interference`, verifying visible lifecycle feedback.
+- After a sent zone update, force a not-confirmed response; the exact submitted X/Y/Z values and zone selector must reopen for retry without being replaced by the latest authoritative snapshot. Retry it and confirm only the matching device report clears the recovery copy.
+- Repeat with an immediate publish error and a Socket.IO disconnect while sending and while awaiting device confirmation. The active device must retain or restore the exact draft, unlock it after reconnecting, and identify the result as not confirmed. A deletion failure must report clearly but must never create or restore an editable draft.
+- Send a zone update on switch A, move to switch B before its not-confirmed result, then return to A. Switch B must not show or clear A's draft; A must reopen its own retryable values. A stale result with the wrong topic or an older request ID must have no effect.
+- Cancel a restored draft and confirm it is explicitly discarded. Confirming a later successful retry must also clear it; merely receiving `sent`, switching devices, or syncing authoritative state must not.
+- Delete a selected zone and verify the confirmation names both the zone and switch. Confirm the status progresses from sending to awaiting the device and then confirmed; canceling the prompt must send nothing.
+- For `Clear Interference`, `Reset Detection Zones`, and `Clear Stay Zones`, verify the confirmation names the action and selected switch and explains that it cannot be undone from Switch Studio. Cancel must send nothing; accept must send exactly once. While any maintenance command is pending, all maintenance buttons must remain disabled and an attempted duplicate must be rejected. Disconnect before completion and simulate a missing response; reconnect/timeout must release the lock and allow a deliberate retry. `Auto-Config Interference` should start without a destructive confirmation.
 - Press `Force Sync` with a zone draft open and verify discard confirmation appears.
 
 ## 5. Configuration and Confirmation
@@ -79,13 +83,18 @@ Last updated: 2026-08-11
 - Disconnect Socket.IO after applying a change, let the authoritative snapshot restore, and verify a matching value does not return as a false failure.
 - Confirm `Discard` restores the newest authoritative values.
 
-## 6. Firmware Safety
+## 6. Firmware Information and Connector Handoff
 
-- Run `Check for Updates` and verify checking, available/up-to-date, error, and timeout feedback.
-- Confirm firmware actions are disabled while the device or backend is unavailable.
-- Confirm only Zigbee2MQTT catalog updates are offered; there is no custom-URL input.
-- Start an available update only on a safe test device and verify requested, updating/progress, and terminal states.
-- If the catalog image is older than installed firmware, confirm the downgrade warning requires explicit approval.
+- Open `Power & Device` and verify the firmware workspace contains no check, schedule, install, downgrade, abort, custom-URL, or upload control. Watching the panel and switching devices must never publish an OTA request from Switch Studio.
+- Confirm the cards distinguish `Installed switch firmware`, `Inovelli Production`, `Inovelli Beta`, and `Zigbee2MQTT catalog`. Exact Inovelli matches and versions derived from raw builds must be labeled differently, and an unavailable value must never display as zero or imply that the switch is up to date.
+- Confirm the panel clearly distinguishes the switch's Zigbee firmware from the read-only `mmWave Firmware Version` for the sensor module.
+- Verify the handoff says to open Zigbee2MQTT's OTA page and locate the selected switch. The external link must use the generic official Zigbee2MQTT OTA guide, open safely in a new tab, and must not guess or construct a local Zigbee2MQTT/Ingress URL.
+- Start an availability check in Zigbee2MQTT and confirm Switch Studio passively displays checking, catalog available/no catalog update, and connector error states. Start an update only on a safe test device through Zigbee2MQTT and verify scheduled/requested, progress and remaining time, completed, and error states without exposing a Switch Studio update action.
+- While an external update is progressing, deliver an older same-device snapshot after a newer firmware event. The installed/catalog values, lifecycle state, progress, and error must not roll back. A newer independent release-reference generation must still update the Inovelli cards without changing live OTA progress.
+- Switch A → B while firmware events continue and verify versions, progress, errors, and source freshness never leak between topics. Return to A and confirm its latest accepted state remains intact.
+- Verify fresh, refreshing-with-cache, refreshing-without-cache, partial, stale, and unavailable release-reference states. Saved values should remain visible on refresh failure, raw network exception strings should not appear in the panel, and device/Zigbee2MQTT values should remain usable when Inovelli references are unavailable.
+- Take the device or connector offline and confirm cached device information remains clearly marked as potentially cached. Restoring connectivity must not briefly replace a newer state with an older snapshot.
+- With a screen reader, verify firmware status and reference freshness announce politely, the progress bar reports its value and remaining time, the card groups have meaningful terms/descriptions, and the external link identifies that it opens a new tab.
 
 ## 7. Responsive and Accessibility Pass
 

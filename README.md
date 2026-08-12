@@ -2,7 +2,7 @@
 
 Inovelli Switch Studio is a community Home Assistant App (formerly add-on) for discovering, monitoring, and configuring Inovelli Blue Series Zigbee devices through Zigbee2MQTT.
 
-It combines a multi-device dashboard with a full VZM32-SN configuration workspace: live 2D/3D presence radar, visual zone editing, LED-bar previews and notification effects, schema-driven device settings, and Zigbee2MQTT OTA controls.
+It combines a multi-device dashboard with a full VZM32-SN configuration workspace: live 2D/3D presence radar, visual zone editing, LED-bar previews and notification effects, schema-driven device settings, and clear firmware information from the switch, Inovelli, and Zigbee2MQTT.
 
 > This is a community project, not an official Inovelli, Home Assistant, or Zigbee2MQTT product.
 
@@ -21,7 +21,7 @@ It combines a multi-device dashboard with a full VZM32-SN configuration workspac
 
 | Device or platform | Support |
 |---|---|
-| Inovelli Blue Series `VZM32-SN` | Full editor, 2D/3D radar, target telemetry, zone tools, LED editor, configuration, and OTA workspace |
+| Inovelli Blue Series `VZM32-SN` | Full editor, 2D/3D radar, target telemetry, zone tools, LED editor, configuration, and read-only firmware workspace |
 | Other eligible Inovelli `VZM*` models | Dashboard discovery and only the unambiguous writable quick controls exposed by Zigbee2MQTT |
 | ZHA | Not supported |
 | Home Assistant installation | Home Assistant Operating System on `amd64` or `aarch64` |
@@ -113,7 +113,7 @@ The View panel controls zone visibility and the radar display envelope. X/Y disp
 - **Load & Dimming** — dimming levels, ramp timing, paddle response, and linked timing controls
 - **LED & Notifications** — persistent LED defaults, per-segment customization, and notification effects
 - **Buttons & Scenes** — tap, scene, and paddle behavior
-- **Power & Device** — OTA status, electrical reporting, protection, and device operation
+- **Power & Device** — read-only firmware and OTA status, electrical reporting, protection, and device operation
 - **Advanced** — lower-frequency fields and conditionally relevant model settings
 
 The controls are schema-driven, with friendlier names and grouping layered over the Zigbee2MQTT definition. Read-only diagnostics stay read-only, and unsupported or ambiguous device controls are not guessed.
@@ -132,11 +132,13 @@ The VZM32-SN visual editor owns the switch's all-LED defaults and seven physical
 
 Persistent LED defaults follow the normal staged-change workflow. Notification effects are immediate commands. Local animations follow Inovelli's published simulator patterns and physical LED direction; exact pacing can vary with installed firmware.
 
-### Firmware updates
+### Firmware information
 
-The Power & Device section can check and request standard Zigbee2MQTT catalog OTA updates for the selected VZM32-SN. It shows installed, official-reference, catalog, progress, timeout, and error information, and requires confirmation before starting an update.
+The Power & Device section presents the switch firmware reported by Zigbee2MQTT, Inovelli's published Production and Beta releases, Zigbee2MQTT's last catalog result, source freshness, and any passive OTA progress or error state. Exact source matches and versions derived from raw build numbers are identified separately.
 
-The installable image is always the one Zigbee2MQTT reports through its OTA catalog. Custom URLs and local firmware files are not supported. Switch Studio warns when reference metadata appears older than the installed image, but it currently uses only Zigbee2MQTT's standard update topics and does not implement Zigbee2MQTT's separate downgrade endpoints. Keep the switch powered and within reliable Zigbee range until an update finishes.
+Switch Studio does not check, schedule, install, downgrade, or abort firmware. Manage those operations in Zigbee2MQTT's OTA page; Switch Studio continues to display progress reported by Zigbee2MQTT when an update is initiated there. See the [official Zigbee2MQTT OTA guide](https://www.zigbee2mqtt.io/information/ota_updates.html) for update behavior and precautions.
+
+The switch's Zigbee firmware and the mmWave sensor module firmware are separate. The firmware workspace describes the switch firmware; **mmWave Firmware Version** remains a distinct read-only diagnostic and can legitimately show a different version.
 
 ## Change and command safety
 
@@ -147,7 +149,7 @@ Switch Studio deliberately separates staged configuration from immediate actions
 - Publish success is not treated as device confirmation. Requested fields stay in flight until matching device reports confirm every value; failures and timeouts return values to a retryable state.
 - **Discard** removes unsent staged values and zone drafts and restores the latest authoritative device snapshot. It cannot cancel a write that was already published.
 - The zone editor panel's **Apply Changes** sends that zone immediately. The bottom action bar's **Apply Changes** can also submit an active zone draft, but the zone remains a separate write from the configuration payload.
-- Dashboard controls, Target Reporting, maintenance commands, notification effects, and OTA actions are immediate operations.
+- Dashboard controls, Target Reporting, maintenance commands, and notification effects are immediate operations. Firmware management is intentionally delegated to Zigbee2MQTT.
 - Controls disable while Socket.IO, MQTT, inventory, or the target device is unavailable. There is no durable offline command queue or delayed replay.
 
 Pending edits live only in page memory and are lost on reload. Browser preferences such as the active section, radar mode, per-device display height, and reporting auto-off are local UI state rather than device configuration.
@@ -168,12 +170,11 @@ Pending edits live only in page memory and are lost on reload. Browser preferenc
 - The 3D scene is for inspection only; zone drawing and editing remain in 2D.
 - Pending edits are not persisted across page reloads.
 - The UI currently loads Socket.IO, Plotly, and DM Sans from public CDNs, so it is not fully offline even when MQTT is local.
-- Firmware installation is limited to the standard Zigbee2MQTT catalog update path.
+- Firmware information depends on device reports, Zigbee2MQTT catalog state, and periodically refreshed Inovelli references; each can be temporarily unavailable or cached independently.
 - LED preview timing is simulator-based and may differ slightly from device firmware.
 
 ## Roadmap
 
-- Add a local/manual firmware-upload workflow for internet-independent updates.
 - Expand verified full-editor support to additional Inovelli Blue Series models.
 - Continue improving model-aware naming, grouping, contextual guidance, and conditional controls.
 

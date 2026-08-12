@@ -40,7 +40,94 @@ test('back button and All Devices route through the same guarded device selectio
     assert.ok(dashboardIndex > guardIndex, 'dashboard navigation should happen after the unsaved-work guard');
     assert.match(selectionSource, /: 'Return to all devices\?';/);
     assert.match(selectionSource, /discardDevice\(currentTopic, \{ silent: true \}\)/);
-    assert.match(selectionSource, /if \(isEditingZone\) endZoneEdit\(\);/);
+    assert.match(selectionSource, /if \(isEditingZone\) \{[\s\S]*?zoneWriteTracker\.discardRetryable\(currentTopic, editingTarget\);[\s\S]*?endZoneEdit\(\);/);
+});
+
+test('zone writes preserve exact retryable drafts through device confirmation lifecycle', () => {
+    assert.match(template, /const zoneWriteTracker = window\.SwitchStudioZones[\s\S]*?createZoneWriteTracker\(\)/);
+
+    const applyStart = template.indexOf('function applyZoneEdit()');
+    const deleteStart = template.indexOf('function deleteZone()', applyStart);
+    const cancelStart = template.indexOf('function cancelZoneEdit()', deleteStart);
+    assert.ok(applyStart >= 0 && deleteStart > applyStart && cancelStart > deleteStart);
+    const applySource = template.slice(applyStart, deleteStart);
+    const deleteSource = template.slice(deleteStart, cancelStart);
+    assert.match(applySource, /const submittedDraft = JSON\.parse\(JSON\.stringify\(draftZoneConfig\)\);/);
+    assert.match(applySource, /zoneWriteTracker\.begin\(\{[\s\S]*?requestId: zoneRequestId,[\s\S]*?topic: activeDeviceTopic,[\s\S]*?target: editingTarget,[\s\S]*?draft: submittedDraft,[\s\S]*?isDelete: false/);
+    assert.match(applySource, /zoneUpdatePending\.set\(zoneRequestId,[\s\S]*?draft: submittedDraft[\s\S]*?socket\.emit\('update_parameter'/);
+    assert.match(deleteSource, /window\.confirm\(`Delete \$\{zoneLabel\} from \$\{deviceName\}\?/);
+    assert.match(deleteSource, /zoneWriteTracker\.begin\(\{[\s\S]*?target: selectedTarget,[\s\S]*?isDelete: true/);
+
+    const resultStart = template.indexOf("result.action === 'update_parameter'");
+    const resultEnd = template.indexOf("if (window.SwitchStudioState && typeof window.SwitchStudioState.handleCommandResult", resultStart);
+    const resultSource = template.slice(resultStart, resultEnd);
+    assert.match(resultSource, /zoneWriteTracker\.transition\(result\)/);
+    assert.match(resultSource, /result\.status === 'sent'[\s\S]*?endZoneEdit\(\);[\s\S]*?awaiting device confirmation/);
+    assert.match(resultSource, /result\.status === 'confirmed'[\s\S]*?zoneUpdatePending\.delete\(result\.request_id\)/);
+    assert.match(resultSource, /result\.status === 'not_confirmed' \|\| result\.status === 'error'[\s\S]*?restoreRetryableZoneDraft\(requestTopic, zoneRequest\.target\)/);
+    assert.match(resultSource, /Zone update not confirmed; exact draft restored for retry/);
+    assert.match(resultSource, /Zone deletion not confirmed; no draft was restored/);
+
+    const disconnectStart = template.indexOf("socket.on('disconnect'");
+    const disconnectEnd = template.indexOf("socket.on('connect_error'", disconnectStart);
+    const disconnectSource = template.slice(disconnectStart, disconnectEnd);
+    const failIndex = disconnectSource.indexOf("zoneWriteTracker.failPending('disconnected')");
+    const clearIndex = disconnectSource.indexOf('zoneUpdatePending.clear()');
+    assert.ok(failIndex >= 0 && clearIndex > failIndex, 'disconnect must recover immutable drafts before clearing request UI state');
+    assert.match(disconnectSource, /restoreRetryableZoneDraft\(activeInterruptedWrite\.topic, activeInterruptedWrite\.target\)/);
+
+    const restoreStart = template.indexOf('function restoreRetryableZoneDraft(topic, target)');
+    const startEdit = template.indexOf('function startZoneEdit()', restoreStart);
+    const restoreSource = template.slice(restoreStart, startEdit);
+    assert.match(restoreSource, /zoneWriteTracker\.getRetryable\(topic, target\)/);
+    assert.match(restoreSource, /openZoneDraft\(retryable\.target, retryable\.draft\)/);
+    assert.match(template, /showWorkspaceView\(normalizedNext\);\s*restoreRetryableZoneDraft\(normalizedNext\);/);
+    assert.match(template.slice(cancelStart), /zoneWriteTracker\.discardRetryable\(activeDeviceTopic, editingTarget\);[\s\S]*?endZoneEdit\(\);/);
+});
+
+test('destructive zone maintenance commands require named confirmation and block duplicates', () => {
+    assert.match(template, /id="btnZoneCommandAutoConfig" data-zone-maintenance-command="1"/);
+    assert.match(template, /id="btnZoneCommandClearInterference" data-zone-maintenance-command="3"/);
+    assert.match(template, /id="btnZoneCommandResetDetection" data-zone-maintenance-command="4"/);
+    assert.match(template, /id="btnZoneCommandClearStay" data-zone-maintenance-command="5"/);
+
+    const sendStart = template.indexOf('function sendCommand(actionId)');
+    const sendEnd = template.indexOf("configSidebar.addEventListener('change'", sendStart);
+    const sendSource = template.slice(sendStart, sendEnd);
+    const pendingGuard = sendSource.indexOf('if (pendingCommandId !== null)');
+    const confirmation = sendSource.indexOf('confirmZoneMaintenanceCommand(actionId, deviceName, window.confirm.bind(window))');
+    const emit = sendSource.indexOf("socket.emit('send_command', actionId)");
+    assert.ok(pendingGuard >= 0 && confirmation > pendingGuard && emit > confirmation);
+    assert.match(sendSource, /if \(!approved\) \{[\s\S]*?Canceled \$\{actionLabel\} for \$\{deviceName\}[\s\S]*?return;/);
+    assert.match(sendSource, /setPendingCommand\(actionId\)[\s\S]*?updateZoneMaintenanceCommandState\(\);[\s\S]*?socket\.emit\('send_command'/);
+    assert.match(template, /socket\.on\('disconnect',[\s\S]*?clearPendingCommand\(\)[\s\S]*?updateZoneMaintenanceCommandState\(\)/);
+    assert.match(template, /onPendingCommandChange:\s*\(\)\s*=>\s*updateZoneMaintenanceCommandState\(\)/);
+    assert.match(template, /function updateZoneMaintenanceCommandState\(\)[\s\S]*?pendingCommandId !== null[\s\S]*?button\.disabled = disabled/);
+});
+
+test('firmware workspace is informative and delegates every OTA action to Zigbee2MQTT', () => {
+    assert.match(template, /id="firmwareSectionTitle">Firmware Information</);
+    assert.match(template, /Installed switch firmware/);
+    assert.match(template, /Inovelli Production/);
+    assert.match(template, /Inovelli Beta/);
+    assert.match(template, /Zigbee2MQTT catalog/);
+    assert.match(template, /Switch Studio does not check, schedule, install, or downgrade firmware/);
+    assert.match(template, /href="https:\/\/www\.zigbee2mqtt\.io\/information\/ota_updates\.html" target="_blank" rel="noopener noreferrer"/);
+    assert.match(template, /id="firmwareProgressBar" role="progressbar"[^>]*aria-valuemin="0"[^>]*aria-valuemax="100"/);
+    assert.match(template, /id="firmwareStatusMessage" role="status" aria-live="polite" aria-atomic="true"/);
+    assert.match(template, /id="firmwareReferenceStatus" role="status" aria-live="polite" aria-atomic="true"/);
+    assert.match(template, /mmWave Firmware Version[\s\S]*sensor module/);
+    assert.doesNotMatch(template, /id="btnFirmware(?:Check|Install)"/);
+    assert.doesNotMatch(template, /socket\.emit\(['"](?:check_firmware_update|start_firmware_update)['"]/);
+    assert.doesNotMatch(template, /result\.action === ['"](?:check_firmware_update|start_firmware_update)['"]/);
+    assert.doesNotMatch(template, /firmwareResponseTimer|FIRMWARE_RESPONSE_TIMEOUT_MS|handleFirmwareCheckClick|handleFirmwareInstallClick/);
+});
+
+test('firmware listeners merge topic-scoped passive state and reference generations', () => {
+    assert.match(template, /socket\.on\('firmware_status',[\s\S]*?if \(msg\.topic !== deviceSelect\.value\) return;[\s\S]*?applyFirmwareStateUpdate\(msg, \{ topic: msg\.topic \}\)/);
+    assert.match(template, /socket\.on\('firmware_reference_status',[\s\S]*?if \(msg\.topic && msg\.topic !== activeDeviceTopic\) return;[\s\S]*?applyFirmwareStateUpdate\(msg, \{ topic: activeDeviceTopic \}\)/);
+    assert.match(template, /applyFirmwareStateUpdate\([\s\S]*?\{ topic: msg\.topic, payload: snapshotFirmware, ts: msg\.ts \},[\s\S]*?\{ reset: true, topic: msg\.topic \}/);
+    assert.match(template, /window\.SwitchStudioFirmware\.merge\(firmwareStateModel, payload,[\s\S]*?topic/);
 });
 
 test('device-only header controls stay available without redundant status actions', () => {

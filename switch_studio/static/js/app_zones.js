@@ -28,6 +28,22 @@
         })
     });
 
+    const ZONE_DRAFT_FIELDS = Object.freeze([
+        'x_min',
+        'x_max',
+        'y_min',
+        'y_max',
+        'z_min',
+        'z_max'
+    ]);
+
+    const ZONE_MAINTENANCE_ACTIONS = Object.freeze({
+        1: Object.freeze({ label: 'Auto-Config Interference', destructive: false }),
+        3: Object.freeze({ label: 'Clear Interference', destructive: true }),
+        4: Object.freeze({ label: 'Reset Detection Zones', destructive: true }),
+        5: Object.freeze({ label: 'Clear Stay Zones', destructive: true })
+    });
+
     let chartEl = null;
     let dataTableBodyEl = null;
     let zoneStatusEl = null;
@@ -46,6 +62,9 @@
     let latestTargets = [];
     let historyLength = 15;
     let lastCommandId = null;
+    let pendingCommandTimer = null;
+    let pendingCommandTimeoutMs = 15000;
+    let pendingCommandStateListener = null;
     let hideZoneStatusTimer = null;
     let targetsSuppressedByGate = false;
 
@@ -186,6 +205,171 @@
         return payload;
     }
 
+    function cloneZoneDraft(draft) {
+        if (!draft || typeof draft !== 'object') return null;
+        const clone = {};
+        ZONE_DRAFT_FIELDS.forEach((field) => {
+            clone[field] = draft[field];
+        });
+        return Object.freeze(clone);
+    }
+
+    function createZoneWriteTracker() {
+        const pendingByRequest = new Map();
+        const latestRequestByKey = new Map();
+        const retryableByKey = new Map();
+        let sequence = 0;
+
+        function makeKey(topic, target) {
+            return `${String(topic || '').trim()}\u0000${String(target || '').trim()}`;
+        }
+
+        function copyRecord(record) {
+            if (!record) return null;
+            return {
+                requestId: record.requestId,
+                topic: record.topic,
+                target: record.target,
+                isDelete: record.isDelete,
+                draft: record.draft ? { ...record.draft } : null,
+                state: record.state,
+                failureStatus: record.failureStatus || null,
+                recoverable: record.recoverable === true
+            };
+        }
+
+        function begin(options) {
+            const opts = options || {};
+            const requestId = String(opts.requestId || '').trim();
+            const topic = String(opts.topic || '').trim();
+            const target = String(opts.target || '').trim();
+            const isDelete = opts.isDelete === true;
+            const draft = isDelete ? null : cloneZoneDraft(opts.draft);
+            if (!requestId || !topic || !target || (!isDelete && !draft)) return null;
+            if (pendingByRequest.has(requestId)) return null;
+
+            const key = makeKey(topic, target);
+            const previousRequestId = latestRequestByKey.get(key);
+            if (previousRequestId) pendingByRequest.delete(previousRequestId);
+
+            const record = {
+                requestId,
+                topic,
+                target,
+                isDelete,
+                draft,
+                key,
+                state: 'sending',
+                failureStatus: null,
+                recoverable: !isDelete,
+                sequence: ++sequence
+            };
+            pendingByRequest.set(requestId, record);
+            latestRequestByKey.set(key, requestId);
+            retryableByKey.delete(key);
+            return copyRecord(record);
+        }
+
+        function transition(result) {
+            const update = result || {};
+            const requestId = String(update.request_id || update.requestId || '').trim();
+            const record = pendingByRequest.get(requestId);
+            if (!record) return { handled: false, reason: 'unknown_request' };
+
+            const resultTopic = String(update.topic || '').trim();
+            if (resultTopic && resultTopic !== record.topic) {
+                return { handled: false, reason: 'topic_mismatch' };
+            }
+            if (latestRequestByKey.get(record.key) !== requestId) {
+                pendingByRequest.delete(requestId);
+                return { handled: false, reason: 'stale_request' };
+            }
+
+            const status = String(update.status || '').trim().toLowerCase();
+            if (status === 'sending' || status === 'sent') {
+                record.state = status === 'sent' ? 'awaiting_device' : 'sending';
+                return { handled: true, terminal: false, record: copyRecord(record) };
+            }
+
+            if (status === 'confirmed') {
+                pendingByRequest.delete(requestId);
+                latestRequestByKey.delete(record.key);
+                retryableByKey.delete(record.key);
+                record.state = 'confirmed';
+                return { handled: true, terminal: true, confirmed: true, record: copyRecord(record) };
+            }
+
+            if (status === 'not_confirmed' || status === 'error' || status === 'disconnected') {
+                pendingByRequest.delete(requestId);
+                latestRequestByKey.delete(record.key);
+                record.state = record.isDelete ? status : 'retryable';
+                record.failureStatus = status;
+                if (!record.isDelete && record.recoverable) retryableByKey.set(record.key, record);
+                return {
+                    handled: true,
+                    terminal: true,
+                    confirmed: false,
+                    shouldRestore: !record.isDelete && record.recoverable,
+                    record: copyRecord(record)
+                };
+            }
+
+            return { handled: false, reason: 'unsupported_status' };
+        }
+
+        function failPending(status) {
+            const failureStatus = status === 'error' ? 'error' : 'disconnected';
+            return Array.from(pendingByRequest.keys())
+                .map((requestId) => transition({ request_id: requestId, status: failureStatus }))
+                .filter((result) => result.handled);
+        }
+
+        function getRetryable(topic, target) {
+            const normalizedTopic = String(topic || '').trim();
+            const normalizedTarget = String(target || '').trim();
+            if (!normalizedTopic) return null;
+            if (normalizedTarget) return copyRecord(retryableByKey.get(makeKey(normalizedTopic, normalizedTarget)));
+
+            const matches = Array.from(retryableByKey.values())
+                .filter((record) => record.topic === normalizedTopic)
+                .sort((left, right) => right.sequence - left.sequence);
+            return copyRecord(matches[0]);
+        }
+
+        function discardRetryable(topic, target) {
+            const key = makeKey(topic, target);
+            const removedRetry = retryableByKey.delete(key);
+            const pendingRequestId = latestRequestByKey.get(key);
+            const pendingRecord = pendingRequestId ? pendingByRequest.get(pendingRequestId) : null;
+            if (pendingRecord && !pendingRecord.isDelete) pendingRecord.recoverable = false;
+            return removedRetry || !!pendingRecord;
+        }
+
+        function hasPending(topic, target) {
+            const key = makeKey(topic, target);
+            const requestId = latestRequestByKey.get(key);
+            return !!(requestId && pendingByRequest.has(requestId));
+        }
+
+        return Object.freeze({
+            begin,
+            transition,
+            failPending,
+            getRetryable,
+            discardRetryable,
+            hasPending
+        });
+    }
+
+    function confirmZoneMaintenanceCommand(actionId, deviceName, confirmFn) {
+        const definition = ZONE_MAINTENANCE_ACTIONS[Number(actionId)];
+        if (!definition) return false;
+        if (!definition.destructive) return true;
+        if (typeof confirmFn !== 'function') return false;
+        const safeDeviceName = String(deviceName || 'selected device').trim() || 'selected device';
+        return confirmFn(`${definition.label} for ${safeDeviceName}? This changes saved sensor zones and cannot be undone from Switch Studio.`) === true;
+    }
+
     function appendCommandLog(message, type) {
         if (!commandLogEl || !message) return;
 
@@ -236,9 +420,34 @@
         }, 5000);
     }
 
+    function notifyPendingCommandState() {
+        if (typeof pendingCommandStateListener === 'function') {
+            pendingCommandStateListener(lastCommandId);
+        }
+    }
+
+    function clearPendingCommand() {
+        if (pendingCommandTimer) {
+            clearTimeout(pendingCommandTimer);
+            pendingCommandTimer = null;
+        }
+        const changed = lastCommandId !== null;
+        lastCommandId = null;
+        if (changed) notifyPendingCommandState();
+    }
+
+    function expirePendingCommand(actionId, label) {
+        if (lastCommandId !== actionId) return;
+        clearPendingCommand();
+        const message = `${label} was not confirmed in time. Check the device state before retrying.`;
+        appendCommandLog(message, 'error');
+        setPacketStatus('error', message);
+        showToast('error', message, 3200);
+    }
+
     function setPendingCommand(actionId) {
         const parsedId = Number(actionId);
-        if (!Number.isFinite(parsedId)) return;
+        if (!Number.isFinite(parsedId) || lastCommandId !== null) return false;
         lastCommandId = parsedId;
 
         const labelMap = {
@@ -258,6 +467,12 @@
 
         setPacketStatus('syncing', status);
         appendCommandLog(`Sent ${label}`, 'syncing');
+        pendingCommandTimer = setTimeout(
+            () => expirePendingCommand(parsedId, label),
+            pendingCommandTimeoutMs
+        );
+        notifyPendingCommandState();
+        return true;
     }
 
     function handleCommandResult(result) {
@@ -279,6 +494,7 @@
             appendCommandLog(`Failed ${controlID}: ${message}`, 'error');
             setPacketStatus('error', `Error: ${message}`);
             showToast('error', message, 3000);
+            clearPendingCommand();
         }
     }
 
@@ -323,11 +539,7 @@
         setPacketStatus(packetMode, message);
         showToast(type === 'error' ? 'error' : packetMode, message, 2200);
 
-        lastCommandId = null;
-    }
-
-    function clearPendingCommand() {
-        lastCommandId = null;
+        clearPendingCommand();
     }
 
     function getPendingCommandId() {
@@ -1008,6 +1220,12 @@
         getIsInteractingFn = opts.getIsInteracting || null;
         shouldRenderTargetsFn = opts.shouldRenderTargets || null;
         shouldRender2dFn = opts.shouldRender2d || null;
+        pendingCommandStateListener = typeof opts.onPendingCommandChange === 'function'
+            ? opts.onPendingCommandChange
+            : null;
+        pendingCommandTimeoutMs = Number.isFinite(opts.maintenanceCommandTimeoutMs) && opts.maintenanceCommandTimeoutMs > 0
+            ? opts.maintenanceCommandTimeoutMs
+            : 15000;
         historyLength = Number.isFinite(opts.historyLength) ? opts.historyLength : 15;
         limits = {
             xMin: Number.isFinite(opts.limits?.xMin) ? opts.limits.xMin : DEFAULT_LIMITS.xMin,
@@ -1027,6 +1245,8 @@
         normalizeZoneConfig,
         validateZoneConfig,
         buildAreaPayload,
+        createZoneWriteTracker,
+        confirmZoneMaintenanceCommand,
         setPendingCommand,
         handleCommandResult,
         handleInterferenceZones,

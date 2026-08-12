@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -30,6 +31,46 @@ def _make_device(name, topic, model="VZM32-SN", capabilities=None):
     if capabilities:
         device["capabilities"].update(capabilities)
     return device
+
+
+def _make_reference_snapshot(generation=7, status="ready"):
+    return {
+        "generation": generation,
+        "reference_status": status,
+        "reference_stale": status == "stale",
+        "reference_error": None,
+        "fetched_at": 1_786_539_000,
+        "last_attempt_at": 1_786_539_000,
+        "retry_at": 1_786_560_600,
+        "current_versions": {"Production": "1.00", "Beta": "1.01"},
+        "entries": {
+            16974080: {
+                "build": "16974080",
+                "raw_hex": "0x01030100",
+                "display_version": "1.00",
+                "track": "Production",
+                "file_name": "VZM32-SN_1.00.ota",
+                "source_name": "Inovelli firmware file",
+                "source_url": "https://example.test/VZM32-SN_1.00.ota",
+                "match_kind": "exact",
+                "exact_match": True,
+                "alias_versions": [],
+            },
+            16974081: {
+                "build": "16974081",
+                "raw_hex": "0x01030101",
+                "display_version": "1.01",
+                "track": "Beta",
+                "file_name": "VZM32-SN_1.01.ota",
+                "source_name": "Inovelli firmware file",
+                "source_url": "https://example.test/VZM32-SN_1.01.ota",
+                "match_kind": "exact",
+                "exact_match": True,
+                "alias_versions": [],
+            },
+        },
+        "sources": {"inovelli_repo": "ok", "inovelli_help": "ok"},
+    }
 
 
 def _int16_to_le_bytes(value):
@@ -71,15 +112,13 @@ class AppBackendTests(unittest.TestCase):
             app_module.pending_writes.clear()
         for entry in pending_entries:
             app_module._cancel_pending_timer(entry)
-        with app_module.ota_requests_lock:
-            app_module.ota_requests.clear()
         with app_module.mqtt_state_lock:
             app_module.mqtt_state.update({
-                "connected": False,
-                "broker_connected": False,
-                "zigbee2mqtt_connected": None,
-                "inventory_ready": False,
-                "reason": "Starting",
+                "connected": True,
+                "broker_connected": True,
+                "zigbee2mqtt_connected": True,
+                "inventory_ready": True,
+                "reason": "Connected",
                 "updated_at": 0,
             })
         self.clients = []
@@ -192,10 +231,18 @@ class AppBackendTests(unittest.TestCase):
     def test_build_force_sync_payload_uses_readable_schema_fields(self):
         fake_schema = {
             "fields": [
-                {"name": "occupancy", "can_read": True},
-                {"name": "mmWaveVersion", "can_read": True},
-                {"name": "write_only_field", "can_read": False},
-                {"name": None, "can_read": True},
+                {"name": "occupancy", "can_get": True},
+                {"name": "mmWaveVersion", "access": 5},
+                {"name": "write_only_field", "can_get": False},
+                {"name": "state_only_field", "access": 1},
+                {
+                    "name": "light",
+                    "features": [
+                        {"property": "state", "can_get": True},
+                        {"property": "brightness", "access": 7},
+                    ],
+                },
+                {"name": None, "can_get": True},
                 "invalid",
             ]
         }
@@ -815,129 +862,295 @@ class AppBackendTests(unittest.TestCase):
         self.assertEqual(results[-1]["payload"]["confirmed_fields"], [])
         self.assertEqual(results[-1]["payload"]["unresolved_fields"], ["mmWaveHoldTime"])
 
-    def test_check_firmware_update_publishes_bridge_request(self):
-        published = []
-
-        def fake_publish(topic, payload, origin, sid=None):
-            published.append({"topic": topic, "payload": payload, "origin": origin, "sid": sid})
-            return True, 0
+    def test_firmware_management_events_are_unregistered_and_never_publish(self):
+        handlers = app_module.socketio.server.handlers.get("/", {})
+        self.assertNotIn("check_firmware_update", handlers)
+        self.assertNotIn("start_firmware_update", handlers)
 
         client = self._client()
         client.get_received()
-
-        with patch.object(app_module, "publish_json", side_effect=fake_publish):
-            client.emit("change_device", "zigbee2mqtt/device_a")
-            client.get_received()
-            client.emit("check_firmware_update", {"request_id": "ota-check-1"})
-
-        self.assertEqual(len(published), 1)
-        self.assertEqual(published[0]["topic"], "zigbee2mqtt/bridge/request/device/ota_update/check")
-        self.assertEqual(published[0]["payload"]["id"], "device_a")
-        self.assertTrue(published[0]["payload"]["transaction"].startswith("switch-studio-"))
-        self.assertEqual(published[0]["origin"], "check_firmware_update")
-
-        results = [event["args"][0] for event in client.get_received() if event["name"] == "command_result"]
-        matching = [result for result in results if result.get("action") == "check_firmware_update"]
-        self.assertTrue(matching)
-        self.assertEqual(matching[-1]["status"], "sent")
-
-    def test_start_firmware_update_publishes_bridge_request(self):
-        published = []
-
-        def fake_publish(topic, payload, origin, sid=None):
-            published.append({"topic": topic, "payload": payload, "origin": origin, "sid": sid})
-            return True, 0
-
-        client = self._client()
-        client.get_received()
-
-        with patch.object(app_module, "publish_json", side_effect=fake_publish):
-            client.emit("change_device", "zigbee2mqtt/device_a")
-            client.get_received()
-            client.emit("start_firmware_update", {"request_id": "ota-update-1"})
-
-        self.assertEqual(len(published), 1)
-        self.assertEqual(published[0]["topic"], "zigbee2mqtt/bridge/request/device/ota_update/update")
-        self.assertEqual(published[0]["payload"]["id"], "device_a")
-        self.assertTrue(published[0]["payload"]["transaction"].startswith("switch-studio-"))
-        self.assertEqual(published[0]["origin"], "start_firmware_update")
-
-        results = [event["args"][0] for event in client.get_received() if event["name"] == "command_result"]
-        matching = [result for result in results if result.get("action") == "start_firmware_update"]
-        self.assertTrue(matching)
-        self.assertEqual(matching[-1]["status"], "sent")
-
-    def test_start_firmware_update_rejects_custom_url(self):
-        client = self._client()
-        client.get_received()
-        client.emit("change_device", "zigbee2mqtt/device_a")
-        client.get_received()
-
         with patch.object(app_module, "publish_json") as publish_mock:
-            client.emit(
-                "start_firmware_update",
-                {"request_id": "ota-custom-url", "url": "https://untrusted.example/firmware.ota"},
+            client.emit("check_firmware_update", {"request_id": "legacy-check"})
+            client.emit("start_firmware_update", {"request_id": "legacy-update"})
+        publish_mock.assert_not_called()
+        self.assertEqual(self._command_results(client, "check_firmware_update"), [])
+        self.assertEqual(self._command_results(client, "start_firmware_update"), [])
+
+    def test_bridge_ota_responses_are_ignored_without_request_correlation(self):
+        topic = "zigbee2mqtt/device_a"
+        with app_module.device_list_lock:
+            live = app_module.device_list["device_a"]["ota_status"]
+            live.update({
+                "revision": 4,
+                "installed_version": "16974080",
+                "latest_version": "16974081",
+                "state": "available",
+                "progress": None,
+            })
+            before = dict(live)
+
+        for response_topic in (
+            "zigbee2mqtt/bridge/response/device/ota_update/check",
+            "zigbee2mqtt/bridge/response/device/ota_update/update",
+        ):
+            response = SimpleNamespace(
+                topic=response_topic,
+                payload=json.dumps({
+                    "status": "ok",
+                    "transaction": "external-z2m-action",
+                    "data": {
+                        "id": "device_a",
+                        "updateAvailable": False,
+                        "update": {"state": "completed", "progress": 100},
+                    },
+                }).encode("utf-8"),
+            )
+            with patch.object(app_module.socketio, "emit") as emit_mock:
+                app_module.on_message(None, None, response)
+            self.assertFalse(any(
+                call.args and call.args[0] == "firmware_status"
+                for call in emit_mock.call_args_list
+            ))
+
+        with app_module.device_list_lock:
+            self.assertEqual(app_module.device_list["device_a"]["ota_status"], before)
+
+    def test_live_firmware_revision_increments_atomically(self):
+        topic = "zigbee2mqtt/device_a"
+        worker_count = 12
+        barrier = threading.Barrier(worker_count + 1)
+        revisions = []
+        failures = []
+        result_lock = threading.Lock()
+
+        def update_progress(index):
+            try:
+                barrier.wait()
+                result = app_module.update_device_ota_status(
+                    topic,
+                    {"state": "updating", "progress": index},
+                )
+                with result_lock:
+                    revisions.append(result["revision"])
+            except Exception as error:  # pragma: no cover - asserted below
+                with result_lock:
+                    failures.append(error)
+
+        with (
+            patch.object(app_module.socketio, "emit"),
+            patch.object(app_module, "emit_device_delta"),
+            patch.object(app_module, "get_firmware_reference_snapshot", return_value={}),
+            patch.object(app_module, "schedule_firmware_reference_refresh", return_value=False),
+        ):
+            workers = [
+                threading.Thread(target=update_progress, args=(index,))
+                for index in range(worker_count)
+            ]
+            for worker in workers:
+                worker.start()
+            barrier.wait()
+            for worker in workers:
+                worker.join(timeout=5)
+
+        self.assertEqual(failures, [])
+        self.assertEqual(sorted(revisions), list(range(1, worker_count + 1)))
+        with app_module.device_list_lock:
+            stored = dict(app_module.device_list["device_a"]["ota_status"])
+        self.assertEqual(stored["revision"], worker_count)
+        self.assertEqual(stored["observed_source"], "zigbee2mqtt")
+        self.assertIsNotNone(stored["observed_at"])
+
+    def test_firmware_snapshots_and_events_compose_without_mutating_live_state(self):
+        topic = "zigbee2mqtt/device_a"
+        reference = _make_reference_snapshot(generation=11)
+        with app_module.device_list_lock:
+            live = app_module.device_list["device_a"]["ota_status"]
+            live.update({
+                "revision": 3,
+                "observed_at": 1_786_540_000,
+                "installed_version": "16974080",
+                "latest_version": "16974081",
+                "available": True,
+                "state": "available",
+            })
+            before = dict(live)
+
+        with (
+            patch.object(app_module, "get_firmware_reference_snapshot", return_value=reference),
+            patch.object(app_module, "schedule_firmware_reference_refresh", return_value=False),
+        ):
+            snapshot = app_module.build_device_snapshot(topic)
+            with patch.object(app_module.socketio, "emit") as emit_mock:
+                app_module.emit_firmware_status(topic, room="one-browser")
+
+        composed = snapshot["payload"]["ota_status"]
+        self.assertEqual(composed["schema_version"], 1)
+        self.assertEqual(composed["topic"], topic)
+        self.assertEqual(composed["live"]["revision"], 3)
+        self.assertEqual(composed["live"]["installed_version"], "16974080")
+        self.assertEqual(composed["reference"]["generation"], 11)
+        self.assertEqual(composed["reference"]["status"], "fresh")
+        self.assertEqual(
+            composed["reference"]["installed_version_detail"]["display_version"],
+            "1.00",
+        )
+        self.assertEqual(composed["management"], {"owner": "zigbee2mqtt", "local_actions": False})
+
+        emitted = next(
+            call.args[1]
+            for call in emit_mock.call_args_list
+            if call.args and call.args[0] == "firmware_status"
+        )
+        self.assertEqual(emitted["payload"]["live"], composed["live"])
+        self.assertEqual(emitted["payload"]["reference"]["generation"], 11)
+        self.assertEqual(emit_mock.call_args.kwargs.get("room"), "one-browser")
+
+        with app_module.device_list_lock:
+            stored = app_module.device_list["device_a"]["ota_status"]
+            self.assertEqual(stored, before)
+            self.assertNotIn("installed_version_detail", stored)
+            self.assertNotIn("latest_version_detail", stored)
+            self.assertNotIn("official_versions", stored)
+            self.assertNotIn("reference", stored)
+
+    def test_compose_exposes_the_new_refresh_start_generation(self):
+        topic = "zigbee2mqtt/device_a"
+        terminal = _make_reference_snapshot(generation=40, status="ready")
+        started = _make_reference_snapshot(generation=41, status="refreshing")
+        started["reference_refreshing"] = True
+
+        with (
+            patch.object(
+                app_module,
+                "get_firmware_reference_snapshot",
+                return_value=terminal,
+            ),
+            patch.object(
+                app_module,
+                "schedule_firmware_reference_refresh",
+                return_value=started,
+            ),
+        ):
+            composed = app_module.compose_firmware_status(topic, app_module.default_ota_status())
+
+        self.assertEqual(composed["reference"]["generation"], 41)
+        self.assertEqual(composed["reference"]["status"], "refreshing")
+        self.assertTrue(composed["reference"]["refreshing"])
+
+    def test_scheduler_returns_the_service_refresh_start_snapshot(self):
+        terminal = _make_reference_snapshot(generation=50, status="stale")
+        started = _make_reference_snapshot(generation=51, status="refreshing")
+        started["reference_refreshing"] = True
+
+        with (
+            patch.object(app_module, "get_firmware_reference_snapshot", return_value=terminal),
+            patch.object(app_module, "get_vzm32sn_reference_data", return_value=started) as start_mock,
+            patch.object(app_module.threading, "Thread") as thread_class,
+        ):
+            scheduled = app_module.schedule_firmware_reference_refresh(
+                force_refresh=True,
+                allow_in_test=True,
             )
 
-        publish_mock.assert_not_called()
-        results = self._command_results(client, "start_firmware_update")
-        self.assertEqual(results[-1]["status"], "error")
-        self.assertEqual(results[-1]["message"], "Custom firmware URLs are not supported")
+        try:
+            self.assertEqual(scheduled["generation"], 51)
+            self.assertTrue(scheduled["reference_refreshing"])
+            start_mock.assert_called_once_with(allow_network=True, force_refresh=True)
+            thread_class.return_value.start.assert_called_once_with()
+        finally:
+            with app_module.firmware_reference_refresh_lock:
+                app_module.firmware_reference_refresh_active = False
+                app_module.firmware_reference_refresh_thread = None
 
-    def test_ota_error_response_uses_transaction_when_response_data_is_empty(self):
+    def test_delayed_reference_completion_cannot_overwrite_newer_live_progress(self):
         topic = "zigbee2mqtt/device_a"
-        transaction = app_module.register_ota_request(topic, "check_firmware_update")
+        started = threading.Event()
+        release = threading.Event()
+        current_reference = _make_reference_snapshot(generation=20, status="stale")
+
+        with app_module.device_list_lock:
+            app_module.device_list["device_a"]["capabilities"]["full_editor"] = True
+            app_module.device_list["device_a"]["ota_status"].update({
+                "revision": 1,
+                "state": "updating",
+                "progress": 5,
+                "installed_version": "16974080",
+                "latest_version": "16974081",
+            })
+
+        def cached_reference_lookup(allow_network=True, force_refresh=False):
+            return dict(current_reference)
+
+        def blocking_reference_refresh(force_refresh=False):
+            started.set()
+            self.assertTrue(release.wait(timeout=5))
+            current_reference.update(_make_reference_snapshot(generation=21, status="ready"))
+            return dict(current_reference)
+
+        with (
+            patch.object(app_module, "get_vzm32sn_reference_data", side_effect=cached_reference_lookup),
+            patch.object(app_module, "refresh_vzm32sn_reference_data", side_effect=blocking_reference_refresh),
+            patch.object(app_module.socketio, "emit") as emit_mock,
+            patch.object(app_module, "emit_device_delta"),
+        ):
+            with app_module.firmware_reference_refresh_lock:
+                app_module.firmware_reference_refresh_active = True
+            worker = threading.Thread(target=app_module._firmware_reference_refresh_worker)
+            worker.start()
+            self.assertTrue(started.wait(timeout=5))
+
+            updated = app_module.update_device_ota_status(
+                topic,
+                {"state": "updating", "progress": 73.5, "remaining": 42},
+            )
+            self.assertEqual(updated["revision"], 2)
+            release.set()
+            worker.join(timeout=5)
+            self.assertFalse(worker.is_alive())
+
+        firmware_events = [
+            call.args[1]
+            for call in emit_mock.call_args_list
+            if call.args and call.args[0] == "firmware_status"
+        ]
+        self.assertGreaterEqual(len(firmware_events), 2)
+        final_payload = firmware_events[-1]["payload"]
+        self.assertEqual(final_payload["live"]["revision"], 2)
+        self.assertEqual(final_payload["live"]["progress"], 73.5)
+        self.assertEqual(final_payload["live"]["remaining"], 42)
+        self.assertEqual(final_payload["reference"]["generation"], 21)
+        with app_module.device_list_lock:
+            stored = app_module.device_list["device_a"]["ota_status"]
+            self.assertEqual(stored["revision"], 2)
+            self.assertEqual(stored["progress"], 73.5)
+            self.assertNotIn("reference", stored)
+
+    def test_snapshot_change_and_force_sync_never_request_reference_network(self):
+        topic = "zigbee2mqtt/device_a"
+        reference = _make_reference_snapshot(generation=30)
+
+        def cached_reference_only(allow_network=True, force_refresh=False):
+            self.assertFalse(allow_network, "synchronous application path requested firmware network I/O")
+            return reference
+
         client = self._client()
         client.get_received()
+        with (
+            patch.object(app_module, "get_vzm32sn_reference_data", side_effect=cached_reference_only) as reference_mock,
+            patch.object(app_module, "schedule_firmware_reference_refresh", return_value=False),
+            patch.object(app_module, "publish_json", return_value=(True, 0)),
+        ):
+            snapshot = app_module.build_device_snapshot(topic)
+            client.emit("change_device", topic)
+            client.get_received()
+            client.emit("force_sync", {"request_id": "read-only-firmware-sync"})
 
-        response = SimpleNamespace(
-            topic="zigbee2mqtt/bridge/response/device/ota_update/check",
-            payload=json.dumps({
-                "status": "error",
-                "transaction": transaction,
-                "data": {},
-                "error": "Update check failed",
-            }).encode("utf-8"),
-        )
-        app_module.on_message(None, None, response)
-
-        with app_module.ota_requests_lock:
-            self.assertNotIn(transaction, app_module.ota_requests)
-        events = [event["args"][0] for event in client.get_received() if event["name"] == "firmware_status"]
-        self.assertTrue(events)
-        self.assertEqual(events[-1]["topic"], topic)
-        self.assertEqual(events[-1]["payload"]["state"], "error")
-        self.assertEqual(events[-1]["payload"]["last_error"], "Update check failed")
-
-    def test_successful_ota_update_response_marks_completion_and_new_version(self):
-        topic = "zigbee2mqtt/device_a"
-        transaction = app_module.register_ota_request(topic, "start_firmware_update")
-        client = self._client()
-        client.get_received()
-
-        response = SimpleNamespace(
-            topic="zigbee2mqtt/bridge/response/device/ota_update/update",
-            payload=json.dumps({
-                "status": "ok",
-                "transaction": transaction,
-                "data": {
-                    "id": "device_a",
-                    "from": {"file_version": 16974080},
-                    "to": {"file_version": 16974336},
-                },
-            }).encode("utf-8"),
-        )
-        app_module.on_message(None, None, response)
-
-        events = [event["args"][0] for event in client.get_received() if event["name"] == "firmware_status"]
-        self.assertTrue(events)
-        status = events[-1]["payload"]
-        self.assertEqual(status["state"], "completed")
-        self.assertEqual(status["progress"], 100)
-        self.assertEqual(status["remaining"], None)
-        self.assertEqual(status["available"], False)
-        self.assertEqual(status["installed_version"], "16974336")
-        self.assertEqual(status["latest_version"], "16974336")
+        self.assertEqual(snapshot["payload"]["ota_status"]["reference"]["generation"], 30)
+        self.assertGreaterEqual(reference_mock.call_count, 3)
+        self.assertTrue(all(
+            call.kwargs.get("allow_network") is False
+            for call in reference_mock.call_args_list
+        ))
 
     def test_terminal_ota_state_clears_stale_progress_unless_explicitly_reported(self):
         topic = "zigbee2mqtt/device_a"
@@ -972,6 +1185,19 @@ class AppBackendTests(unittest.TestCase):
         self.assertEqual(result["remaining"], 42.5)
         self.assertEqual(result["installed_version"], "16974080")
         self.assertEqual(result["latest_version"], "16973834")
+
+    def test_zigbee2mqtt_v2_update_state_supplies_availability_without_legacy_flag(self):
+        available = app_module.extract_ota_status_from_payload({
+            "update": {
+                "state": "available",
+                "installed_version": 10,
+                "latest_version": 11,
+            }
+        })
+        idle = app_module.extract_ota_status_from_payload({"update": {"state": "idle"}})
+        self.assertIs(available["available"], True)
+        self.assertEqual(available["state"], "available")
+        self.assertIs(idle["available"], False)
 
     def test_partial_ota_progress_retains_cached_versions(self):
         topic = "zigbee2mqtt/Bedroom Light Control"
@@ -1026,6 +1252,35 @@ class AppBackendTests(unittest.TestCase):
             self.assertEqual(published[0]["topic"], "zigbee2mqtt/device_shared/set")
             self.assertEqual(published[0]["origin"], "auto_disable_target_reporting")
             self.assertIn("mmWaveTargetInfoReport", published[0]["payload"])
+
+    def test_auto_off_disconnect_skips_publish_when_backend_or_device_is_not_ready(self):
+        for offline_kind in ("broker", "device"):
+            with self.subTest(offline_kind=offline_kind):
+                client = self._client()
+                client.get_received()
+                client.emit("change_device", "zigbee2mqtt/device_shared")
+                client.emit("set_reporting_auto_off", {"enabled": True})
+                client.get_received()
+                if offline_kind == "broker":
+                    with app_module.mqtt_state_lock:
+                        app_module.mqtt_state["broker_connected"] = False
+                        app_module.mqtt_state["connected"] = False
+                else:
+                    with app_module.device_list_lock:
+                        app_module.device_list["device_shared"]["availability"] = "offline"
+                with patch.object(app_module, "publish_json") as publish_mock:
+                    client.disconnect()
+                publish_mock.assert_not_called()
+
+                with app_module.mqtt_state_lock:
+                    app_module.mqtt_state.update({
+                        "connected": True,
+                        "broker_connected": True,
+                        "zigbee2mqtt_connected": True,
+                        "inventory_ready": True,
+                    })
+                with app_module.device_list_lock:
+                    app_module.device_list["device_shared"]["availability"] = None
 
     def test_index_renders_feature_flag_value(self):
         original_value = app_module.SWITCH_STUDIO_UI
@@ -1247,26 +1502,28 @@ class AppBackendTests(unittest.TestCase):
             {"state": "state", "brightness": "brightness"},
         )
 
-    def test_ota_request_preserves_slash_friendly_name(self):
+    def test_read_only_firmware_snapshot_preserves_slash_friendly_name(self):
         friendly_name = "kitchen/floor_light"
         topic = f"zigbee2mqtt/{friendly_name}"
         with app_module.device_list_lock:
             app_module.device_list.clear()
             app_module.device_list[friendly_name] = _make_device(friendly_name, topic)
+            app_module.device_list[friendly_name]["ota_status"].update({
+                "revision": 1,
+                "installed_version": "16974080",
+            })
 
-        client = self._client()
-        client.get_received()
-        with patch.object(app_module, "publish_json", return_value=(True, 0)) as publish_mock:
-            client.emit("change_device", topic)
-            client.get_received()
-            client.emit("check_firmware_update", {"request_id": "slash-ota"})
+        with (
+            patch.object(app_module, "get_firmware_reference_snapshot", return_value=_make_reference_snapshot()),
+            patch.object(app_module, "schedule_firmware_reference_refresh", return_value=False),
+            patch.object(app_module, "publish_json") as publish_mock,
+        ):
+            snapshot = app_module.build_device_snapshot(topic)
 
-        publish_mock.assert_called_once()
-        self.assertEqual(
-            publish_mock.call_args.args[0],
-            "zigbee2mqtt/bridge/request/device/ota_update/check",
-        )
-        self.assertEqual(publish_mock.call_args.args[1]["id"], friendly_name)
+        publish_mock.assert_not_called()
+        self.assertEqual(snapshot["topic"], topic)
+        self.assertEqual(snapshot["payload"]["ota_status"]["topic"], topic)
+        self.assertEqual(snapshot["payload"]["ota_status"]["live"]["installed_version"], "16974080")
 
     def test_known_device_name_ending_in_availability_is_processed_as_state(self):
         friendly_name = "kitchen/availability"
@@ -1444,59 +1701,32 @@ class AppBackendTests(unittest.TestCase):
             }
         }
         msg = SimpleNamespace(topic=topic, payload=json.dumps(payload).encode("utf-8"))
-        app_module.on_message(None, None, msg)
+        with (
+            patch.object(app_module, "get_firmware_reference_snapshot", return_value=_make_reference_snapshot()),
+            patch.object(app_module, "schedule_firmware_reference_refresh", return_value=False),
+        ):
+            app_module.on_message(None, None, msg)
 
         firmware_events = [event["args"][0] for event in client.get_received() if event["name"] == "firmware_status"]
         self.assertTrue(firmware_events)
         latest = firmware_events[-1]["payload"]
-        self.assertEqual(latest["available"], True)
-        self.assertEqual(latest["installed_version"], "16974080")
-        self.assertEqual(latest["latest_version"], "16973834")
-        self.assertEqual(latest["installed_version_detail"]["display_version"], "1.00")
-        self.assertEqual(latest["installed_version_detail"]["raw_hex"], "0x01030100")
-        self.assertEqual(latest["latest_version_detail"]["display_version"], "0.10")
-        self.assertEqual(latest["latest_version_detail"]["raw_hex"], "0x0103000A")
-        self.assertEqual(latest["official_versions"], {})
-        self.assertEqual(latest["state"], "available")
+        self.assertEqual(latest["live"]["revision"], 1)
+        self.assertEqual(latest["live"]["available"], True)
+        self.assertEqual(latest["live"]["installed_version"], "16974080")
+        self.assertEqual(latest["live"]["latest_version"], "16973834")
+        self.assertEqual(latest["live"]["state"], "available")
+        self.assertEqual(latest["reference"]["installed_version_detail"]["display_version"], "1.00")
+        self.assertEqual(latest["reference"]["installed_version_detail"]["raw_hex"], "0x01030100")
+        self.assertEqual(latest["reference"]["latest_version_detail"]["display_version"], "0.10")
+        self.assertEqual(latest["reference"]["latest_version_detail"]["raw_hex"], "0x0103000A")
+        self.assertEqual(latest["reference"]["official_versions"], {"Production": "1.00", "Beta": "1.01"})
 
-    def test_on_message_handles_ota_bridge_response(self):
-        topic = "zigbee2mqtt/Bedroom Light Control"
         with app_module.device_list_lock:
-            app_module.device_list["Bedroom Light Control"] = _make_device("Bedroom Light Control", topic)
-
-        client = self._client()
-        client.get_received()
-
-        payload = {
-            "status": "ok",
-            "data": {
-                "id": "Bedroom Light Control",
-                "updateAvailable": True,
-                "downgrade": True,
-                "update": {
-                    "installed_version": 16974080,
-                    "latest_version": 16973834,
-                    "state": "checked",
-                }
-            }
-        }
-        msg = SimpleNamespace(
-            topic="zigbee2mqtt/bridge/response/device/ota_update/check",
-            payload=json.dumps(payload).encode("utf-8")
-        )
-        app_module.on_message(None, None, msg)
-
-        firmware_events = [event["args"][0] for event in client.get_received() if event["name"] == "firmware_status"]
-        self.assertTrue(firmware_events)
-        latest = firmware_events[-1]["payload"]
-        self.assertEqual(latest["available"], True)
-        self.assertEqual(latest["downgrade"], True)
-        self.assertEqual(latest["installed_version"], "16974080")
-        self.assertEqual(latest["latest_version"], "16973834")
-        self.assertEqual(latest["installed_version_detail"]["display_version"], "1.00")
-        self.assertEqual(latest["latest_version_detail"]["display_version"], "0.10")
-        self.assertEqual(latest["official_versions"], {})
-        self.assertEqual(latest["state"], "checked")
+            stored = app_module.device_list["Bedroom Light Control"]["ota_status"]
+            self.assertEqual(stored["revision"], 1)
+            self.assertIsNone(stored["progress"])
+            self.assertNotIn("installed_version_detail", stored)
+            self.assertNotIn("reference", stored)
 
     def test_on_message_parses_detection_zone_raw_packet(self):
         topic = "zigbee2mqtt/Bedroom Light Control"
@@ -1536,6 +1766,206 @@ class AppBackendTests(unittest.TestCase):
 
         self.assertEqual(len(zones), 1)
         self.assertEqual(zones[0], {"area_id": "area1", "area_index": 1, **zone_values})
+
+    def test_command_readiness_blocks_every_publish_family_until_backend_is_ready(self):
+        client = self._client()
+        client.get_received()
+        client.emit("change_device", "zigbee2mqtt/device_a")
+        client.get_received()
+
+        with app_module.mqtt_state_lock:
+            app_module.mqtt_state.update({
+                "connected": False,
+                "broker_connected": False,
+                "zigbee2mqtt_connected": None,
+                "inventory_ready": False,
+                "reason": "Disconnected",
+            })
+
+        commands = [
+            ("set_target_reporting", {"enabled": True, "request_id": "ready-report"}),
+            ("set_basic_control", {"state": "ON", "request_id": "ready-basic"}),
+            ("update_parameter", {"param": "mmWaveHoldTime", "value": 30, "request_id": "ready-param"}),
+            ("apply_parameters", {"changes": {"mmWaveHoldTime": 30}, "request_id": "ready-apply"}),
+            ("force_sync", {"request_id": "ready-sync"}),
+            ("send_command", 2),
+        ]
+        with patch.object(app_module, "publish_json") as publish_mock:
+            for event_name, payload in commands:
+                with self.subTest(event_name=event_name):
+                    client.emit(event_name, payload)
+                    results = self._command_results(client)
+                    self.assertTrue(results)
+                    self.assertEqual(results[-1]["status"], "error")
+                    self.assertIn("MQTT broker", results[-1]["message"])
+        publish_mock.assert_not_called()
+
+    def test_command_readiness_allows_unknown_availability_but_rejects_offline(self):
+        topic = "zigbee2mqtt/device_a"
+        self.assertIsNone(app_module.get_command_readiness_error(topic))
+        with app_module.device_list_lock:
+            app_module.device_list["device_a"]["availability"] = "offline"
+        self.assertIn("Device is offline", app_module.get_command_readiness_error(topic))
+
+        with app_module.device_list_lock:
+            app_module.device_list["device_a"]["availability"] = None
+        with app_module.mqtt_state_lock:
+            app_module.mqtt_state["zigbee2mqtt_connected"] = False
+            app_module.mqtt_state["connected"] = False
+        self.assertIn("Zigbee2MQTT is offline", app_module.get_command_readiness_error(topic))
+
+        with app_module.mqtt_state_lock:
+            app_module.mqtt_state["zigbee2mqtt_connected"] = True
+            app_module.mqtt_state["connected"] = True
+            app_module.mqtt_state["inventory_ready"] = False
+        self.assertIn("inventory is still loading", app_module.get_command_readiness_error(topic))
+
+    def test_command_payload_and_request_limits_reject_before_publish(self):
+        client = self._client()
+        client.get_received()
+        client.emit("change_device", "zigbee2mqtt/device_a")
+        client.get_received()
+
+        with patch.object(app_module, "publish_json") as publish_mock:
+            client.emit(
+                "update_parameter",
+                {
+                    "param": "futureScalar",
+                    "value": "x" * (app_module.MAX_STRING_LENGTH + 1),
+                    "request_id": "oversized-value",
+                },
+            )
+            result = self._command_results(client, "update_parameter")[-1]
+            self.assertEqual(result["status"], "error")
+            self.assertIn("UTF-8 bytes", result["message"])
+
+            client.emit(
+                "update_parameter",
+                {
+                    "param": "mmWaveHoldTime",
+                    "value": 30,
+                    "request_id": "bad request id with spaces",
+                },
+            )
+            result = self._command_results(client, "update_parameter")[-1]
+            self.assertEqual(result["status"], "error")
+            self.assertIn("Request ID", result["message"])
+
+            with patch.object(app_module, "MAX_CHANGE_COUNT", 1):
+                client.emit(
+                    "apply_parameters",
+                    {
+                        "request_id": "too-many-fields",
+                        "changes": {"mmWaveHoldTime": 30, "mmWaveStayLife": 5},
+                    },
+                )
+            result = self._command_results(client, "apply_parameters")[-1]
+            self.assertEqual(result["status"], "error")
+            self.assertIn("At most 1", result["message"])
+
+            oversized = "x" * (app_module.MAX_STRING_LENGTH + 1)
+            bounded_envelope_cases = (
+                ("set_reporting_auto_off", {"enabled": True, "ignored": oversized}),
+                ("set_target_reporting", {"enabled": True, "ignored": oversized}),
+                ("set_basic_control", {"state": "ON", "ignored": oversized}),
+                (
+                    "update_parameter",
+                    {"param": "mmWaveHoldTime", "value": 30, "ignored": oversized},
+                ),
+                (
+                    "apply_parameters",
+                    {"changes": {"mmWaveHoldTime": 30}, "ignored": oversized},
+                ),
+                ("force_sync", {"ignored": oversized}),
+                ("send_command", oversized),
+            )
+            for event_name, envelope in bounded_envelope_cases:
+                with self.subTest(event_name=event_name):
+                    client.emit(event_name, envelope)
+                    result = self._command_results(client, event_name)[-1]
+                    self.assertEqual(result["status"], "error")
+                    self.assertIn("UTF-8 bytes", result["message"])
+
+            client.emit(
+                "set_basic_control",
+                {"brightness": float("nan"), "request_id": "nonfinite-brightness"},
+            )
+            result = self._command_results(client, "set_basic_control")[-1]
+            self.assertEqual(result["status"], "error")
+            self.assertIn("finite", result["message"])
+        publish_mock.assert_not_called()
+
+        nested = {"value": 1}
+        for _ in range(app_module.MAX_VALUE_DEPTH + 1):
+            nested = {"child": nested}
+        self.assertIn("nesting", app_module.validate_command_payload(nested))
+        self.assertIn("finite", app_module.validate_command_payload({"value": float("nan")}))
+        self.assertIn("valid UTF-8", app_module.validate_command_payload({"value": "\ud800"}))
+        self.assertIn("valid UTF-8", app_module.validate_command_payload({"\ud800": "value"}))
+
+    def test_pending_write_caps_fail_closed_without_replacing_existing_work(self):
+        with patch.object(app_module, "MAX_PENDING_WRITES_PER_SID", 1):
+            first = app_module.register_pending_write(
+                "sid-a", "one", "zigbee2mqtt/device_a", "update_parameter", {"one": 1}
+            )
+            duplicate = app_module.register_pending_write(
+                "sid-a", "one", "zigbee2mqtt/device_a", "update_parameter", {"replacement": 9}
+            )
+            second = app_module.register_pending_write(
+                "sid-a", "two", "zigbee2mqtt/device_a", "update_parameter", {"two": 2}
+            )
+        self.assertIsNotNone(first)
+        self.assertIsNone(duplicate)
+        self.assertIsNone(second)
+        with app_module.pending_writes_lock:
+            self.assertEqual(app_module.pending_writes["sid-a:one"]["expected"], {"one": 1})
+
+        with app_module.pending_writes_lock:
+            app_module.pending_writes.clear()
+        with patch.object(app_module, "MAX_PENDING_WRITES_GLOBAL", 1):
+            self.assertIsNotNone(app_module.register_pending_write(
+                "sid-a", "one", "zigbee2mqtt/device_a", "update_parameter", {"one": 1}
+            ))
+            self.assertIsNone(app_module.register_pending_write(
+                "sid-b", "two", "zigbee2mqtt/device_b", "update_parameter", {"two": 2}
+            ))
+
+    def test_signature_discovery_upgrades_quick_controls_from_later_reports_only(self):
+        topic = "zigbee2mqtt/signature_only"
+        device = _make_device(
+            "signature_only",
+            topic,
+            capabilities={
+                "state": False,
+                "brightness": False,
+                "full_editor": True,
+                "state_property": None,
+                "brightness_property": None,
+                "readable_state_property": None,
+                "readable_brightness_property": None,
+                "quick_controls_ambiguous": False,
+            },
+        )
+        device["inventory_present"] = False
+        with app_module.device_list_lock:
+            app_module.device_list.clear()
+            app_module.device_list["signature_only"] = device
+
+        with patch.object(app_module, "emit_device_list") as emit_device_list:
+            app_module.on_message(
+                None,
+                None,
+                SimpleNamespace(
+                    topic=topic,
+                    payload=json.dumps({"state": "ON", "brightness": 120}).encode("utf-8"),
+                ),
+            )
+        upgraded = app_module.get_device_by_topic(topic)["capabilities"]
+        self.assertTrue(upgraded["state"])
+        self.assertTrue(upgraded["brightness"])
+        self.assertEqual(upgraded["state_property"], "state")
+        self.assertEqual(upgraded["brightness_property"], "brightness")
+        emit_device_list.assert_called_once_with()
 
 
 if __name__ == "__main__":
