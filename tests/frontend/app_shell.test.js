@@ -107,6 +107,52 @@ test('LED visual editor integrates effects while preserving schema-driven fallba
     assert.match(template, /individual_led_effect:\s*'LED Effect \(Single LED\)'/);
 });
 
+test('LED switch stays centered in its pane while tablet editors stack instead of overlaying it', () => {
+    const stageRule = template.match(/\.led-switch-stage\s*\{([\s\S]*?)\}/);
+    const baseArtRule = template.match(/\.led-switch-art\s*\{([\s\S]*?)\}/);
+    assert.ok(stageRule, 'base LED switch stage rule should exist');
+    assert.ok(baseArtRule, 'base LED switch art rule should exist');
+    assert.match(stageRule[1], /display:\s*flex;/);
+    assert.match(stageRule[1], /justify-content:\s*center;/);
+    assert.match(baseArtRule[1], /margin:\s*0;/);
+
+    const artRules = Array.from(template.matchAll(/\.led-switch-art\s*\{([\s\S]*?)\}/g));
+    assert.ok(artRules.length >= 2, 'base and phone LED art rules should be present');
+    artRules.forEach((match) => {
+        assert.doesNotMatch(match[1], /margin-left\s*:/, 'no breakpoint may offset the switch toward one side');
+    });
+    assert.doesNotMatch(
+        template,
+        /\.led-editor-layout\.has-segment-editor \.led-switch-(?:stage|art)\s*\{[\s\S]*?(?:justify-content:\s*flex-start|margin-left\s*:)/,
+        'opening a segment editor must not displace the switch from the stage center',
+    );
+
+    const responsiveStart = template.indexOf('@media (max-width: 1180px)');
+    const tabletStart = template.indexOf('@media (min-width: 721px) and (max-width: 1180px)');
+    const phoneStart = template.indexOf('@media (max-width: 720px)', tabletStart);
+    const reducedMotionStart = template.indexOf('@media (prefers-reduced-motion: reduce)', phoneStart);
+    assert.ok(responsiveStart >= 0 && tabletStart > responsiveStart && phoneStart > tabletStart);
+    const responsiveCss = template.slice(responsiveStart, tabletStart);
+    const tabletCss = template.slice(tabletStart, phoneStart);
+    const phoneCss = template.slice(phoneStart, reducedMotionStart);
+
+    assert.match(responsiveCss, /\.led-switch-stage\s*\{[\s\S]*?width:\s*100%;[\s\S]*?max-width:\s*650px;[\s\S]*?margin:\s*0 auto;/);
+    assert.match(tabletCss, /\.led-editor-layout\.has-segment-editor \.led-global-panel\s*\{\s*display:\s*none;/);
+    assert.match(
+        tabletCss,
+        /\.led-segment-popover\s*\{[\s\S]*?position:\s*relative;[\s\S]*?grid-column:\s*1;[\s\S]*?grid-row:\s*2;[\s\S]*?top:\s*auto;[\s\S]*?right:\s*auto;[\s\S]*?justify-self:\s*center;[\s\S]*?width:\s*min\(650px, 100%\);/,
+    );
+    assert.doesNotMatch(tabletCss, /\.led-segment-popover\s*\{[\s\S]*?position:\s*absolute;/);
+    assert.match(phoneCss, /\.led-switch-art\s*\{[\s\S]*?margin:\s*0 auto;/);
+    assert.match(phoneCss, /\.led-segment-popover\s*\{[\s\S]*?position:\s*fixed;[\s\S]*?inset:\s*auto 10px/);
+
+    const basePopoverRule = template.slice(0, responsiveStart).match(/\.led-segment-popover\s*\{([\s\S]*?)\}/);
+    assert.ok(basePopoverRule);
+    assert.match(basePopoverRule[1], /position:\s*relative;/);
+    assert.match(basePopoverRule[1], /grid-column:\s*2;/);
+    assert.match(basePopoverRule[1], /grid-row:\s*1;/);
+});
+
 test('radar shell keeps the full Cartesian 2D surface beside one accessible 3D scene', () => {
     assert.match(
         template,

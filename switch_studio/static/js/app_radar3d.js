@@ -113,6 +113,7 @@
     let lastRenderedGeneration = -1;
     let lifecycleGeneration = 0;
     let renderAttemptGeneration = 0;
+    let fullRenderInFlight = false;
     let modeInputBindings = [];
     let resetBinding = null;
     let webglLostBinding = null;
@@ -133,8 +134,14 @@
     let lastModePathProgressValid = true;
     let lastIssuedCameraSignature = '';
     let lastIssuedCamera = null;
-    let plotlyRelayoutBinding = null;
+    let plotlyRelayoutBindings = [];
     let gestureBindings = [];
+    let cameraGestureActive = false;
+    let cameraGestureGeneration = 0;
+    let cameraGestureEndTimer = null;
+    let cameraGestureCamera = null;
+    let cameraGestureDeferredRender = false;
+    let cameraGestureDeferredResize = false;
     let surfaceTransitionTimer = null;
     let surfaceTransitionDirection = null;
 
@@ -1251,6 +1258,7 @@
         const opts = options || {};
         const requestGeneration = ++modeRequestGeneration;
         const normalized = normalizeMode(mode);
+        if (normalized !== activeMode) cancelCameraGesture({ captureCamera: true });
         const previousMode = activeMode;
         const previousRenderedMode = renderedCameraMode;
         const startingCamera = cameraTransitioning && lastIssuedCamera
@@ -1416,6 +1424,7 @@
     function setVisible(nextVisible) {
         visible = nextVisible !== false;
         if (!visible) {
+            cancelCameraGesture({ captureCamera: true });
             if (cameraTransitioning && !cameraTransitionChangesMode && activeMode === '3d') {
                 pendingCameraTarget = cloneCamera(lastPerspectiveCamera || DEFAULT_CAMERA);
             }
@@ -1735,6 +1744,18 @@
         ].join(',')}`;
     }
 
+    function getSceneAspectRatio() {
+        const bounds = sceneModel.renderBounds || sceneModel.bounds;
+        const xSpan = bounds.xMax - bounds.xMin;
+        const ySpan = bounds.yMax - bounds.yMin;
+        const horizontalMax = Math.max(xSpan, ySpan);
+        return {
+            x: xSpan / horizontalMax,
+            y: ySpan / horizontalMax,
+            z: 1,
+        };
+    }
+
     function getSceneModeRelayout(mode) {
         const bounds = sceneModel.renderBounds || sceneModel.bounds;
         return {
@@ -1742,7 +1763,8 @@
             'scene.yaxis.range': [bounds.yMin, bounds.yMax],
             'scene.zaxis.range': [bounds.zMin, bounds.zMax],
             'scene.zaxis.visible': true,
-            'scene.aspectmode': 'data',
+            'scene.aspectmode': 'manual',
+            'scene.aspectratio': getSceneAspectRatio(),
             'scene.dragmode': normalizeMode(mode) === '3d' ? 'turntable' : false,
         };
     }
@@ -1796,7 +1818,8 @@
                 // the explicit camera still preserves this device's view.
                 uirevision: getSceneUiRevision(),
                 bgcolor: 'rgba(0, 0, 0, 0)',
-                aspectmode: 'data',
+                aspectmode: 'manual',
+                aspectratio: getSceneAspectRatio(),
                 dragmode: activeMode === '3d' ? 'turntable' : false,
                 camera: opts.camera || cameraForMode(activeMode),
                 xaxis: axisLayout('Width (cm)', [bounds.xMin, bounds.xMax], visibility.grid),
@@ -1839,8 +1862,10 @@
     }
 
     function handleRenderFailure(error, message) {
+        cancelCameraGesture({ captureCamera: false, clearDeferred: true });
         chartCreationPromise = null;
         chartInitialized = false;
+        fullRenderInFlight = false;
         plotlyUnavailable = true;
         cancelScheduledRender();
         syncModeControls();
@@ -1855,12 +1880,17 @@
 
     function reactCurrentScene(reason, options) {
         if (!canRenderScene() || !chartInitialized || cameraTransitioning) return false;
+        if (cameraGestureActive) {
+            cameraGestureDeferredRender = true;
+            return false;
+        }
         const renderer = resolvePlotly();
         if (!renderer || typeof renderer.react !== 'function') {
             handleRenderFailure(null);
             return false;
         }
         try {
+            cameraGestureDeferredRender = false;
             const renderLifecycle = lifecycleGeneration;
             const renderAttempt = ++renderAttemptGeneration;
             const renderedGeneration = renderGeneration;
@@ -1881,6 +1911,7 @@
             }
             const perspectiveGenerationAtStart = perspectiveCameraGeneration;
             const requestedCamera = layoutOptions.camera ? cloneCamera(layoutOptions.camera) : null;
+            fullRenderInFlight = true;
             const result = renderer.react(
                 chart3dEl,
                 assembleTraces(),
@@ -1893,6 +1924,7 @@
                     || renderLifecycle !== lifecycleGeneration
                     || renderAttempt !== renderAttemptGeneration
                 ) return null;
+                fullRenderInFlight = false;
                 pruneStaleSceneCanvases();
                 if (reason === 'targets') lastTargetRenderAt = nowFn();
                 renderedCameraMode = resultingCameraMode;
@@ -1917,13 +1949,17 @@
                         !destroyed
                         && renderLifecycle === lifecycleGeneration
                         && renderAttempt === renderAttemptGeneration
-                    ) handleRenderFailure(error);
+                    ) {
+                        fullRenderInFlight = false;
+                        handleRenderFailure(error);
+                    }
                     return null;
                 });
             }
             finalizeRender();
             return true;
         } catch (error) {
+            fullRenderInFlight = false;
             handleRenderFailure(error);
             return false;
         }
@@ -1931,6 +1967,7 @@
 
     function restyleTargets() {
         if (!canRenderScene() || !chartInitialized || cameraTransitioning) return false;
+        if (cameraGestureActive && cameraGestureDeferredRender) return false;
         const renderer = resolvePlotly();
         if (!renderer || typeof renderer.restyle !== 'function') {
             return reactCurrentScene('targets');
@@ -2120,6 +2157,10 @@
 
     function resizeChart() {
         if (!canRenderScene() || !chartInitialized) return;
+        if (cameraGestureActive) {
+            cameraGestureDeferredResize = true;
+            return;
+        }
         const renderer = resolvePlotly();
         try {
             if (renderer?.Plots && typeof renderer.Plots.resize === 'function') {
@@ -2133,6 +2174,7 @@
     function setActiveDevice(deviceKey) {
         const normalized = String(deviceKey || 'unselected');
         if (normalized === activeDevice) return activeDevice;
+        cancelCameraGesture({ captureCamera: false });
         modeRequestGeneration += 1;
         pendingCameraTarget = null;
         activeDevice = normalized;
@@ -2158,6 +2200,7 @@
             || activeMode !== '3d'
             || !!surfaceTransitionDirection
         ) return false;
+        cancelCameraGesture({ captureCamera: true });
         const currentCamera = cameraForSteadyRender('3d');
         pendingCameraTarget = null;
         cancelCameraTransition();
@@ -2169,6 +2212,7 @@
     }
 
     function resetForDeviceChange(deviceKey) {
+        cancelCameraGesture({ captureCamera: false });
         modeRequestGeneration += 1;
         pendingCameraTarget = null;
         if (deviceKey !== undefined) setActiveDevice(deviceKey);
@@ -2192,6 +2236,7 @@
 
     function handleWebglLost(event) {
         if (event && typeof event.preventDefault === 'function') event.preventDefault();
+        cancelCameraGesture({ captureCamera: true });
         // Invalidate any pending newPlot attempt. Its promise may settle after
         // the browser has restored WebGL and a replacement chart is active.
         lifecycleGeneration += 1;
@@ -2257,6 +2302,31 @@
         return camera;
     }
 
+    function rememberPerspectiveCamera(rawCamera) {
+        const observed = coerceCamera(rawCamera, cameraForMode('3d'));
+        const corrected = sanitizePerspectiveCamera(observed);
+        lastPerspectiveCamera = cloneCamera(corrected);
+        perspectiveCameraGeneration += 1;
+        perspectiveCameraAuthoritative = true;
+        lastModePathProgress = 1;
+        lastModePathProgressValid = true;
+        return { observed, corrected };
+    }
+
+    function rememberGestureCamera(rawCamera) {
+        if (!rawCamera || activeMode !== '3d') return null;
+        const remembered = rememberPerspectiveCamera(rawCamera);
+        cameraGestureCamera = cloneCamera(remembered.corrected);
+        return remembered;
+    }
+
+    function handlePlotlyRelayouting(event) {
+        if (!cameraGestureActive || destroyed || !chartInitialized || cameraTransitioning) return;
+        const rawCamera = cameraFromRelayoutEvent(event);
+        if (!rawCamera || cameraSignature(rawCamera) === lastIssuedCameraSignature) return;
+        rememberGestureCamera(rawCamera);
+    }
+
     function handlePlotlyRelayout(event) {
         const rawCamera = cameraFromRelayoutEvent(event);
         if (!rawCamera || destroyed || !chartInitialized) return;
@@ -2265,18 +2335,15 @@
         if (cameraSignature(observed) === lastIssuedCameraSignature) return;
 
         if (cameraTransitioning) return;
+        if (cameraGestureActive && activeMode === '3d') {
+            rememberGestureCamera(observed);
+            scheduleCameraGestureEnd();
+            return;
+        }
+
         const corrected = activeMode === '3d'
-            ? sanitizePerspectiveCamera(observed)
+            ? rememberPerspectiveCamera(observed).corrected
             : sanitizeOrthographicCamera();
-        if (activeMode === '3d') {
-            lastPerspectiveCamera = cloneCamera(corrected);
-            perspectiveCameraGeneration += 1;
-            perspectiveCameraAuthoritative = true;
-        }
-        if (activeMode === '3d') {
-            lastModePathProgress = 1;
-            lastModePathProgressValid = true;
-        }
         if (cameraNearlyEqual(observed, corrected)) return;
 
         // Each raw relayout describes what Plotly has already rendered. Never
@@ -2286,18 +2353,116 @@
     }
 
     function bindPlotlyRelayout() {
-        if (plotlyRelayoutBinding || !chart3dEl || typeof chart3dEl.on !== 'function') return;
-        chart3dEl.on('plotly_relayout', handlePlotlyRelayout);
-        plotlyRelayoutBinding = { element: chart3dEl, eventName: 'plotly_relayout', handler: handlePlotlyRelayout };
+        if (plotlyRelayoutBindings.length || !chart3dEl || typeof chart3dEl.on !== 'function') return;
+        const bindings = [
+            { eventName: 'plotly_relayouting', handler: handlePlotlyRelayouting },
+            { eventName: 'plotly_relayout', handler: handlePlotlyRelayout },
+        ];
+        bindings.forEach((binding) => chart3dEl.on(binding.eventName, binding.handler));
+        plotlyRelayoutBindings = bindings.map((binding) => ({ element: chart3dEl, ...binding }));
     }
 
     function unbindPlotlyRelayout() {
-        if (!plotlyRelayoutBinding) return;
-        const binding = plotlyRelayoutBinding;
-        if (typeof binding.element?.removeListener === 'function') {
-            binding.element.removeListener(binding.eventName, binding.handler);
+        plotlyRelayoutBindings.forEach((binding) => {
+            if (typeof binding.element?.removeListener === 'function') {
+                binding.element.removeListener(binding.eventName, binding.handler);
+            }
+        });
+        plotlyRelayoutBindings = [];
+    }
+
+    function clearCameraGestureEndTimer() {
+        if (cameraGestureEndTimer === null) return;
+        clearTimeoutFn(cameraGestureEndTimer);
+        cameraGestureEndTimer = null;
+    }
+
+    function setCameraGestureState(active) {
+        cameraGestureActive = active === true;
+        if (chart3dEl?.dataset) chart3dEl.dataset.cameraGesture = cameraGestureActive ? 'active' : 'idle';
+    }
+
+    function cancelCameraGesture(options) {
+        const opts = options || {};
+        const hadGesture = cameraGestureActive || cameraGestureEndTimer !== null;
+        if (hadGesture && opts.captureCamera !== false && activeMode === '3d' && chartInitialized) {
+            const captured = cameraGestureCamera || copyRenderedCamera('3d');
+            if (captured) rememberPerspectiveCamera(captured);
         }
-        plotlyRelayoutBinding = null;
+        cameraGestureGeneration += 1;
+        clearCameraGestureEndTimer();
+        setCameraGestureState(false);
+        cameraGestureCamera = null;
+        cameraGestureDeferredResize = false;
+        if (opts.clearDeferred !== false) cameraGestureDeferredRender = false;
+        if (hadGesture) renderAttemptGeneration += 1;
+        return hadGesture;
+    }
+
+    function beginCameraGesture() {
+        if (cameraGestureActive) return true;
+        clearCameraGestureEndTimer();
+        cameraGestureGeneration += 1;
+        setCameraGestureState(true);
+        cameraGestureCamera = null;
+        if (fullRenderInFlight) {
+            cameraGestureDeferredRender = true;
+            fullRenderInFlight = false;
+        }
+        // A React that started just before pointer-down may settle after the
+        // orbit has moved. Its finalizer must not restore that earlier camera.
+        renderAttemptGeneration += 1;
+        if (!perspectiveCameraAuthoritative) {
+            const renderedCamera = copyRenderedCamera('3d');
+            if (renderedCamera) rememberPerspectiveCamera(renderedCamera);
+        }
+        cancelCameraTransition();
+        return true;
+    }
+
+    function finishCameraGesture(generation) {
+        if (
+            generation !== cameraGestureGeneration
+            || !cameraGestureActive
+            || destroyed
+        ) return false;
+        clearCameraGestureEndTimer();
+        const captured = cameraGestureCamera
+            || copyRenderedCamera('3d')
+            || lastPerspectiveCamera
+            || DEFAULT_CAMERA;
+        const { corrected } = rememberPerspectiveCamera(captured);
+        const needsFullRender = cameraGestureDeferredRender;
+        const needsTargetRender = !needsFullRender && lastRenderedGeneration !== renderGeneration;
+        const needsResize = cameraGestureDeferredResize;
+        cancelScheduledRender();
+        setCameraGestureState(false);
+        cameraGestureCamera = null;
+        cameraGestureDeferredRender = false;
+        cameraGestureDeferredResize = false;
+
+        if (!canRenderScene() || activeMode !== '3d' || !chartInitialized) return false;
+        if (needsFullRender) {
+            reactCurrentScene('gesture-reconcile', {
+                camera: corrected,
+                renderedMode: '3d',
+            });
+        } else {
+            // Reassert the sanitized fixed-center, world-Z-up camera only after
+            // Plotly has finished its native orbit gesture.
+            issueCameraRelayout(corrected, null, { fatal: false, includeProjection: false });
+            if (needsTargetRender) scheduleTargetRender(true);
+        }
+        if (needsResize) resizeChart();
+        return true;
+    }
+
+    function scheduleCameraGestureEnd() {
+        if (!cameraGestureActive) return false;
+        clearCameraGestureEndTimer();
+        const generation = cameraGestureGeneration;
+        cameraGestureEndTimer = setTimeoutFn(() => finishCameraGesture(generation), 0);
+        return true;
     }
 
     function cameraInteractionEnabled() {
@@ -2319,7 +2484,7 @@
             stopCameraGesture(event);
             return;
         }
-        cancelCameraTransition();
+        beginCameraGesture();
     }
 
     function handleCameraWheel(event) {
@@ -2332,6 +2497,7 @@
         }
         if (Math.abs(deltaY) < 0.01) return;
         stopCameraGesture(event);
+        if (cameraGestureActive) finishCameraGesture(cameraGestureGeneration);
         cancelCameraTransition();
         const current = cameraForSteadyRender('3d');
         const factor = Math.exp(clamp(deltaY, -500, 500) * 0.0012);
@@ -2354,21 +2520,47 @@
     }
 
     function handleCameraTouchStart() {
-        if (cameraInteractionEnabled()) cancelCameraTransition();
+        if (cameraInteractionEnabled()) beginCameraGesture();
+    }
+
+    function handleCameraGestureEnd() {
+        scheduleCameraGestureEnd();
     }
 
     function bindCameraGestureGuards() {
         if (!chart3dEl?.addEventListener || gestureBindings.length) return;
         const bindings = [
+            { element: chart3dEl, eventName: 'pointerdown', handler: handleCameraMouseDown, options: { capture: true } },
             { eventName: 'mousedown', handler: handleCameraMouseDown, options: { capture: true } },
             { eventName: 'wheel', handler: handleCameraWheel, options: { capture: true, passive: false } },
             { eventName: 'contextmenu', handler: handleCameraContextMenu, options: { capture: true } },
             { eventName: 'touchstart', handler: handleCameraTouchStart, options: { capture: true, passive: true } },
-        ];
-        bindings.forEach((binding) => {
-            chart3dEl.addEventListener(binding.eventName, binding.handler, binding.options);
+        ].map((binding) => ({ element: chart3dEl, ...binding }));
+        const endTargets = [chart3dEl, getWindow()]
+            .filter((element, index, values) => (
+                element
+                && typeof element.addEventListener === 'function'
+                && values.indexOf(element) === index
+            ));
+        endTargets.forEach((element) => {
+            bindings.push(
+                { element, eventName: 'pointerup', handler: handleCameraGestureEnd, options: { capture: true } },
+                { element, eventName: 'pointercancel', handler: handleCameraGestureEnd, options: { capture: true } },
+                { element, eventName: 'mouseup', handler: handleCameraGestureEnd, options: { capture: true } },
+                { element, eventName: 'touchend', handler: handleCameraGestureEnd, options: { capture: true, passive: true } },
+                { element, eventName: 'touchcancel', handler: handleCameraGestureEnd, options: { capture: true, passive: true } },
+            );
         });
-        gestureBindings = bindings.map((binding) => ({ element: chart3dEl, ...binding }));
+        bindings.push({
+            element: chart3dEl,
+            eventName: 'lostpointercapture',
+            handler: handleCameraGestureEnd,
+            options: { capture: true },
+        });
+        bindings.forEach((binding) => {
+            binding.element.addEventListener(binding.eventName, binding.handler, binding.options);
+        });
+        gestureBindings = bindings;
     }
 
     function bindControls() {
@@ -2391,6 +2583,9 @@
         if (interactionButton?.addEventListener) {
             const handler = () => {
                 if (!mobileFn() || activeMode !== '3d') return;
+                if (!mobileInteractionLocked && cameraGestureActive) {
+                    finishCameraGesture(cameraGestureGeneration);
+                }
                 mobileInteractionLocked = !mobileInteractionLocked;
                 syncInteractionState();
             };
@@ -2447,6 +2642,7 @@
     function destroy() {
         lifecycleGeneration += 1;
         destroyed = true;
+        cancelCameraGesture({ captureCamera: false });
         cancelCameraTransition();
         cancelScheduledRender();
         if (typeof targetUnsubscribe === 'function') targetUnsubscribe();
@@ -2476,6 +2672,7 @@
         }
         chartInitialized = false;
         chartCreationPromise = null;
+        fullRenderInFlight = false;
         lastRenderedGeneration = -1;
     }
 
@@ -2514,6 +2711,7 @@
         renderGeneration = 0;
         lastRenderedGeneration = -1;
         renderAttemptGeneration = 0;
+        fullRenderInFlight = false;
         mobileInteractionLocked = true;
         lastMobileState = null;
         lastPerspectiveCamera = copyCamera();
@@ -2527,8 +2725,14 @@
         pendingCameraTarget = null;
         lastIssuedCameraSignature = '';
         lastIssuedCamera = null;
-        plotlyRelayoutBinding = null;
+        plotlyRelayoutBindings = [];
         gestureBindings = [];
+        cameraGestureActive = false;
+        cameraGestureGeneration = 0;
+        cameraGestureEndTimer = null;
+        cameraGestureCamera = null;
+        cameraGestureDeferredRender = false;
+        cameraGestureDeferredResize = false;
         nowFn = typeof opts.now === 'function' ? opts.now : () => Date.now();
         setTimeoutFn = typeof opts.setTimeoutFn === 'function' ? opts.setTimeoutFn : (callback, delay) => setTimeout(callback, delay);
         clearTimeoutFn = typeof opts.clearTimeoutFn === 'function' ? opts.clearTimeoutFn : (timer) => clearTimeout(timer);
@@ -2545,6 +2749,7 @@
         lastModePathProgressValid = true;
 
         if (statusEl?.setAttribute) statusEl.setAttribute('aria-live', 'polite');
+        setCameraGestureState(false);
         bindControls();
         bindResizeObserver();
         syncModeControls();

@@ -254,14 +254,14 @@ function loadController(options) {
         }
     }
 
-    const windowObject = {
+    const windowObject = Object.assign(new MockElement('window'), {
         Plotly: plotly,
         SwitchStudioZones: zonesApi,
         localStorage: storage,
         ResizeObserver: MockResizeObserver,
         matchMedia: () => ({ matches: false }),
         console,
-    };
+    });
     const context = {
         window: windowObject,
         console,
@@ -323,6 +323,7 @@ function loadController(options) {
         modeEvents,
         statusEvents,
         resizeObservers,
+        windowObject,
     };
 }
 
@@ -468,7 +469,8 @@ test('native Cartesian 2D stays active without creating WebGL until 3D is reques
     assert.equal(setup.elements.chart2d.dataset.radarSurfaceState, 'outgoing');
     assert.equal(setup.elements.chart3d.dataset.radarSurfaceState, 'incoming');
     assert.equal(plots[0].layout.scene.dragmode, 'turntable');
-    assert.equal(plots[0].layout.scene.aspectmode, 'data');
+    assert.equal(plots[0].layout.scene.aspectmode, 'manual');
+    assertVectorClose(plots[0].layout.scene.aspectratio, { x: 1, y: 0.5, z: 1 });
     assert.notEqual(plots[0].layout.scene.zaxis.visible, false);
     assert.equal(plots[0].config.scrollZoom, false);
     assertCameraClose(plain(plots[0].layout.scene.camera), TOP_DOWN_CAMERA);
@@ -541,7 +543,11 @@ test('mode controls crossfade native 2D with one perspective scene and a fixed w
     const perspective = cameraFromRelayout(perspectiveRelayout);
     assertCameraClose(plain(perspective), DEFAULT_PERSPECTIVE_CAMERA);
     assert.deepEqual(Array.from(perspectiveRelayout.update['scene.xaxis.range']), [-650, 650]);
-    assert.equal(perspectiveRelayout.update['scene.aspectmode'], 'data');
+    assert.equal(perspectiveRelayout.update['scene.aspectmode'], 'manual');
+    assertVectorClose(
+        perspectiveRelayout.update['scene.aspectratio'],
+        { x: 1, y: 0.5, z: 1 },
+    );
     assert.equal(perspectiveRelayout.update['scene.dragmode'], 'turntable');
     assert.ok(forwardRelayouts.length >= 20, 'the 560 ms orbit should emit a smooth sequence of frames');
     let previousEye = TOP_DOWN_CAMERA.eye;
@@ -1114,6 +1120,12 @@ test('zone cuboids expand only Plotly render bounds while persisted display boun
         [-574, 604],
         'the 1,110 cm zone union receives a 34 cm fit margin on both overflowing sides',
     );
+    assert.equal(initialPlot.layout.scene.aspectmode, 'manual');
+    assertVectorClose(
+        initialPlot.layout.scene.aspectratio,
+        { x: 1, y: 838 / 1484, z: 1 },
+        1e-12,
+    );
     const floorGrid = initialPlot.traces.find((trace) => trace.name === 'Floor grid');
     const finiteFloorX = Array.from(floorGrid.x).filter(Number.isFinite);
     const finiteFloorY = Array.from(floorGrid.y).filter(Number.isFinite);
@@ -1139,6 +1151,8 @@ test('zone cuboids expand only Plotly render bounds while persisted display boun
     assert.deepEqual(Array.from(withoutOutliers.layout.scene.xaxis.range), [-300, 300]);
     assert.deepEqual(Array.from(withoutOutliers.layout.scene.yaxis.range), [0, 600]);
     assert.deepEqual(Array.from(withoutOutliers.layout.scene.zaxis.range), [-120, 160]);
+    assert.equal(withoutOutliers.layout.scene.aspectmode, 'manual');
+    assertVectorClose(withoutOutliers.layout.scene.aspectratio, { x: 1, y: 1, z: 1 });
     const restoredFloorGrid = withoutOutliers.traces.find((trace) => trace.name === 'Floor grid');
     assert.equal(
         Array.from(restoredFloorGrid.z).filter(Number.isFinite).every((value) => value === -120),
@@ -1191,7 +1205,8 @@ test('scene assembly uses exact XYZ bounds, one primary cuboid, slot visibility,
     assert.deepEqual(Array.from(newPlot.layout.scene.xaxis.range), [-500, 500]);
     assert.deepEqual(Array.from(newPlot.layout.scene.yaxis.range), [0, 600]);
     assert.deepEqual(Array.from(newPlot.layout.scene.zaxis.range), [-250, 250]);
-    assert.equal(newPlot.layout.scene.aspectmode, 'data');
+    assert.equal(newPlot.layout.scene.aspectmode, 'manual');
+    assertVectorClose(newPlot.layout.scene.aspectratio, { x: 1, y: 0.6, z: 1 });
     assert.equal(newPlot.layout.scene.dragmode, 'turntable');
     assert.equal(newPlot.config.scrollZoom, false);
     assertCameraClose(plain(newPlot.layout.scene.camera), DEFAULT_PERSPECTIVE_CAMERA);
@@ -1785,6 +1800,130 @@ test('perspective gesture guards block pan and roll while vertical wheel zoom ke
             initialPlot.layout.scene.camera.eye.y,
             initialPlot.layout.scene.camera.eye.z,
         ));
+});
+
+test('an active camera drag invalidates stale React and reconciles deferred scene, targets, and resize once on global release', async () => {
+    const plotly = createPlotly();
+    const setup = loadController({
+        initialMode: '3d',
+        activeDevice: 'device-a',
+        sceneModel: scene(),
+        plotly,
+    });
+    const pendingRenders = [];
+    plotly.react = (element, traces, layout, config) => {
+        const deferred = createDeferred();
+        const call = { kind: 'react', element, traces, layout, config, deferred };
+        plotly.calls.push(call);
+        pendingRenders.push(call);
+        return deferred.promise;
+    };
+    const cameraB = {
+        eye: { x: 1.75, y: -1.05, z: 1.15 },
+        center: { x: 0, y: 0, z: 0 },
+        up: { x: 0, y: 0, z: 1 },
+        projection: { type: 'perspective' },
+    };
+    const cameraC = {
+        eye: { x: -1.35, y: -1.7, z: 0.9 },
+        center: { x: 0, y: 0, z: 0 },
+        up: { x: 0, y: 0, z: 1 },
+        projection: { type: 'perspective' },
+    };
+
+    setup.controller.setSceneModel(scene({
+        bounds: { xMin: -540, xMax: 620, yMin: -20, yMax: 710, zMin: -300, zMax: 440 },
+    }));
+    assert.equal(pendingRenders.length, 1);
+    const staleRequestedCamera = plain(pendingRenders[0].layout.scene.camera);
+    const restylesBeforeDrag = plotly.calls.filter((call) => call.kind === 'restyle').length;
+    const resizesBeforeDrag = plotly.calls.filter((call) => call.kind === 'resize').length;
+    const relayoutsBeforeDrag = cameraRelayouts(setup).length;
+
+    setup.elements.chart3d.dispatch('pointerdown', createGestureEvent({ button: 0 }));
+    assert.equal(setup.elements.chart3d.dataset.cameraGesture, 'active');
+    setup.elements.chart3d.emit('plotly_relayouting', { 'scene.camera': cameraB });
+    setup.elements.chart3d.emit('plotly_relayouting', { 'scene.camera': cameraC });
+    assert.equal(cameraRelayouts(setup).length, relayoutsBeforeDrag, 'live native orbit events must not fight the drag');
+
+    setup.controller.setSceneModel(scene({
+        bounds: { xMin: -600, xMax: 680, yMin: -40, yMax: 760, zMin: -360, zMax: 500 },
+    }));
+    setup.zonesApi.emitSnapshot({
+        reason: 'drag-live',
+        targets: [{ id: 1, x: 83, y: 146, z: 27 }],
+        history: {},
+    });
+    setup.clock.advance(125);
+    setup.resizeObservers[0].callback();
+    assert.equal(pendingRenders.length, 1, 'full scene work should wait instead of starting another React mid-drag');
+    assert.equal(plotly.calls.filter((call) => call.kind === 'restyle').length, restylesBeforeDrag);
+    assert.equal(plotly.calls.filter((call) => call.kind === 'resize').length, resizesBeforeDrag);
+
+    setup.windowObject.dispatch('pointerup', createGestureEvent());
+    assert.equal(setup.elements.chart3d.dataset.cameraGesture, 'active', 'global release settles after Plotly finishes the event turn');
+    setup.clock.advance(0);
+    assert.equal(setup.elements.chart3d.dataset.cameraGesture, 'idle');
+    assert.equal(pendingRenders.length, 2, 'release should reconcile all deferred full-render work exactly once');
+    const reconciled = pendingRenders[1];
+    assertCameraClose(plain(reconciled.layout.scene.camera), cameraC);
+    assert.deepEqual(Array.from(reconciled.layout.scene.zaxis.range), [-360, 500]);
+    assert.deepEqual(Array.from(reconciled.traces.at(-2).x), [83]);
+    assert.equal(plotly.calls.filter((call) => call.kind === 'resize').length, resizesBeforeDrag + 1);
+    assert.equal(cameraRelayouts(setup).length, relayoutsBeforeDrag);
+
+    pendingRenders[0].deferred.resolve(setup.elements.chart3d);
+    await flushPromises();
+    assert.equal(cameraRelayouts(setup).length, relayoutsBeforeDrag, 'the invalidated React camera must never reappear');
+    assert.notDeepEqual(staleRequestedCamera.eye, cameraC.eye);
+    pendingRenders[1].deferred.resolve(setup.elements.chart3d);
+    await flushPromises();
+    assert.equal(cameraRelayouts(setup).length, relayoutsBeforeDrag);
+
+    setup.controller.setSceneModel(scene({
+        bounds: { xMin: -640, xMax: 700, yMin: -60, yMax: 800, zMin: -400, zMax: 540 },
+    }));
+    assert.equal(pendingRenders.length, 3);
+    assertCameraClose(plain(pendingRenders[2].layout.scene.camera), cameraC);
+    pendingRenders[2].deferred.resolve(setup.elements.chart3d);
+    await flushPromises();
+    assert.equal(projectionRelayouts(setup).length, 0);
+});
+
+test('target-only updates keep restyling during a drag and global cancel settles the latest live camera', () => {
+    const setup = loadController({ initialMode: '3d', sceneModel: scene() });
+    const camera = {
+        eye: { x: -1.6, y: -1.25, z: 1.05 },
+        center: { x: 0, y: 0, z: 0 },
+        up: { x: 0, y: 0, z: 1 },
+        projection: { type: 'perspective' },
+    };
+    const reactCount = setup.plotly.calls.filter((call) => call.kind === 'react').length;
+    const restyleCount = setup.plotly.calls.filter((call) => call.kind === 'restyle').length;
+    const relayoutCount = cameraRelayouts(setup).length;
+
+    setup.elements.chart3d.dispatch('pointerdown', createGestureEvent({ button: 0 }));
+    setup.elements.chart3d.emit('plotly_relayouting', { 'scene.camera': camera });
+    setup.zonesApi.emitSnapshot({
+        reason: 'drag-target-only',
+        targets: [{ id: 1, x: 31, y: 72, z: 14 }],
+        history: {},
+    });
+    setup.clock.advance(125);
+    assert.equal(setup.elements.chart3d.dataset.cameraGesture, 'active');
+    assert.equal(setup.plotly.calls.filter((call) => call.kind === 'react').length, reactCount);
+    assert.equal(setup.plotly.calls.filter((call) => call.kind === 'restyle').length, restyleCount + 1);
+    assert.equal(cameraRelayouts(setup).length, relayoutCount);
+
+    setup.windowObject.dispatch('pointercancel', createGestureEvent());
+    setup.clock.advance(0);
+    assert.equal(setup.elements.chart3d.dataset.cameraGesture, 'idle');
+    const settleCalls = cameraRelayouts(setup).slice(relayoutCount);
+    assert.equal(settleCalls.length, 1);
+    assertCameraClose(plain(cameraFromRelayout(settleCalls[0])), camera);
+    assert.equal(settleCalls[0].update['scene.camera'], undefined);
+    assert.equal(settleCalls[0].update['scene.camera.projection.type'], undefined);
+    assert.equal(projectionRelayouts(setup).length, 0);
 });
 
 test('plotly accepts safe negative cameras and clamps near-pole views without an azimuth snap', () => {
@@ -2397,10 +2536,12 @@ test('WebGL loss restores 3D and rebinds camera sanitation after Plotly purges l
     plotly.newPlot = (element, traces, layout, config) => {
         // Plotly.newPlot purges emitter listeners attached to graphDiv while
         // rebuilding the scene. DOM listeners remain separate in browsers.
+        element.listeners.delete('plotly_relayouting');
         element.listeners.delete('plotly_relayout');
         return createPlot(element, traces, layout, config);
     };
     const setup = loadController({ initialMode: '3d', plotly });
+    assert.equal(setup.elements.chart3d.listeners.get('plotly_relayouting')?.size, 1);
     assert.equal(setup.elements.chart3d.listeners.get('plotly_relayout')?.size, 1);
     let prevented = false;
     setup.elements.chart3d.dispatch('webglcontextlost', {
@@ -2415,6 +2556,7 @@ test('WebGL loss restores 3D and rebinds camera sanitation after Plotly purges l
     assert.equal(setup.controller.getMode(), '3d');
     assert.equal(setup.elements.mode3d.disabled, false);
     assert.equal(setup.plotly.calls.filter((call) => call.kind === 'newPlot').length, 2);
+    assert.equal(setup.elements.chart3d.listeners.get('plotly_relayouting')?.size, 1);
     assert.equal(setup.elements.chart3d.listeners.get('plotly_relayout')?.size, 1);
     setup.clock.advance(2000);
     assert.equal(setup.controller.getMode(), '3d');
@@ -2524,7 +2666,14 @@ test('an older same-device scene rejection cannot override a newer render', asyn
 test('ResizeObserver resizes only the active 3D surface and destroy detaches resources', () => {
     const setup = loadController({ initialMode: '3d' });
     assert.equal(setup.resizeObservers.length, 1);
+    assert.equal(setup.elements.chart3d.listeners.get('plotly_relayouting')?.size, 1);
     assert.equal(setup.elements.chart3d.listeners.get('plotly_relayout')?.size, 1);
+    assert.equal(setup.elements.chart3d.listeners.get('pointerdown')?.size, 1);
+    assert.equal(setup.windowObject.listeners.get('pointerup')?.size, 1);
+    assert.equal(setup.windowObject.listeners.get('pointercancel')?.size, 1);
+    assert.equal(setup.windowObject.listeners.get('mouseup')?.size, 1);
+    assert.equal(setup.windowObject.listeners.get('touchend')?.size, 1);
+    assert.equal(setup.windowObject.listeners.get('touchcancel')?.size, 1);
     setup.resizeObservers[0].callback();
     assert.ok(setup.plotly.calls.some((call) => call.kind === 'resize'));
     assert.equal(setup.zonesApi.hasSnapshotListener(), true);
@@ -2532,7 +2681,14 @@ test('ResizeObserver resizes only the active 3D surface and destroy detaches res
     setup.controller.destroy();
     assert.equal(setup.resizeObservers[0].disconnected, true);
     assert.equal(setup.zonesApi.hasSnapshotListener(), false);
+    assert.equal(setup.elements.chart3d.listeners.get('plotly_relayouting')?.size, 0);
     assert.equal(setup.elements.chart3d.listeners.get('plotly_relayout')?.size, 0);
+    assert.equal(setup.elements.chart3d.listeners.get('pointerdown')?.size, 0);
     assert.equal(setup.elements.chart3d.listeners.get('wheel')?.size, 0);
+    assert.equal(setup.windowObject.listeners.get('pointerup')?.size, 0);
+    assert.equal(setup.windowObject.listeners.get('pointercancel')?.size, 0);
+    assert.equal(setup.windowObject.listeners.get('mouseup')?.size, 0);
+    assert.equal(setup.windowObject.listeners.get('touchend')?.size, 0);
+    assert.equal(setup.windowObject.listeners.get('touchcancel')?.size, 0);
     assert.ok(setup.plotly.calls.some((call) => call.kind === 'purge'));
 });
