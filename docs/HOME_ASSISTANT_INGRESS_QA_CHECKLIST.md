@@ -12,6 +12,8 @@ Last updated: 2026-08-12
 ## 1. Launch, Inventory, and Connectivity
 
 - Open the add-on through Home Assistant Ingress and confirm the dashboard is the first view.
+- Confirm desktop, mobile-app/WebView, and mobile-browser ingress sessions complete the Socket.IO polling-to-WebSocket upgrade and remain connected after a page reload. Test the real Home Assistant hostname/port; foreign Origin values must be rejected.
+- From the App network, verify direct HTTP and Socket.IO access from any peer other than Home Assistant's ingress proxy is rejected, even when it supplies spoofed `X-Forwarded-For`, `X-Real-IP`, `X-Remote-User`, or `X-Ingress-Path` headers. The HTTP rejection must be `403` and non-cacheable.
 - Confirm every discovered device has one card with a sensible name, model, readiness state, and available telemetry.
 - Confirm unknown telemetry displays as unavailable, never as a false zero.
 - Confirm the logs show a successful MQTT connection and subscription to the configured base topic.
@@ -24,6 +26,8 @@ Last updated: 2026-08-12
 
 - Toggle power and change brightness on each supported dashboard card; verify the command targets that card's exact topic.
 - Confirm a card remains pending until its matching device report arrives and rolls back on a publish error or timeout.
+- Burst valid commands from one session until backpressure is reached. Confirm the App returns a retryable `rate_limited` result with a retry delay, publishes nothing for denied actions, creates no pending confirmation, and succeeds again after the delay. Repeat with two sessions to confirm one session's local burst does not immediately exhaust the other; a sufficiently large combined burst must still hit the global bound.
+- Trigger `Force Sync` with only one command token available and confirm neither of its two MQTT requests nor cached refresh events are emitted. With two tokens available, both requests should proceed as one atomic budget decision.
 - Open a VZM32-SN and confirm it lands on `Presence & Zones`.
 - Confirm Blue Series models without full-editor support remain usable through verified quick controls but cannot open the VZM32 editor.
 - Stage a configuration change and attempt to select another device; test both cancel and confirm-to-discard paths.

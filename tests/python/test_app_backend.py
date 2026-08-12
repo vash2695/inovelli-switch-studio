@@ -107,6 +107,7 @@ class AppBackendTests(unittest.TestCase):
             app_module.session_topics.clear()
         with app_module.session_reporting_auto_off_lock:
             app_module.session_reporting_auto_off.clear()
+        app_module.reset_command_rate_limits()
         with app_module.pending_writes_lock:
             pending_entries = list(app_module.pending_writes.values())
             app_module.pending_writes.clear()
@@ -131,9 +132,22 @@ class AppBackendTests(unittest.TestCase):
                 pass
 
     def _client(self):
-        client = app_module.socketio.test_client(app_module.app)
+        return self._client_from_peer("127.0.0.1")
+
+    def _client_from_peer(self, remote_addr, headers=None):
+        flask_client = app_module.app.test_client()
+        flask_client.environ_base["REMOTE_ADDR"] = remote_addr
+        client = app_module.socketio.test_client(
+            app_module.app,
+            headers=headers,
+            flask_test_client=flask_client,
+        )
         self.clients.append(client)
         return client
+
+    @staticmethod
+    def _server_sid(client):
+        return app_module.socketio.server.manager.sid_from_eio_sid(client.eio_sid, "/")
 
     @staticmethod
     def _command_results(client, action=None):
@@ -162,6 +176,176 @@ class AppBackendTests(unittest.TestCase):
             {"area1": {"width_min": 10}},
             {"area1": {"width_min": 11}},
         ))
+
+    def test_trusted_ingress_peer_accepts_only_supervisor_and_explicit_dev_loopback(self):
+        self.assertEqual(app_module.TRUSTED_INGRESS_PEERS, {"172.30.32.2"})
+        self.assertEqual(str(app_module.normalize_peer_address("172.30.32.2")), "172.30.32.2")
+        self.assertEqual(str(app_module.normalize_peer_address("::ffff:172.30.32.2")), "172.30.32.2")
+        self.assertTrue(app_module.is_trusted_ingress_peer("172.30.32.2", test_mode=False))
+        self.assertTrue(app_module.is_trusted_ingress_peer("::ffff:172.30.32.2", test_mode=False))
+
+        for loopback in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):
+            with self.subTest(loopback=loopback):
+                self.assertTrue(app_module.is_trusted_ingress_peer(loopback, test_mode=True))
+                self.assertFalse(app_module.is_trusted_ingress_peer(loopback, test_mode=False))
+
+        for foreign in ("172.30.32.3", "192.168.1.25", "203.0.113.8", "not-an-address", None):
+            with self.subTest(foreign=foreign):
+                self.assertFalse(app_module.is_trusted_ingress_peer(foreign, test_mode=False))
+                self.assertFalse(app_module.is_trusted_ingress_peer(foreign, test_mode=True))
+
+    def test_http_boundary_uses_actual_ingress_peer_and_rejects_spoofed_headers(self):
+        with app_module.app.test_client() as client:
+            for remote_addr in ("172.30.32.2", "::ffff:172.30.32.2"):
+                with self.subTest(remote_addr=remote_addr):
+                    response = client.get(
+                        "/",
+                        environ_overrides={"REMOTE_ADDR": remote_addr},
+                    )
+                    self.assertEqual(response.status_code, 200)
+
+            response = client.get(
+                "/",
+                environ_overrides={"REMOTE_ADDR": "203.0.113.8"},
+                headers={
+                    "X-Forwarded-For": "172.30.32.2",
+                    "X-Real-IP": "172.30.32.2",
+                    "X-Remote-User": "owner@example.test",
+                    "X-Ingress-Path": "/api/hassio_ingress/spoofed",
+                },
+            )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.headers.get("Cache-Control"), "no-store")
+        self.assertIn("Home Assistant Ingress", response.get_data(as_text=True))
+
+    def test_engineio_polling_handshake_is_rejected_before_foreign_session_allocation(self):
+        handshake_path = "/socket.io/?EIO=4&transport=polling"
+        engineio_server = app_module.socketio.server.eio
+        sockets_before = set(engineio_server.sockets)
+
+        with app_module.app.test_client() as client:
+            foreign = client.get(
+                handshake_path,
+                environ_overrides={"REMOTE_ADDR": "203.0.113.8"},
+                headers={
+                    "X-Forwarded-For": "172.30.32.2",
+                    "X-Real-IP": "172.30.32.2",
+                    "X-Remote-User": "owner@example.test",
+                    "X-Ingress-Path": "/api/hassio_ingress/spoofed",
+                },
+            )
+            self.assertEqual(foreign.status_code, 403)
+            self.assertEqual(foreign.headers.get("Cache-Control"), "no-store")
+            self.assertFalse(foreign.get_data(as_text=True).startswith("0{"))
+            self.assertEqual(set(engineio_server.sockets), sockets_before)
+
+            trusted = client.get(
+                handshake_path,
+                environ_overrides={"REMOTE_ADDR": "172.30.32.2"},
+            )
+
+        self.assertEqual(trusted.status_code, 200)
+        open_frame = trusted.get_data(as_text=True)
+        self.assertTrue(open_frame.startswith("0{"))
+        open_payload = json.loads(open_frame[1:])
+        trusted_sid = open_payload["sid"]
+        self.assertIn(trusted_sid, engineio_server.sockets)
+
+        # This test exercises only the raw Engine.IO opening request, so clean
+        # up the intentionally half-open polling session without a Socket.IO
+        # test client owning its lifecycle.
+        trusted_socket = engineio_server.sockets.pop(trusted_sid)
+        trusted_socket.close(wait=False, abort=True)
+
+    def test_socket_origin_matches_effective_external_origin(self):
+        ingress_environ = {
+            "wsgi.url_scheme": "http",
+            "HTTP_HOST": "172.30.32.1:8099",
+            "HTTP_X_FORWARDED_PROTO": " https, http ",
+            "HTTP_X_FORWARDED_HOST": " HA.Example:8123, supervisor ",
+        }
+        self.assertTrue(app_module.is_allowed_socket_origin("https://ha.example:8123", ingress_environ))
+        self.assertTrue(app_module.is_allowed_socket_origin("https://HA.EXAMPLE:8123/", ingress_environ))
+
+        direct_environ = {"wsgi.url_scheme": "http", "HTTP_HOST": "localhost:5000"}
+        self.assertTrue(app_module.is_allowed_socket_origin("http://LOCALHOST:5000", direct_environ))
+
+        default_port_environ = {
+            "wsgi.url_scheme": "http",
+            "HTTP_HOST": "upstream:5000",
+            "HTTP_X_FORWARDED_PROTO": "https",
+            "HTTP_X_FORWARDED_HOST": "ha.example",
+        }
+        self.assertTrue(app_module.is_allowed_socket_origin("https://ha.example:443", default_port_environ))
+
+        for origin in (
+            "https://evil.example:8123",
+            "http://ha.example:8123",
+            "https://ha.example:443",
+            "http://172.30.32.1:8099",
+        ):
+            with self.subTest(origin=origin):
+                self.assertFalse(app_module.is_allowed_socket_origin(origin, ingress_environ))
+
+    def test_socket_origin_rejects_ambiguous_or_malformed_values(self):
+        environ = {
+            "wsgi.url_scheme": "http",
+            "HTTP_HOST": "upstream:5000",
+            "HTTP_X_FORWARDED_PROTO": "https",
+            "HTTP_X_FORWARDED_HOST": "ha.example:8123",
+        }
+
+        # Missing Origin is retained for trusted non-browser/proxy clients. The
+        # connect handler must apply the canonical peer check before this rule.
+        self.assertTrue(app_module.is_allowed_socket_origin(None, environ))
+        self.assertTrue(app_module.is_allowed_socket_origin("   ", environ))
+
+        invalid_origins = (
+            "null",
+            "https://ha.example:8123, https://evil.example",
+            "https://user:password@ha.example:8123",
+            "https://ha.example:8123/path",
+            "https://ha.example:8123/#fragment",
+            "ws://ha.example:8123",
+            "not a URL",
+        )
+        for origin in invalid_origins:
+            with self.subTest(origin=origin):
+                self.assertFalse(app_module.is_allowed_socket_origin(origin, environ))
+
+    def test_socket_connect_trusts_actual_peer_not_spoofable_forwarding_headers(self):
+        ingress_headers = {
+            "Origin": "https://ha.example:8123",
+            "X-Forwarded-Proto": "https",
+            "X-Forwarded-Host": "ha.example:8123",
+        }
+        trusted = self._client_from_peer("172.30.32.2", ingress_headers)
+        self.assertTrue(trusted.is_connected())
+
+        mapped = self._client_from_peer("::ffff:172.30.32.2", ingress_headers)
+        self.assertTrue(mapped.is_connected())
+
+        spoofed_headers = {
+            **ingress_headers,
+            "X-Forwarded-For": "172.30.32.2",
+            "X-Real-IP": "172.30.32.2",
+            "X-Remote-User": "owner@example.test",
+            "X-Ingress-Path": "/api/hassio_ingress/spoofed",
+        }
+        foreign = self._client_from_peer("203.0.113.8", spoofed_headers)
+        self.assertFalse(foreign.is_connected())
+
+    def test_socket_connect_rejects_foreign_origin_even_from_trusted_peer(self):
+        client = self._client_from_peer(
+            "172.30.32.2",
+            {
+                "Origin": "https://evil.example:8123",
+                "X-Forwarded-Proto": "https",
+                "X-Forwarded-Host": "ha.example:8123",
+            },
+        )
+        self.assertFalse(client.is_connected())
 
     def test_mqtt_health_tracks_broker_and_zigbee2mqtt_bridge(self):
         subscribed = []
@@ -1253,6 +1437,33 @@ class AppBackendTests(unittest.TestCase):
             self.assertEqual(published[0]["origin"], "auto_disable_target_reporting")
             self.assertIn("mmWaveTargetInfoReport", published[0]["payload"])
 
+    def test_auto_off_disconnect_cleanup_bypasses_rate_limit_and_cleans_sid_bucket(self):
+        client = self._client()
+        client.get_received()
+        client.emit("change_device", "zigbee2mqtt/device_shared")
+        client.get_received()
+        sid = self._server_sid(client)
+        now = 7000.0
+        app_module.reset_command_rate_limits(now=now)
+
+        for _ in range(int(app_module.COMMAND_RATE_CAPACITY_PER_SID)):
+            self.assertTrue(app_module.consume_command_rate_limit(sid, now=now)[0])
+        self.assertFalse(app_module.consume_command_rate_limit(sid, now=now)[0])
+
+        # Auto-off is a session preference, not an MQTT write, so it remains
+        # usable even when that session's publish budget is exhausted.
+        client.emit("set_reporting_auto_off", {"enabled": True})
+        self.assertTrue(app_module.get_session_reporting_auto_off(sid))
+
+        with patch.object(app_module.time, "monotonic", return_value=now):
+            with patch.object(app_module, "publish_json", return_value=(True, 0)) as publish_mock:
+                client.disconnect()
+
+        publish_mock.assert_called_once()
+        self.assertEqual(publish_mock.call_args.kwargs.get("origin"), "auto_disable_target_reporting")
+        with app_module.command_rate_limits_lock:
+            self.assertNotIn(sid, app_module.command_rate_limits)
+
     def test_auto_off_disconnect_skips_publish_when_backend_or_device_is_not_ready(self):
         for offline_kind in ("broker", "device"):
             with self.subTest(offline_kind=offline_kind):
@@ -1819,6 +2030,255 @@ class AppBackendTests(unittest.TestCase):
             app_module.mqtt_state["connected"] = True
             app_module.mqtt_state["inventory_ready"] = False
         self.assertIn("inventory is still loading", app_module.get_command_readiness_error(topic))
+
+    def test_command_readiness_preserves_signature_discovery_fallback(self):
+        topic = "zigbee2mqtt/signature_only"
+        device = _make_device("signature_only", topic)
+        device["inventory_present"] = False
+        device["availability"] = None
+        with app_module.device_list_lock:
+            app_module.device_list["signature_only"] = device
+
+        self.assertIsNone(app_module.get_command_readiness_error(topic))
+
+        with app_module.device_list_lock:
+            app_module.device_list["signature_only"]["availability"] = "offline"
+        self.assertIn("Device is offline", app_module.get_command_readiness_error(topic))
+
+    def test_command_rate_limit_is_fair_per_sid_and_recovers_with_the_clock(self):
+        capacity = int(app_module.COMMAND_RATE_CAPACITY_PER_SID)
+        refill_rate = float(app_module.COMMAND_RATE_REFILL_PER_SECOND)
+        base_time = 1000.0
+        app_module.reset_command_rate_limits(now=base_time)
+
+        for _ in range(capacity):
+            allowed, retry_after = app_module.consume_command_rate_limit("sid-a", now=base_time)
+            self.assertTrue(allowed)
+            self.assertEqual(retry_after, 0)
+
+        allowed, retry_after = app_module.consume_command_rate_limit("sid-a", now=base_time)
+        self.assertFalse(allowed)
+        self.assertGreater(retry_after, 0)
+
+        # Exhausting one browser must not consume another browser's local bucket.
+        allowed, retry_after = app_module.consume_command_rate_limit("sid-b", now=base_time)
+        self.assertTrue(allowed)
+        self.assertEqual(retry_after, 0)
+
+        # A backwards observation cannot mint tokens; ordinary monotonic
+        # progress must still recover one token afterward.
+        allowed, _ = app_module.consume_command_rate_limit("sid-a", now=base_time - 10)
+        self.assertFalse(allowed)
+        allowed, retry_after = app_module.consume_command_rate_limit(
+            "sid-a",
+            now=base_time + (1.1 / refill_rate),
+        )
+        self.assertTrue(allowed)
+        self.assertEqual(retry_after, 0)
+        self.assertFalse(app_module.consume_command_rate_limit(
+            "sid-a",
+            now=base_time + (1.1 / refill_rate),
+        )[0])
+
+    def test_command_rate_limit_applies_global_backpressure_and_refills(self):
+        capacity = int(app_module.COMMAND_RATE_GLOBAL_CAPACITY)
+        refill_rate = float(app_module.COMMAND_RATE_GLOBAL_REFILL_PER_SECOND)
+        base_time = 2000.0
+        app_module.reset_command_rate_limits(now=base_time)
+
+        for index in range(capacity):
+            allowed, retry_after = app_module.consume_command_rate_limit(
+                f"global-sid-{index}",
+                now=base_time,
+            )
+            self.assertTrue(allowed)
+            self.assertEqual(retry_after, 0)
+
+        allowed, retry_after = app_module.consume_command_rate_limit(
+            "global-overflow",
+            now=base_time,
+        )
+        self.assertFalse(allowed)
+        self.assertGreater(retry_after, 0)
+
+        allowed, retry_after = app_module.consume_command_rate_limit(
+            "global-recovered",
+            now=base_time + (1.1 / refill_rate),
+        )
+        self.assertTrue(allowed)
+        self.assertEqual(retry_after, 0)
+
+    def test_command_rate_limit_cost_is_atomic(self):
+        capacity = int(app_module.COMMAND_RATE_CAPACITY_PER_SID)
+        base_time = 3000.0
+        app_module.reset_command_rate_limits(now=base_time)
+
+        for _ in range(capacity - 1):
+            self.assertTrue(app_module.consume_command_rate_limit("sid-cost", now=base_time)[0])
+
+        allowed, retry_after = app_module.consume_command_rate_limit(
+            "sid-cost",
+            cost=2,
+            now=base_time,
+        )
+        self.assertFalse(allowed)
+        self.assertGreater(retry_after, 0)
+
+        # A rejected multi-token request must not consume the final token.
+        self.assertTrue(app_module.consume_command_rate_limit("sid-cost", now=base_time)[0])
+
+    def test_publish_handlers_are_throttled_and_force_sync_costs_two_tokens(self):
+        client = self._client()
+        client.get_received()
+        client.emit("change_device", "zigbee2mqtt/device_a")
+        client.get_received()
+
+        events = (
+            (
+                "set_target_reporting",
+                {"enabled": True, "request_id": "limited-target"},
+                "set_target_reporting",
+                1,
+            ),
+            (
+                "set_basic_control",
+                {"state": "ON", "request_id": "limited-basic"},
+                "set_basic_control",
+                1,
+            ),
+            (
+                "update_parameter",
+                {"param": "mmWaveHoldTime", "value": 30, "request_id": "limited-update"},
+                "update_parameter",
+                1,
+            ),
+            (
+                "apply_parameters",
+                {"changes": {"mmWaveHoldTime": 30}, "request_id": "limited-apply"},
+                "apply_parameters",
+                1,
+            ),
+            ("force_sync", {"request_id": "limited-sync"}, "force_sync", 2),
+            ("send_command", 2, "send_command", 1),
+        )
+        with patch.object(app_module, "enforce_command_rate_limit_or_emit", return_value=False) as enforce_mock:
+            with patch.object(app_module, "publish_json") as publish_mock:
+                for event_name, payload, expected_action, expected_cost in events:
+                    with self.subTest(event_name=event_name):
+                        enforce_mock.reset_mock()
+                        client.emit(event_name, payload)
+                        enforce_mock.assert_called_once()
+                        args, kwargs = enforce_mock.call_args
+                        self.assertEqual(args[0], self._server_sid(client))
+                        self.assertEqual(args[1], expected_action)
+                        actual_cost = kwargs.get("cost", args[2] if len(args) > 2 else 1)
+                        self.assertEqual(actual_cost, expected_cost)
+                        received = client.get_received()
+                        if event_name == "force_sync":
+                            self.assertNotIn("device_snapshot", [event["name"] for event in received])
+                publish_mock.assert_not_called()
+        with app_module.pending_writes_lock:
+            self.assertEqual(app_module.pending_writes, {})
+
+    def test_invalid_or_unready_commands_do_not_consume_rate_tokens(self):
+        client = self._client()
+        client.get_received()
+
+        with patch.object(app_module, "enforce_command_rate_limit_or_emit") as enforce_mock:
+            client.emit(
+                "set_basic_control",
+                {"state": "ON", "request_id": "unready-basic"},
+            )
+            client.emit(
+                "set_basic_control",
+                {"topic": "zigbee2mqtt/device_a", "request_id": "missing-control"},
+            )
+            with patch.object(
+                app_module.schema_service,
+                "validate_update",
+                return_value=(False, "invalid test value", None, False),
+            ):
+                client.emit(
+                    "update_parameter",
+                    {
+                        "topic": "zigbee2mqtt/device_a",
+                        "param": "mmWaveHoldTime",
+                        "value": 30,
+                        "request_id": "invalid-schema-value",
+                    },
+                )
+            with patch.object(app_module, "build_force_sync_payload", return_value={}):
+                client.emit(
+                    "force_sync",
+                    {"topic": "zigbee2mqtt/device_a", "request_id": "no-readable-fields"},
+                )
+
+        enforce_mock.assert_not_called()
+
+    def test_rate_limited_command_returns_retryable_error_before_publish(self):
+        client = self._client()
+        client.get_received()
+        client.emit("change_device", "zigbee2mqtt/device_a")
+        client.get_received()
+        sid = self._server_sid(client)
+        now = 4000.0
+
+        for _ in range(int(app_module.COMMAND_RATE_CAPACITY_PER_SID)):
+            self.assertTrue(app_module.consume_command_rate_limit(sid, now=now)[0])
+
+        with patch.object(app_module.time, "monotonic", return_value=now):
+            with patch.object(app_module, "publish_json") as publish_mock:
+                client.emit(
+                    "set_basic_control",
+                    {"state": "ON", "request_id": "rate-limited-basic"},
+                )
+        publish_mock.assert_not_called()
+        result = self._command_results(client, "set_basic_control")[-1]
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["error_code"], "rate_limited")
+        self.assertTrue(result["retryable"])
+        self.assertGreater(result["retry_after_ms"], 0)
+        self.assertEqual(result["payload"]["retry_after_ms"], result["retry_after_ms"])
+
+    def test_read_only_events_and_session_preference_are_not_rate_limited(self):
+        client = self._client()
+        client.get_received()
+        sid = self._server_sid(client)
+        now = 5000.0
+        for _ in range(int(app_module.COMMAND_RATE_CAPACITY_PER_SID)):
+            self.assertTrue(app_module.consume_command_rate_limit(sid, now=now)[0])
+
+        with patch.object(app_module.time, "monotonic", return_value=now):
+            client.emit("request_devices")
+            client.emit("request_schema")
+            client.emit("change_device", "zigbee2mqtt/device_a")
+            client.emit("set_reporting_auto_off", {"enabled": True})
+
+        received_names = [event["name"] for event in client.get_received()]
+        self.assertIn("device_list", received_names)
+        self.assertIn("schema_model", received_names)
+        self.assertIn("device_snapshot", received_names)
+        self.assertTrue(app_module.get_session_reporting_auto_off(sid))
+        client.emit("set_reporting_auto_off", {"enabled": False})
+
+    def test_disconnect_clears_only_that_sids_command_bucket(self):
+        client_a = self._client()
+        client_b = self._client()
+        client_a.get_received()
+        client_b.get_received()
+        sid_a = self._server_sid(client_a)
+        sid_b = self._server_sid(client_b)
+        now = 6000.0
+
+        for _ in range(int(app_module.COMMAND_RATE_CAPACITY_PER_SID)):
+            self.assertTrue(app_module.consume_command_rate_limit(sid_a, now=now)[0])
+            self.assertTrue(app_module.consume_command_rate_limit(sid_b, now=now)[0])
+        self.assertFalse(app_module.consume_command_rate_limit(sid_a, now=now)[0])
+        self.assertFalse(app_module.consume_command_rate_limit(sid_b, now=now)[0])
+
+        client_a.disconnect()
+        self.assertTrue(app_module.consume_command_rate_limit(sid_a, now=now)[0])
+        self.assertFalse(app_module.consume_command_rate_limit(sid_b, now=now)[0])
 
     def test_command_payload_and_request_limits_reject_before_publish(self):
         client = self._client()

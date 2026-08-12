@@ -61,7 +61,7 @@ Feature descriptions follow the branch you are reading, so `dev` may be ahead of
 5. Save, then start or restart the App.
 6. Choose **Open Web UI**. Optionally enable **Show in sidebar**.
 
-The web interface is exposed through Home Assistant Ingress; the App does not publish a separate host port. Configuration options are read when the App starts, so restart it after changing them.
+The web interface is exposed only through Home Assistant Ingress; the App does not publish a separate host port. Direct HTTP and Socket.IO clients are rejected unless they are the Home Assistant ingress proxy. Configuration options are read when the App starts, so restart it after changing them.
 
 ## App configuration
 
@@ -191,6 +191,10 @@ python -m pip install --upgrade pip
 python -m pip install -r switch_studio/requirements.txt
 python -m unittest discover -s tests/python -p "test_*.py" -v
 ```
+
+Production traffic is restricted to Home Assistant's ingress proxy. For deliberate local browser QA, start the process with `SWITCH_STUDIO_ALLOW_LOCAL_DIRECT=true`; this permits loopback clients only and prints a startup warning. Never enable that override in the Home Assistant App.
+
+MQTT-producing browser commands also have bounded per-session and global throughput. A burst may return a retryable `rate_limited` or `server_busy` result; the UI should leave the requested action ready to retry rather than treating it as device confirmation.
 
 ### Frontend tests
 

@@ -11,8 +11,10 @@ import time
 import threading 
 import copy
 import hashlib
+import ipaddress
 import math
 import re
+import urllib.parse
 from flask import Flask, render_template, request
 from flask_socketio import SocketIO
 import paho.mqtt.client as mqtt
@@ -48,6 +50,11 @@ MQTT_CONNACK_REASON = {
 }
 TEST_MODE = str(os.environ.get("SWITCH_STUDIO_TEST_MODE", "")).strip().lower() in {"1", "true", "yes", "on"}
 FIRMWARE_PROCESS_EPOCH = f"{os.getpid()}-{time.time_ns()}"
+SUPERVISOR_INGRESS_IP = ipaddress.ip_address('172.30.32.2')
+TRUSTED_INGRESS_PEERS = {str(SUPERVISOR_INGRESS_IP)}
+ALLOW_LOCAL_DIRECT = TEST_MODE or str(
+    os.environ.get('SWITCH_STUDIO_ALLOW_LOCAL_DIRECT', '')
+).strip().lower() in {'1', 'true', 'yes', 'on'}
 
 
 def _config_first(config_obj, keys, default_value):
@@ -116,6 +123,97 @@ def _as_bool(value, default=False):
         if lowered in {"0", "false", "no", "off"}:
             return False
     return bool(default)
+
+
+def normalize_peer_address(value):
+    """Return the actual socket peer as an IP address without trusting proxy headers."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        peer = ipaddress.ip_address(value.strip())
+    except ValueError:
+        return None
+    if isinstance(peer, ipaddress.IPv6Address) and peer.ipv4_mapped is not None:
+        return peer.ipv4_mapped
+    return peer
+
+
+def is_trusted_ingress_peer(remote_addr, test_mode=None):
+    """Accept only Home Assistant's ingress proxy, plus loopback for explicit local QA."""
+    peer = normalize_peer_address(remote_addr)
+    if peer is None:
+        return False
+    allow_loopback = ALLOW_LOCAL_DIRECT if test_mode is None else bool(test_mode)
+    return peer == SUPERVISOR_INGRESS_IP or (allow_loopback and peer.is_loopback)
+
+
+def _normalized_origin(value):
+    if not isinstance(value, str) or not value.strip():
+        return None
+    normalized_value = value.strip()
+    if ',' in normalized_value:
+        return None
+    try:
+        parsed = urllib.parse.urlsplit(normalized_value)
+    except ValueError:
+        return None
+    if parsed.scheme.lower() not in {'http', 'https'} or not parsed.netloc:
+        return None
+    if parsed.username or parsed.password or parsed.path not in {'', '/'} or parsed.query or parsed.fragment:
+        return None
+    hostname = parsed.hostname
+    if not hostname:
+        return None
+    try:
+        port = parsed.port
+    except ValueError:
+        return None
+    scheme = parsed.scheme.lower()
+    if (scheme == 'http' and port == 80) or (scheme == 'https' and port == 443):
+        port = None
+    normalized_host = hostname.lower()
+    if ':' in normalized_host:
+        normalized_host = f'[{normalized_host}]'
+    port_suffix = f':{port}' if port is not None else ''
+    return f'{scheme}://{normalized_host}{port_suffix}'
+
+
+def is_allowed_socket_origin(origin, environ=None):
+    """Apply same-origin checks using Host data supplied by the trusted ingress peer."""
+    if origin is None or (isinstance(origin, str) and not origin.strip()):
+        return True
+    request_environ = environ if isinstance(environ, dict) else {}
+    host = str(request_environ.get('HTTP_HOST') or '').strip()
+    scheme = str(request_environ.get('wsgi.url_scheme') or 'http').strip().lower()
+    forwarded_host = str(request_environ.get('HTTP_X_FORWARDED_HOST') or '').split(',')[0].strip()
+    forwarded_proto = str(request_environ.get('HTTP_X_FORWARDED_PROTO') or scheme).split(',')[0].strip().lower()
+    effective_origin = (
+        _normalized_origin(f"{forwarded_proto}://{forwarded_host}")
+        if forwarded_host else
+        (_normalized_origin(f"{scheme}://{host}") if host else None)
+    )
+    return effective_origin is not None and _normalized_origin(origin) == effective_origin
+
+
+class TrustedIngressMiddleware:
+    """Reject non-ingress peers before Flask or Engine.IO allocates request state."""
+
+    def __init__(self, wsgi_app):
+        self.wsgi_app = wsgi_app
+
+    def __call__(self, environ, start_response):
+        if is_trusted_ingress_peer(environ.get('REMOTE_ADDR')):
+            return self.wsgi_app(environ, start_response)
+        body = b'Forbidden: use Home Assistant Ingress'
+        start_response(
+            '403 Forbidden',
+            [
+                ('Content-Type', 'text/plain; charset=utf-8'),
+                ('Content-Length', str(len(body))),
+                ('Cache-Control', 'no-store'),
+            ],
+        )
+        return [body]
 
 
 def _normalize_basic_state(value):
@@ -241,9 +339,29 @@ print(
     f"UI template fingerprint: {template_fingerprint} tabs_enabled={'yes' if template_tabs_enabled else 'no'}",
     flush=True
 )
+if ALLOW_LOCAL_DIRECT and not TEST_MODE:
+    print(
+        'WARNING: SWITCH_STUDIO_ALLOW_LOCAL_DIRECT is enabled; loopback access is intended only for local QA.',
+        flush=True,
+    )
 
 app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+socketio = SocketIO(app, cors_allowed_origins=is_allowed_socket_origin, async_mode='threading')
+app.wsgi_app = TrustedIngressMiddleware(app.wsgi_app)
+
+
+@app.before_request
+def require_trusted_ingress_peer():
+    if is_trusted_ingress_peer(request.remote_addr):
+        return None
+    return (
+        'Forbidden: use Home Assistant Ingress',
+        403,
+        {
+            'Content-Type': 'text/plain; charset=utf-8',
+            'Cache-Control': 'no-store',
+        },
+    )
 
 # Stores device names, topics, config, and throttling timers
 device_list = {}
@@ -285,6 +403,21 @@ MAX_CONTAINER_ITEMS = 128
 MAX_STRING_LENGTH = 4096
 MAX_COMMAND_PAYLOAD_BYTES = 65536
 REQUEST_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
+
+# MQTT-producing browser commands use atomic per-session and global token
+# buckets. Pending-write caps bound retained work; these buckets additionally
+# bound rapid confirmed writes and commands that do not await device echoes.
+COMMAND_RATE_CAPACITY_PER_SID = 12.0
+COMMAND_RATE_REFILL_PER_SECOND = 4.0
+COMMAND_RATE_GLOBAL_CAPACITY = 60.0
+COMMAND_RATE_GLOBAL_REFILL_PER_SECOND = 20.0
+MAX_COMMAND_RATE_SIDS = 256
+command_rate_limits = {}
+command_rate_limits_lock = threading.Lock()
+command_rate_global = {
+    'tokens': COMMAND_RATE_GLOBAL_CAPACITY,
+    'updated_at': time.monotonic(),
+}
 
 mqtt_state = {
     'connected': False,
@@ -672,6 +805,117 @@ def validate_command_envelope_or_emit(sid, action, payload):
         action=action,
         status='error',
         message=error,
+    )
+    return False
+
+
+def _refill_command_bucket(bucket, capacity, refill_rate, now):
+    previous = float(bucket.get('updated_at') or now)
+    effective_now = max(previous, now)
+    elapsed = effective_now - previous
+    bucket['tokens'] = min(
+        float(capacity),
+        max(0.0, float(bucket.get('tokens') or 0.0)) + (elapsed * float(refill_rate)),
+    )
+    bucket['updated_at'] = effective_now
+
+
+def reset_command_rate_limits(now=None):
+    """Reset bounded command accounting; exposed for deterministic lifecycle tests."""
+    current = time.monotonic() if now is None else float(now)
+    with command_rate_limits_lock:
+        command_rate_limits.clear()
+        command_rate_global.update({
+            'tokens': COMMAND_RATE_GLOBAL_CAPACITY,
+            'updated_at': current,
+        })
+
+
+def clear_command_rate_limit(sid):
+    if not sid:
+        return
+    with command_rate_limits_lock:
+        command_rate_limits.pop(str(sid), None)
+
+
+def consume_command_rate_limit(sid, cost=1, now=None):
+    """Atomically charge per-session and global buckets without partial deductions."""
+    if not sid:
+        return False, None
+    if isinstance(cost, bool) or not isinstance(cost, (int, float)) or not math.isfinite(float(cost)):
+        raise ValueError('Command rate cost must be a finite integer from 1 to 2')
+    numeric_cost = float(cost)
+    if not numeric_cost.is_integer() or numeric_cost < 1 or numeric_cost > 2:
+        raise ValueError('Command rate cost must be a finite integer from 1 to 2')
+
+    current = time.monotonic() if now is None else float(now)
+    sid_key = str(sid)
+    with command_rate_limits_lock:
+        sid_bucket = command_rate_limits.get(sid_key)
+        if sid_bucket is None:
+            if len(command_rate_limits) >= MAX_COMMAND_RATE_SIDS:
+                return False, None
+            sid_bucket = {
+                'tokens': COMMAND_RATE_CAPACITY_PER_SID,
+                'updated_at': current,
+            }
+            command_rate_limits[sid_key] = sid_bucket
+
+        _refill_command_bucket(
+            sid_bucket,
+            COMMAND_RATE_CAPACITY_PER_SID,
+            COMMAND_RATE_REFILL_PER_SECOND,
+            current,
+        )
+        _refill_command_bucket(
+            command_rate_global,
+            COMMAND_RATE_GLOBAL_CAPACITY,
+            COMMAND_RATE_GLOBAL_REFILL_PER_SECOND,
+            current,
+        )
+
+        sid_deficit = max(0.0, numeric_cost - sid_bucket['tokens'])
+        global_deficit = max(0.0, numeric_cost - command_rate_global['tokens'])
+        if sid_deficit or global_deficit:
+            retry_after = max(
+                sid_deficit / COMMAND_RATE_REFILL_PER_SECOND,
+                global_deficit / COMMAND_RATE_GLOBAL_REFILL_PER_SECOND,
+                0.1,
+            )
+            return False, retry_after
+
+        sid_bucket['tokens'] -= numeric_cost
+        command_rate_global['tokens'] -= numeric_cost
+        return True, 0.0
+
+
+def enforce_command_rate_limit_or_emit(sid, action, cost=1, topic=None, request_id=None):
+    allowed, retry_after = consume_command_rate_limit(sid, cost=cost)
+    if allowed:
+        return True
+    server_busy = retry_after is None
+    retry_after_ms = None if server_busy else max(100, int(math.ceil(retry_after * 1000)))
+    payload = {
+        'error_code': 'server_busy' if server_busy else 'rate_limited',
+        'retryable': True,
+    }
+    if retry_after_ms is not None:
+        payload['retry_after_ms'] = retry_after_ms
+    emit_command_result(
+        sid,
+        action=action,
+        status='error',
+        topic=topic,
+        request_id=request_id,
+        payload=payload,
+        message=(
+            'The command service is busy; wait and retry'
+            if server_busy else
+            f'Too many commands; retry in about {retry_after_ms} ms'
+        ),
+        error_code=payload['error_code'],
+        retryable=True,
+        retry_after_ms=retry_after_ms,
     )
     return False
 
@@ -1374,7 +1618,19 @@ def emit_device_snapshot(topic, room=None):
     socketio.emit('device_snapshot', snapshot, room=room)
 
 
-def emit_command_result(sid, action, status, topic=None, request_id=None, message=None, payload=None, rc=None):
+def emit_command_result(
+    sid,
+    action,
+    status,
+    topic=None,
+    request_id=None,
+    message=None,
+    payload=None,
+    rc=None,
+    error_code=None,
+    retryable=None,
+    retry_after_ms=None,
+):
     result = {
         'action': action,
         'status': status,
@@ -1388,6 +1644,12 @@ def emit_command_result(sid, action, status, topic=None, request_id=None, messag
         result['payload'] = payload
     if rc is not None:
         result['rc'] = rc
+    if error_code is not None:
+        result['error_code'] = error_code
+    if retryable is not None:
+        result['retryable'] = bool(retryable)
+    if retry_after_ms is not None:
+        result['retry_after_ms'] = int(retry_after_ms)
 
     socketio.emit('command_result', result, room=sid)
 
@@ -1920,7 +2182,19 @@ def publish_json(topic, payload, origin, sid=None):
 
 # --- WEBSOCKET HANDLERS ---
 @socketio.on('connect')
-def handle_socket_connect():
+def handle_socket_connect(auth=None):
+    if not is_trusted_ingress_peer(request.remote_addr):
+        print(
+            f"Rejected untrusted WebSocket peer: remote_addr={request.remote_addr or '-'}",
+            flush=True,
+        )
+        return False
+    if not is_allowed_socket_origin(request.headers.get('Origin'), request.environ):
+        print(
+            f"Rejected cross-origin WebSocket connection: remote_addr={request.remote_addr or '-'}",
+            flush=True,
+        )
+        return False
     print(f"WebSocket connected: sid={request.sid}", flush=True)
     set_session_reporting_auto_off(request.sid, False)
     emit_schema_model(room=request.sid)
@@ -1928,7 +2202,7 @@ def handle_socket_connect():
 
 
 @socketio.on('disconnect')
-def handle_socket_disconnect():
+def handle_socket_disconnect(reason=None):
     sid = request.sid
     # This topic was validated when selected. Keep it for cleanup even if the
     # device was evicted from the in-memory discovery list before disconnect.
@@ -1959,6 +2233,8 @@ def handle_socket_disconnect():
                     f"Failed to auto-disable mmWave target reporting on disconnect: topic={current_topic} sid={sid} rc={rc}",
                     flush=True
                 )
+
+    clear_command_rate_limit(sid)
 
     print(f"WebSocket disconnected: sid={request.sid}", flush=True)
 
@@ -2075,6 +2351,14 @@ def handle_set_target_reporting(data):
 
     target_value = resolve_target_reporting_value(enabled)
     payload = {'mmWaveTargetInfoReport': target_value}
+    if not enforce_command_rate_limit_or_emit(
+        request.sid,
+        'set_target_reporting',
+        cost=1,
+        topic=current_topic,
+        request_id=request_id,
+    ):
+        return
     if not reserve_pending_write_or_emit(
         request.sid,
         request_id,
@@ -2188,6 +2472,18 @@ def handle_set_basic_control(data):
         )
         return
 
+    publish_payload = {
+        basic_control_mapping[control_name]: value
+        for control_name, value in control_payload.items()
+    }
+    if not enforce_command_rate_limit_or_emit(
+        request.sid,
+        'set_basic_control',
+        cost=1,
+        topic=current_topic,
+        request_id=request_id,
+    ):
+        return
     if not reserve_pending_write_or_emit(
         request.sid,
         request_id,
@@ -2196,10 +2492,6 @@ def handle_set_basic_control(data):
         control_payload
     ):
         return
-    publish_payload = {
-        basic_control_mapping[control_name]: value
-        for control_name, value in control_payload.items()
-    }
     ok, rc = publish_json(
         f"{current_topic}/set",
         publish_payload,
@@ -2293,6 +2585,14 @@ def handle_update_parameter(data):
         return
 
     control_payload = {param: normalized_value}
+    if not enforce_command_rate_limit_or_emit(
+        request.sid,
+        'update_parameter',
+        cost=1,
+        topic=current_topic,
+        request_id=request_id,
+    ):
+        return
     if not reserve_pending_write_or_emit(
         request.sid,
         request_id,
@@ -2403,6 +2703,14 @@ def handle_apply_parameters(data):
         )
         return
 
+    if not enforce_command_rate_limit_or_emit(
+        request.sid,
+        'apply_parameters',
+        cost=1,
+        topic=current_topic,
+        request_id=request_id,
+    ):
+        return
     if not reserve_pending_write_or_emit(
         request.sid,
         request_id,
@@ -2460,16 +2768,7 @@ def handle_force_sync(data=None):
         )
         return
     
-    # 1. Emit cached data
-    emit_device_snapshot(current_topic, room=request.sid)
-    device_data = get_device_by_topic(current_topic)
-    if device_data:
-        if 'zone_config' in device_data: socketio.emit('zone_config', {'topic': current_topic, 'payload': device_data['zone_config']}, room=request.sid)
-        if 'interference_zones' in device_data: socketio.emit('interference_zones', {'topic': current_topic, 'payload': device_data['interference_zones']}, room=request.sid)
-        if 'detection_zones' in device_data: socketio.emit('detection_zones', {'topic': current_topic, 'payload': device_data['detection_zones']}, room=request.sid)
-        if 'stay_zones' in device_data: socketio.emit('stay_zones', {'topic': current_topic, 'payload': device_data['stay_zones']}, room=request.sid)
-
-    # 2. Trigger Z2M read
+    # Build and validate the complete two-publish operation before charging it.
     payload = build_force_sync_payload()
     if not payload:
         emit_command_result(
@@ -2481,6 +2780,26 @@ def handle_force_sync(data=None):
             message='No GET-capable fields are available for this device schema',
         )
         return
+    if not enforce_command_rate_limit_or_emit(
+        request.sid,
+        'force_sync',
+        cost=2,
+        topic=current_topic,
+        request_id=request_id,
+    ):
+        return
+
+    # 1. Emit cached data only after the complete operation has acquired its
+    # two-token budget. A denied request performs no command-side work.
+    emit_device_snapshot(current_topic, room=request.sid)
+    device_data = get_device_by_topic(current_topic)
+    if device_data:
+        if 'zone_config' in device_data: socketio.emit('zone_config', {'topic': current_topic, 'payload': device_data['zone_config']}, room=request.sid)
+        if 'interference_zones' in device_data: socketio.emit('interference_zones', {'topic': current_topic, 'payload': device_data['interference_zones']}, room=request.sid)
+        if 'detection_zones' in device_data: socketio.emit('detection_zones', {'topic': current_topic, 'payload': device_data['detection_zones']}, room=request.sid)
+        if 'stay_zones' in device_data: socketio.emit('stay_zones', {'topic': current_topic, 'payload': device_data['stay_zones']}, room=request.sid)
+
+    # 2. Trigger Z2M read.
     ok_get, rc_get = publish_json(f"{current_topic}/get", payload, origin='force_sync_get', sid=request.sid)
     emit_command_result(
         request.sid,
@@ -2546,6 +2865,13 @@ def handle_command(cmd_action):
     cmd_string = action_map.get(cmd_action_int)
     if cmd_string:
         cmd_payload = {"mmwave_control_commands": {"controlID": cmd_string}}
+        if not enforce_command_rate_limit_or_emit(
+            request.sid,
+            'send_command',
+            cost=1,
+            topic=current_topic,
+        ):
+            return
         ok, rc = publish_json(
             f"{current_topic}/set",
             cmd_payload,
