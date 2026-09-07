@@ -814,10 +814,13 @@
             defaultLevelRemote: 254,
             defaultLevelLocal: 254,
         };
-        syncAllCards();
-        if (containerEl) {
-            buildFriendlyLoadPage();
-        }
+        controlRefs = null;
+        if (containerEl) containerEl.innerHTML = '';
+    }
+
+    function activateDevice() {
+        hydrateFromStateApi();
+        buildFriendlyLoadPage();
     }
 
     function init(options) {
@@ -836,6 +839,7 @@
         init,
         setSchemaModel,
         resetForDeviceChange,
+        activateDevice,
         __test__: {
             setRawValuesForTest: (values) => {
                 rawValues = { ...(values || {}) };

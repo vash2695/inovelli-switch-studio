@@ -103,8 +103,14 @@ function createStorage(initial, options) {
     const opts = options || {};
     const values = new Map(Object.entries(initial || {}));
     const writes = [];
+    const removals = [];
     return {
-        getItem: (key) => values.has(key) ? values.get(key) : null,
+        getItem(key) {
+            if (typeof opts.failGet === 'function' && opts.failGet(key)) {
+                throw new Error(`Storage read rejected for ${key}`);
+            }
+            return values.has(key) ? values.get(key) : null;
+        },
         setItem(key, value) {
             writes.push({ key, value: String(value) });
             if (typeof opts.failSet === 'function' && opts.failSet(key, value)) {
@@ -112,8 +118,16 @@ function createStorage(initial, options) {
             }
             values.set(key, String(value));
         },
+        removeItem(key) {
+            removals.push(key);
+            if (typeof opts.failRemove === 'function' && opts.failRemove(key)) {
+                throw new Error(`Storage removal rejected for ${key}`);
+            }
+            values.delete(key);
+        },
         value: (key) => values.get(key),
         writes,
+        removals,
     };
 }
 
@@ -1029,12 +1043,20 @@ test('zone editing forces 2D without replacing the preference, then restores 3D'
     assert.equal(setup.modeEvents.at(-1).metadata.forced, false);
 });
 
-test('display height bounds validate and persist atomically for each device', () => {
-    const storage = createStorage({ 'switchStudio.radarViewMode': '3d' });
-    const setup = loadController({ storage, activeDevice: 'device-a' });
+test('display height bounds validate and legacy per-device values are review drafts only', () => {
+    const officeKey = 'switchStudio.radarDisplayHeight:zigbee2mqtt%2Foffice%20switch';
+    const malformedKey = 'switchStudio.radarDisplayHeight:zigbee2mqtt%2Fmalformed';
+    const partialKey = 'switchStudio.radarDisplayHeight:zigbee2mqtt%2Fpartial';
+    const outOfRangeKey = 'switchStudio.radarDisplayHeight:zigbee2mqtt%2Fout-of-range';
+    const storage = createStorage({
+        'switchStudio.radarViewMode': '3d',
+        [officeKey]: '{"zMin":420,"zMax":-180}',
+        [malformedKey]: '{broken json',
+        [partialKey]: '{"zMin":-120}',
+        [outOfRangeKey]: '{"zMin":-601,"zMax":200}',
+    });
+    const setup = loadController({ storage, activeDevice: 'zigbee2mqtt/office switch' });
     const api = setup.controller;
-    const keyA = 'switchStudio.radarDisplayHeight:zigbee2mqtt%2Foffice%20switch';
-    const keyB = 'switchStudio.radarDisplayHeight:zigbee2mqtt%2Fbedroom%20switch';
 
     assert.deepEqual(plain(api.normalizeDisplayHeightBounds(420, -180)), { zMin: -180, zMax: 420 });
     assert.deepEqual(plain(api.normalizeDisplayHeightBounds('-100', '-80')), { zMin: -100, zMax: -80 });
@@ -1053,138 +1075,57 @@ test('display height bounds validate and persist atomically for each device', ()
         assert.equal(api.normalizeDisplayHeightBounds(zMin, zMax), null);
     });
 
-    assert.deepEqual(plain(api.loadDisplayHeightBounds('zigbee2mqtt/office switch')), { zMin: -600, zMax: 600 });
     assert.deepEqual(
-        plain(api.saveDisplayHeightBounds('zigbee2mqtt/office switch', 420, -180)),
+        plain(api.loadLegacyDisplayHeightBounds('zigbee2mqtt/office switch')),
         { zMin: -180, zMax: 420 },
     );
-    assert.equal(storage.value(keyA), '{"zMin":-180,"zMax":420}');
-    assert.deepEqual(
-        plain(api.saveDisplayHeightBounds('zigbee2mqtt/bedroom switch', -360, 140)),
-        { zMin: -360, zMax: 140 },
-    );
-    assert.equal(storage.value(keyB), '{"zMin":-360,"zMax":140}');
-
-    assert.deepEqual(plain(api.loadDisplayHeightBounds('zigbee2mqtt/office switch')), { zMin: -180, zMax: 420 });
-    assert.deepEqual(plain(api.loadDisplayHeightBounds('zigbee2mqtt/bedroom switch')), { zMin: -360, zMax: 140 });
-    assert.deepEqual(plain(api.loadDisplayHeightBounds('zigbee2mqtt/office switch')), { zMin: -180, zMax: 420 });
-    assert.equal(api.saveDisplayHeightBounds('', -100, 100), null, 'unselected state must not create a shared height preference');
-
-    const priorA = storage.value(keyA);
-    assert.equal(api.saveDisplayHeightBounds('zigbee2mqtt/office switch', '', 100), null);
-    assert.equal(api.saveDisplayHeightBounds('zigbee2mqtt/office switch', 0, 10), null);
-    assert.equal(storage.value(keyA), priorA, 'invalid saves must retain the complete prior pair');
-
-    storage.setItem(keyA, '{"zMin":-120}');
-    assert.deepEqual(
-        plain(api.loadDisplayHeightBounds('zigbee2mqtt/office switch')),
-        { zMin: -600, zMax: 600 },
-        'a partial pair must fall back atomically',
-    );
-    storage.setItem(keyA, '{broken json');
-    assert.deepEqual(plain(api.loadDisplayHeightBounds('zigbee2mqtt/office switch')), { zMin: -600, zMax: 600 });
-    storage.setItem(keyA, '{"zMin":-601,"zMax":200}');
-    assert.deepEqual(plain(api.loadDisplayHeightBounds('zigbee2mqtt/office switch')), { zMin: -600, zMax: 600 });
-
+    assert.equal(api.loadLegacyDisplayHeightBounds('zigbee2mqtt/unknown'), null);
+    assert.equal(api.loadLegacyDisplayHeightBounds('zigbee2mqtt/malformed'), null);
+    assert.equal(api.loadLegacyDisplayHeightBounds('zigbee2mqtt/partial'), null);
+    assert.equal(api.loadLegacyDisplayHeightBounds('zigbee2mqtt/out-of-range'), null);
+    assert.equal(api.loadLegacyDisplayHeightBounds(''), null);
+    assert.equal(storage.writes.length, 0, 'reading a legacy draft must never rewrite browser state');
+    assert.equal(storage.removals.length, 0, 'the draft remains until the user confirms a shared save');
     assert.equal(setup.controller.getMode(), '3d');
-    assert.equal(storage.value('switchStudio.radarViewMode'), '3d', 'height persistence must not overwrite the global view mode');
-    const reloaded = loadController({ storage, activeDevice: 'zigbee2mqtt/bedroom switch' });
-    assert.equal(reloaded.controller.getMode(), '3d');
-    assert.deepEqual(
-        plain(reloaded.controller.loadDisplayHeightBounds('zigbee2mqtt/bedroom switch')),
-        { zMin: -360, zMax: 140 },
-    );
+    assert.equal(storage.value('switchStudio.radarViewMode'), '3d');
+
+    assert.equal(api.saveDisplayHeightBounds, undefined, 'new height changes must not use browser-local persistence');
+    assert.equal(api.saveDisplayHeightBoundsForDevices, undefined, 'the obsolete apply-to-inventory storage API must stay removed');
 });
 
-test('bulk display height persistence normalizes reversed bounds, dedupes topics, and does not become a future-device default', () => {
-    const offlineKey = 'switchStudio.radarDisplayHeight:zigbee2mqtt%2Foffline%20switch';
+test('legacy height cleanup is topic-scoped and denied browser storage fails safely', () => {
+    const officeTopic = 'zigbee2mqtt/office switch';
+    const bedroomTopic = 'zigbee2mqtt/bedroom switch';
+    const officeKey = `switchStudio.radarDisplayHeight:${encodeURIComponent(officeTopic)}`;
+    const bedroomKey = `switchStudio.radarDisplayHeight:${encodeURIComponent(bedroomTopic)}`;
     const storage = createStorage({
-        'switchStudio.radarViewMode': '3d',
-        [offlineKey]: '{"zMin":-90,"zMax":210}',
+        [officeKey]: '{"zMin":-180,"zMax":420}',
+        [bedroomKey]: '{"zMin":-360,"zMax":140}',
     });
-    const setup = loadController({ storage, activeDevice: 'zigbee2mqtt/office switch' });
-    const api = setup.controller;
-    const officeKey = 'switchStudio.radarDisplayHeight:zigbee2mqtt%2Foffice%20switch';
-    const bedroomKey = 'switchStudio.radarDisplayHeight:zigbee2mqtt%2Fbedroom%20switch';
-    const writesBefore = storage.writes.length;
+    const setup = loadController({ storage });
 
-    const result = api.saveDisplayHeightBoundsForDevices([
-        ' zigbee2mqtt/office switch ',
-        'zigbee2mqtt/bedroom switch',
-        'zigbee2mqtt/office switch',
-        '',
-        null,
-    ], 420, -180);
+    assert.equal(setup.controller.clearLegacyDisplayHeightBounds(officeTopic), true);
+    assert.equal(storage.value(officeKey), undefined);
+    assert.equal(storage.value(bedroomKey), '{"zMin":-360,"zMax":140}');
+    assert.deepEqual(storage.removals, [officeKey]);
+    assert.equal(setup.controller.clearLegacyDisplayHeightBounds(''), false);
+    assert.deepEqual(storage.removals, [officeKey], 'an empty topic must not target a shared prefix key');
 
-    assert.deepEqual(plain(result), {
-        bounds: { zMin: -180, zMax: 420 },
-        deviceKeys: ['zigbee2mqtt/office switch', 'zigbee2mqtt/bedroom switch'],
-        failedDeviceKeys: [],
+    const readDenied = loadController({
+        storage: createStorage(
+            { [officeKey]: '{"zMin":-180,"zMax":420}' },
+            { failGet: (key) => key === officeKey },
+        ),
     });
-    assert.deepEqual(storage.writes.slice(writesBefore), [
-        { key: officeKey, value: '{"zMin":-180,"zMax":420}' },
-        { key: bedroomKey, value: '{"zMin":-180,"zMax":420}' },
-    ]);
-    assert.equal(storage.value(officeKey), '{"zMin":-180,"zMax":420}');
-    assert.equal(storage.value(bedroomKey), '{"zMin":-180,"zMax":420}');
-    assert.equal(storage.value(offlineKey), '{"zMin":-90,"zMax":210}', 'topics outside the supplied inventory snapshot stay untouched');
+    assert.equal(readDenied.controller.loadLegacyDisplayHeightBounds(officeTopic), null);
 
-    const writesAfterValidSave = storage.writes.length;
-    assert.equal(api.saveDisplayHeightBoundsForDevices(['zigbee2mqtt/office switch'], 0, 10), null);
-    assert.equal(api.saveDisplayHeightBoundsForDevices(['', null], -180, 420), null);
-    assert.equal(storage.writes.length, writesAfterValidSave, 'invalid bounds or an empty topic set must not partially write');
-    assert.equal(storage.value(officeKey), '{"zMin":-180,"zMax":420}');
-
-    assert.deepEqual(
-        plain(api.loadDisplayHeightBounds('zigbee2mqtt/future switch')),
-        { zMin: -600, zMax: 600 },
-        'a switch discovered after the one-shot bulk action keeps the normal per-device fallback',
+    const removalDeniedStorage = createStorage(
+        { [officeKey]: '{"zMin":-180,"zMax":420}' },
+        { failRemove: (key) => key === officeKey },
     );
-    assert.equal(storage.value('switchStudio.radarDisplayHeight:'), undefined, 'bulk persistence must not create a shared default key');
-    assert.equal(storage.value('switchStudio.radarViewMode'), '3d', 'bulk height persistence must not disturb the global view mode');
-    assert.equal(setup.controller.getMode(), '3d');
-});
-
-test('bulk display height persistence reports partial and total local-storage failures without counting rejected topics', () => {
-    const topics = [
-        'zigbee2mqtt/office switch',
-        'zigbee2mqtt/bedroom switch',
-        'zigbee2mqtt/den switch',
-    ];
-    const keys = topics.map((topic) => `switchStudio.radarDisplayHeight:${encodeURIComponent(topic)}`);
-    const partialStorage = createStorage(
-        { 'switchStudio.radarViewMode': '2d' },
-        { failSet: (key) => key === keys[1] },
-    );
-    const partialSetup = loadController({ storage: partialStorage });
-
-    const partialResult = partialSetup.controller.saveDisplayHeightBoundsForDevices(topics, -240, 360);
-    assert.deepEqual(plain(partialResult), {
-        bounds: { zMin: -240, zMax: 360 },
-        deviceKeys: [topics[0], topics[2]],
-        failedDeviceKeys: [topics[1]],
-    });
-    assert.equal(partialStorage.value(keys[0]), '{"zMin":-240,"zMax":360}');
-    assert.equal(partialStorage.value(keys[1]), undefined);
-    assert.equal(partialStorage.value(keys[2]), '{"zMin":-240,"zMax":360}');
-    assert.deepEqual(partialStorage.writes.map((write) => write.key), keys, 'every deduped topic should receive one write attempt');
-    assert.equal(partialStorage.value('switchStudio.radarViewMode'), '2d');
-
-    const allFailedStorage = createStorage(
-        { 'switchStudio.radarViewMode': '3d' },
-        { failSet: (key) => key.startsWith('switchStudio.radarDisplayHeight:') },
-    );
-    const allFailedSetup = loadController({ storage: allFailedStorage });
-    const allFailedResult = allFailedSetup.controller.saveDisplayHeightBoundsForDevices(topics.slice(0, 2), -240, 360);
-    assert.deepEqual(plain(allFailedResult), {
-        bounds: { zMin: -240, zMax: 360 },
-        deviceKeys: [],
-        failedDeviceKeys: topics.slice(0, 2),
-    });
-    assert.equal(allFailedStorage.value(keys[0]), undefined);
-    assert.equal(allFailedStorage.value(keys[1]), undefined);
-    assert.equal(allFailedStorage.value('switchStudio.radarViewMode'), '3d');
-    assert.equal(allFailedSetup.controller.getMode(), '3d');
+    const removalDenied = loadController({ storage: removalDeniedStorage });
+    assert.equal(removalDenied.controller.clearLegacyDisplayHeightBounds(officeTopic), false);
+    assert.equal(removalDeniedStorage.value(officeKey), '{"zMin":-180,"zMax":420}');
 });
 
 test('display-only height changes stay dormant in native 2D while rebuilding full-height FOV geometry', () => {
@@ -1211,10 +1152,8 @@ test('display-only height changes stay dormant in native 2D while rebuilding ful
 
 test('zone cuboids expand render bounds, FOV, and deterministic floor coverage without rewriting authored data', () => {
     const deviceKey = 'zigbee2mqtt/office switch';
-    const displayStorageKey = `switchStudio.radarDisplayHeight:${encodeURIComponent(deviceKey)}`;
     const storage = createStorage({
         'switchStudio.radarViewMode': '3d',
-        [displayStorageKey]: '{"zMin":-120,"zMax":160}',
     });
     const displayBounds = {
         xMin: -300,
@@ -1335,9 +1274,7 @@ test('zone cuboids expand render bounds, FOV, and deterministic floor coverage w
         { name: 'Stay area 1', zMin: 100, zMax: 570 },
         { name: 'Interference area 1', zMin: -40, zMax: 80 },
     ], 'semantic cuboids must retain exact device-authored heights while the FOV fills the scene');
-    assert.deepEqual(plain(setup.controller.loadDisplayHeightBounds(deviceKey)), { zMin: -120, zMax: 160 });
-    assert.equal(storage.value(displayStorageKey), '{"zMin":-120,"zMax":160}');
-    assert.equal(storage.writes.length, 0, 'expanding render axes must not rewrite the saved per-device display range');
+    assert.equal(storage.writes.length, 0, 'expanding render axes must not create browser-local display-height state');
 
     setup.controller.setSceneModel(scene({
         zones: {
@@ -1365,8 +1302,6 @@ test('zone cuboids expand render bounds, FOV, and deterministic floor coverage w
     assert.deepEqual([Math.min(...restoredFloorY), Math.max(...restoredFloorY)], [0, 600]);
     assert.equal(setup.zonesApi.calls.fov.at(-1).zMin, -120);
     assert.equal(setup.zonesApi.calls.fov.at(-1).zMax, 160);
-    assert.deepEqual(plain(setup.controller.loadDisplayHeightBounds(deviceKey)), { zMin: -120, zMax: 160 });
-    assert.equal(storage.value(displayStorageKey), '{"zMin":-120,"zMax":160}');
     assert.equal(storage.writes.length, 0);
 });
 
@@ -1544,7 +1479,7 @@ test('FOV spans the complete visible Z axis while the sensor remains only at the
     assert.deepEqual(Array.from(sensorOrigin.z), [0]);
 });
 
-test('per-device display height updates the 3D axis and full-height FOV without changing zones, mode, or camera', () => {
+test('global display height updates the 3D axis and full-height FOV without changing zones, mode, or camera', () => {
     const storage = createStorage({ 'switchStudio.radarViewMode': '3d' });
     const initialModel = scene({
         bounds: { xMin: -500, xMax: 500, yMin: 0, yMax: 600, zMin: -600, zMax: 600 },
@@ -1568,11 +1503,6 @@ test('per-device display height updates the 3D axis and full-height FOV without 
             uirevision: initialPlot.layout.scene.uirevision,
         },
     };
-    assert.deepEqual(
-        plain(setup.controller.saveDisplayHeightBounds('device-a', -180, 420)),
-        { zMin: -180, zMax: 420 },
-    );
-
     setup.controller.setSceneModel(scene({
         bounds: { xMin: -500, xMax: 500, yMin: 0, yMax: 600, zMin: -180, zMax: 420 },
     }));

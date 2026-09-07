@@ -550,50 +550,28 @@
         return { zMin, zMax };
     }
 
-    function loadDisplayHeightBounds(deviceKey) {
-        const fallback = { zMin: DISPLAY_HEIGHT_MIN, zMax: DISPLAY_HEIGHT_MAX };
+    function loadLegacyDisplayHeightBounds(deviceKey) {
         const key = displayHeightStorageKey(deviceKey);
-        if (!key) return fallback;
+        if (!key) return null;
         const stored = safeStorageGet(key);
-        if (!stored) return fallback;
+        if (!stored) return null;
         try {
             const parsed = JSON.parse(stored);
-            return normalizeDisplayHeightBounds(parsed?.zMin, parsed?.zMax) || fallback;
+            return normalizeDisplayHeightBounds(parsed?.zMin, parsed?.zMax);
         } catch (error) {
-            return fallback;
+            return null;
         }
     }
 
-    function saveDisplayHeightBounds(deviceKey, rawMin, rawMax) {
+    function clearLegacyDisplayHeightBounds(deviceKey) {
         const key = displayHeightStorageKey(deviceKey);
-        const normalized = normalizeDisplayHeightBounds(rawMin, rawMax);
-        if (!key || !normalized) return null;
-        safeStorageSet(key, JSON.stringify(normalized));
-        return normalized;
-    }
-
-    function saveDisplayHeightBoundsForDevices(deviceKeys, rawMin, rawMax) {
-        const bounds = normalizeDisplayHeightBounds(rawMin, rawMax);
-        if (!bounds) return null;
-        const normalizedKeys = Array.from(new Set(
-            (Array.isArray(deviceKeys) ? deviceKeys : [])
-                .map((deviceKey) => String(deviceKey || '').trim())
-                .filter(Boolean),
-        ));
-        if (!normalizedKeys.length) return null;
-        const serialized = JSON.stringify(bounds);
-        const savedDeviceKeys = [];
-        const failedDeviceKeys = [];
-        normalizedKeys.forEach((deviceKey) => {
-            const key = displayHeightStorageKey(deviceKey);
-            if (key && safeStorageSet(key, serialized)) savedDeviceKeys.push(deviceKey);
-            else failedDeviceKeys.push(deviceKey);
-        });
-        return {
-            bounds: { ...bounds },
-            deviceKeys: savedDeviceKeys,
-            failedDeviceKeys,
-        };
+        if (!key || !storage || typeof storage.removeItem !== 'function') return false;
+        try {
+            storage.removeItem(key);
+            return true;
+        } catch (error) {
+            return false;
+        }
     }
 
     function normalizeMode(mode) {
@@ -2918,9 +2896,8 @@
         return {
             init,
             normalizeDisplayHeightBounds,
-            loadDisplayHeightBounds,
-            saveDisplayHeightBounds,
-            saveDisplayHeightBoundsForDevices,
+            loadLegacyDisplayHeightBounds,
+            clearLegacyDisplayHeightBounds,
             setVisible,
             setActiveDevice,
             setEditing,

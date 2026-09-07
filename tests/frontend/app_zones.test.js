@@ -12,6 +12,17 @@ function assertNear(actual, expected, tolerance = 0.001) {
     assert.ok(Math.abs(actual - expected) <= tolerance, `${actual} should be within ${tolerance} of ${expected}`);
 }
 
+test('maintenance errors from another device or an earlier request do not clear current work', () => {
+    const { zones } = loadZonesModule();
+    zones.setPendingCommand(3, { topic: 'b', request_id: 'new-request' });
+    zones.handleCommandResult({ action: 'send_command', status: 'error', topic: 'a', request_id: 'old-request' });
+    assert.equal(zones.getPendingCommandId(), 3);
+    zones.handleCommandResult({ action: 'send_command', status: 'error', topic: 'b', request_id: 'old-request' });
+    assert.equal(zones.getPendingCommandId(), 3);
+    zones.handleCommandResult({ action: 'send_command', status: 'error', topic: 'b', request_id: 'new-request' });
+    assert.equal(zones.getPendingCommandId(), null);
+});
+
 function loadZonesModule(options) {
     const opts = options || {};
     const scriptPath = path.resolve(__dirname, '../../switch_studio/static/js/app_zones.js');

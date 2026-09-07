@@ -113,7 +113,7 @@ Zone types have distinct jobs:
 
 The Zone Editor's `?` button reveals on-demand guidance for Detection, Stay, and Interference Areas, with links to Inovelli's [official advanced configuration guide](https://help.inovelli.com/en/articles/12773613-blue-series-mmwave-presence-dimmer-switch-advanced-mmwave-configuration) and the community's [area configuration discussion](https://community.inovelli.com/t/presence-area-configuration-best-practice/20933). [Inovelli has confirmed](https://community.inovelli.com/t/having-trouble-understanding-blue-mmwave-vzm32-sn-stay-settings-parameters/21585/4) a switch-firmware bug can return Stay Area X coordinates mirrored or with min/max swapped, so verify the reported zone position after applying a stay-area change.
 
-The View panel controls zone visibility and the radar display envelope. X/Y display bounds affect both views. Z display bounds affect 3D, are stored per device in the current browser, and do not change the switch configuration. **Apply Height to All Switches** copies only the current Z display bounds to compatible switches already discovered in that browser; it sends no MQTT command and does not become a default for future devices.
+The View panel controls zone visibility and the radar display envelope. Width/depth (X/Y) affect both views and remain browser-local preferences. The 3D height (Z) range is one persistent setting owned by the Switch Studio add-on, so every current or future switch and every browser using that installation shares it. Saving the shared height writes only the add-on's local settings file; it sends no MQTT command and never changes switch configuration. If no shared range exists yet, a valid older browser-only range may be offered as an unsaved draft, but it becomes global only after you review it and choose **Save Shared Height**.
 
 ### Configuration sections
 
@@ -153,14 +153,14 @@ The switch's Zigbee firmware and the mmWave sensor module firmware are separate.
 Switch Studio deliberately separates staged configuration from immediate actions:
 
 - Configuration fields and persistent LED defaults are staged in the current page until **Apply Changes**.
-- Apply validates the staged fields and publishes them together in one MQTT `/set` payload.
-- Publish success is not treated as device confirmation. Requested fields stay in flight until matching device reports confirm every value; failures and timeouts return values to a retryable state.
+- Apply validates all staged fields before publishing. Device parameters share one MQTT `/set` payload; Zigbee2MQTT runtime options use a separate `bridge/request/device/options` request.
+- Publish success is not treated as confirmation. Device parameters wait for matching device reports; runtime options wait for the matching Zigbee2MQTT transaction response. Mixed batches finish only when both paths confirm. Failures and timeouts leave unresolved values retryable, and options requiring a Zigbee2MQTT restart display a notice.
 - **Discard** removes unsent staged values and zone drafts and restores the latest authoritative device snapshot. It cannot cancel a write that was already published.
 - The zone editor panel's **Apply Changes** sends that zone immediately. The bottom action bar's **Apply Changes** can also submit an active zone draft, but the zone remains a separate write from the configuration payload.
 - Dashboard controls, Target Reporting, maintenance commands, and notification effects are immediate operations. Firmware management is intentionally delegated to Zigbee2MQTT.
 - Controls disable while Socket.IO, MQTT, inventory, or the target device is unavailable. There is no durable offline command queue or delayed replay.
 
-Pending edits live only in page memory and are lost on reload. Browser preferences such as the active section, radar mode, per-device display height, and reporting auto-off are local UI state rather than device configuration.
+Pending edits live only in page memory and are lost on reload. Browser preferences such as the active section, radar mode, width/depth display range, and reporting auto-off remain local UI state rather than device configuration. The shared 3D height range is persistent add-on state and is synchronized live across connected browsers.
 
 ## Mobile and accessibility behavior
 

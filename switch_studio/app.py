@@ -14,6 +14,8 @@ import hashlib
 import ipaddress
 import math
 import re
+import tempfile
+import uuid
 import urllib.parse
 from flask import Flask, render_template, request
 from flask_socketio import SocketIO
@@ -50,6 +52,16 @@ MQTT_CONNACK_REASON = {
 }
 TEST_MODE = str(os.environ.get("SWITCH_STUDIO_TEST_MODE", "")).strip().lower() in {"1", "true", "yes", "on"}
 FIRMWARE_PROCESS_EPOCH = f"{os.getpid()}-{time.time_ns()}"
+RADAR_DISPLAY_SETTINGS_EPOCH = f"{os.getpid()}-{time.time_ns()}"
+RADAR_DISPLAY_SETTINGS_PATH = os.environ.get(
+    'SWITCH_STUDIO_RADAR_DISPLAY_SETTINGS_PATH',
+    '/data/radar_display_settings_v1.json',
+)
+RADAR_DISPLAY_SETTINGS_SCHEMA_VERSION = 1
+RADAR_DISPLAY_SETTINGS_MAX_BYTES = 4096
+RADAR_DISPLAY_HEIGHT_MIN = -600
+RADAR_DISPLAY_HEIGHT_MAX = 600
+RADAR_DISPLAY_HEIGHT_MIN_SPAN = 20
 SUPERVISOR_INGRESS_IP = ipaddress.ip_address('172.30.32.2')
 TRUSTED_INGRESS_PEERS = {str(SUPERVISOR_INGRESS_IP)}
 ALLOW_LOCAL_DIRECT = TEST_MODE or str(
@@ -123,6 +135,316 @@ def _as_bool(value, default=False):
         if lowered in {"0", "false", "no", "off"}:
             return False
     return bool(default)
+
+
+radar_display_height_lock = threading.Lock()
+_radar_display_height_state = None
+_radar_display_height_state_path = None
+RADAR_DISPLAY_WRITE_MIN_INTERVAL_SECONDS = 0.5
+MAX_RADAR_DISPLAY_WRITE_SIDS = 256
+radar_display_write_limits = {}
+radar_display_write_limits_lock = threading.Lock()
+
+
+def _default_radar_display_height_state(read_only=False):
+    return {
+        'schema_version': RADAR_DISPLAY_SETTINGS_SCHEMA_VERSION,
+        'revision': 0,
+        'configured': False,
+        'z_min': RADAR_DISPLAY_HEIGHT_MIN,
+        'z_max': RADAR_DISPLAY_HEIGHT_MAX,
+        'read_only': bool(read_only),
+    }
+
+
+def normalize_radar_display_height(raw_min, raw_max):
+    """Validate and normalize the shared 3D display-height range."""
+    if isinstance(raw_min, bool) or isinstance(raw_max, bool):
+        return None
+    if not isinstance(raw_min, (int, float)) or not isinstance(raw_max, (int, float)):
+        return None
+    try:
+        z_min = float(raw_min)
+        z_max = float(raw_max)
+    except (OverflowError, ValueError):
+        return None
+    if not math.isfinite(z_min) or not math.isfinite(z_max):
+        return None
+    z_min, z_max = sorted((z_min, z_max))
+    if z_min < RADAR_DISPLAY_HEIGHT_MIN or z_max > RADAR_DISPLAY_HEIGHT_MAX:
+        return None
+    if (z_max - z_min) < RADAR_DISPLAY_HEIGHT_MIN_SPAN:
+        return None
+    return {
+        'z_min': int(z_min) if z_min.is_integer() else z_min,
+        'z_max': int(z_max) if z_max.is_integer() else z_max,
+    }
+
+
+def _load_radar_display_height_state(path=None):
+    settings_path = str(path or RADAR_DISPLAY_SETTINGS_PATH)
+    fallback = _default_radar_display_height_state()
+    protected_fallback = _default_radar_display_height_state(read_only=True)
+    try:
+        with open(settings_path, 'rb') as settings_file:
+            raw = settings_file.read(RADAR_DISPLAY_SETTINGS_MAX_BYTES + 1)
+    except FileNotFoundError:
+        return fallback
+    except OSError as error:
+        print(
+            f"Radar display settings could not be read; shared height is read-only ({type(error).__name__})",
+            flush=True,
+        )
+        return _default_radar_display_height_state(read_only=True)
+
+    if len(raw) > RADAR_DISPLAY_SETTINGS_MAX_BYTES:
+        print('Radar display settings exceeded the size limit; shared height is read-only', flush=True)
+        return protected_fallback
+    try:
+        stored = json.loads(raw.decode('utf-8'))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        print('Radar display settings were invalid; shared height is read-only', flush=True)
+        return protected_fallback
+    if not isinstance(stored, dict):
+        print('Radar display settings had an invalid shape; shared height is read-only', flush=True)
+        return protected_fallback
+
+    schema_version = stored.get('schema_version')
+    if isinstance(schema_version, bool) or not isinstance(schema_version, int):
+        print('Radar display settings had an invalid schema; shared height is read-only', flush=True)
+        return protected_fallback
+    if schema_version > RADAR_DISPLAY_SETTINGS_SCHEMA_VERSION:
+        print('Radar display settings use a newer schema; shared height is read-only', flush=True)
+        return _default_radar_display_height_state(read_only=True)
+    if schema_version != RADAR_DISPLAY_SETTINGS_SCHEMA_VERSION:
+        print('Radar display settings had an unsupported schema; shared height is read-only', flush=True)
+        return protected_fallback
+
+    revision = stored.get('revision')
+    configured = stored.get('configured')
+    bounds = normalize_radar_display_height(stored.get('z_min'), stored.get('z_max'))
+    if (
+        isinstance(revision, bool)
+        or not isinstance(revision, int)
+        or revision < 0
+        or revision > 9007199254740991
+        or configured is not True
+        or bounds is None
+    ):
+        print('Radar display settings failed validation; shared height is read-only', flush=True)
+        return protected_fallback
+    return {
+        'schema_version': RADAR_DISPLAY_SETTINGS_SCHEMA_VERSION,
+        'revision': revision,
+        'configured': True,
+        'z_min': bounds['z_min'],
+        'z_max': bounds['z_max'],
+        'read_only': False,
+    }
+
+
+def _write_radar_display_height_state(state, path=None):
+    settings_path = os.path.abspath(str(path or RADAR_DISPLAY_SETTINGS_PATH))
+    settings_dir = os.path.dirname(settings_path) or os.curdir
+    os.makedirs(settings_dir, exist_ok=True)
+    persisted = {
+        'schema_version': RADAR_DISPLAY_SETTINGS_SCHEMA_VERSION,
+        'revision': int(state['revision']),
+        'configured': True,
+        'z_min': state['z_min'],
+        'z_max': state['z_max'],
+    }
+    descriptor = None
+    temporary_path = None
+    try:
+        descriptor, temporary_path = tempfile.mkstemp(
+            prefix='.radar-display-settings-',
+            suffix='.tmp',
+            dir=settings_dir,
+        )
+        try:
+            os.chmod(temporary_path, 0o600)
+        except OSError:
+            pass
+        with os.fdopen(descriptor, 'w', encoding='utf-8') as settings_file:
+            descriptor = None
+            json.dump(persisted, settings_file, separators=(',', ':'), allow_nan=False)
+            settings_file.flush()
+            os.fsync(settings_file.fileno())
+        os.replace(temporary_path, settings_path)
+        temporary_path = None
+        try:
+            directory_fd = os.open(settings_dir, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        except OSError:
+            # Windows and some container filesystems do not support directory fsync.
+            pass
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        if temporary_path:
+            try:
+                os.unlink(temporary_path)
+            except OSError:
+                pass
+
+
+def _ensure_radar_display_height_state_locked():
+    global _radar_display_height_state, _radar_display_height_state_path
+    current_path = str(RADAR_DISPLAY_SETTINGS_PATH)
+    if _radar_display_height_state is None or _radar_display_height_state_path != current_path:
+        _radar_display_height_state = _load_radar_display_height_state(current_path)
+        _radar_display_height_state_path = current_path
+    return _radar_display_height_state
+
+
+def _radar_display_height_snapshot_locked():
+    state = _ensure_radar_display_height_state_locked()
+    return {
+        'schema_version': RADAR_DISPLAY_SETTINGS_SCHEMA_VERSION,
+        'epoch': RADAR_DISPLAY_SETTINGS_EPOCH,
+        'revision': int(state['revision']),
+        'configured': bool(state['configured']),
+        'z_min': state['z_min'],
+        'z_max': state['z_max'],
+        'read_only': bool(state.get('read_only')),
+    }
+
+
+def get_radar_display_height_snapshot():
+    with radar_display_height_lock:
+        return copy.deepcopy(_radar_display_height_snapshot_locked())
+
+
+def set_radar_display_height(
+    raw_min,
+    raw_max,
+    if_unset=False,
+    expected_epoch=None,
+    expected_revision=None,
+):
+    """Compare, atomically persist, and return the authoritative shared height."""
+    global _radar_display_height_state
+    bounds = normalize_radar_display_height(raw_min, raw_max)
+    if bounds is None:
+        return {
+            'status': 'error',
+            'error_code': 'invalid_settings',
+            'message': '3D height bounds must be between -600 and 600 cm with at least 20 cm between them.',
+            'snapshot': get_radar_display_height_snapshot(),
+        }
+
+    with radar_display_height_lock:
+        state = _ensure_radar_display_height_state_locked()
+        current = copy.deepcopy(_radar_display_height_snapshot_locked())
+        if state.get('read_only'):
+            return {
+                'status': 'error',
+                'error_code': 'unsupported_settings_version',
+                'message': 'The saved shared-height setting could not be loaded safely and is read-only.',
+                'snapshot': current,
+            }
+        if int(state.get('revision') or 0) >= 9007199254740991:
+            return {
+                'status': 'error',
+                'error_code': 'revision_exhausted',
+                'message': 'Shared height revision is exhausted and cannot be changed safely.',
+                'snapshot': current,
+            }
+        if if_unset:
+            if state.get('configured'):
+                return {
+                    'status': 'conflict',
+                    'error_code': 'already_configured',
+                    'message': 'A shared 3D height was already configured.',
+                    'snapshot': current,
+                }
+        elif expected_epoch != RADAR_DISPLAY_SETTINGS_EPOCH or expected_revision != state.get('revision'):
+            return {
+                'status': 'conflict',
+                'error_code': 'revision_conflict',
+                'message': 'Shared 3D height changed before this save. Review the current value and try again.',
+                'snapshot': current,
+            }
+
+        if (
+            state.get('configured')
+            and state.get('z_min') == bounds['z_min']
+            and state.get('z_max') == bounds['z_max']
+        ):
+            return {
+                'status': 'unchanged',
+                'message': 'Shared 3D height is already set to these values.',
+                'snapshot': current,
+            }
+
+        candidate = {
+            'schema_version': RADAR_DISPLAY_SETTINGS_SCHEMA_VERSION,
+            'revision': int(state.get('revision') or 0) + 1,
+            'configured': True,
+            'z_min': bounds['z_min'],
+            'z_max': bounds['z_max'],
+            'read_only': False,
+        }
+        try:
+            _write_radar_display_height_state(candidate)
+        except (OSError, TypeError, ValueError) as error:
+            print(
+                f"Radar display settings could not be saved ({type(error).__name__})",
+                flush=True,
+            )
+            return {
+                'status': 'error',
+                'error_code': 'persistence_failed',
+                'message': 'Shared height could not be saved. The previous shared range is still active.',
+                'snapshot': current,
+            }
+        _radar_display_height_state = candidate
+        return {
+            'status': 'saved',
+            'message': 'Shared 3D height saved.',
+            'snapshot': copy.deepcopy(_radar_display_height_snapshot_locked()),
+        }
+
+
+def _reset_radar_display_height_state_for_tests():
+    global _radar_display_height_state, _radar_display_height_state_path
+    with radar_display_height_lock:
+        _radar_display_height_state = None
+        _radar_display_height_state_path = None
+    with radar_display_write_limits_lock:
+        radar_display_write_limits.clear()
+
+
+def consume_radar_display_write_limit(sid, now=None):
+    """Bound settings-file writes without consuming MQTT command capacity."""
+    if not sid:
+        return False, None
+    current = time.monotonic() if now is None else float(now)
+    sid_key = str(sid)
+    with radar_display_write_limits_lock:
+        previous = radar_display_write_limits.get(sid_key)
+        if previous is None and len(radar_display_write_limits) >= MAX_RADAR_DISPLAY_WRITE_SIDS:
+            return False, None
+        if previous is not None:
+            elapsed = max(0.0, current - float(previous))
+            if elapsed < RADAR_DISPLAY_WRITE_MIN_INTERVAL_SECONDS:
+                return False, RADAR_DISPLAY_WRITE_MIN_INTERVAL_SECONDS - elapsed
+        radar_display_write_limits[sid_key] = current
+    return True, 0.0
+
+
+def clear_radar_display_write_limit(sid):
+    if not sid:
+        return
+    with radar_display_write_limits_lock:
+        radar_display_write_limits.pop(str(sid), None)
 
 
 def normalize_peer_address(value):
@@ -370,6 +692,10 @@ device_list_lock = threading.Lock()
 # bridge/devices inventory. Keep the latest exact-topic value so inventory
 # creation is independent of MQTT delivery order.
 device_availability_cache = {}
+# None means no authoritative inventory has arrived during this process.
+# Keep the latest allowlist across reconnects so retained reports cannot revive exclusions.
+inventory_topics = None
+device_options_cache = {}
 
 # Stores per-socket selected MQTT topic to avoid cross-session command routing
 session_topics = {}
@@ -594,6 +920,8 @@ def upsert_discovered_device(
     topic = f"{MQTT_BASE_TOPIC}/{name}"
     created = False
     with device_list_lock:
+        if not inventory_present and inventory_topics is not None and topic not in inventory_topics:
+            return None, False
         cached_availability = device_availability_cache.get(topic)
         cached_state = (
             cached_availability.get('state')
@@ -615,9 +943,9 @@ def upsert_discovered_device(
                     'zones': False,
                     **(capabilities or {}),
                 },
-                'interference_zones': [],
-                'detection_zones': [],
-                'stay_zones': [],
+                'interference_zones': None,
+                'detection_zones': None,
+                'stay_zones': None,
                 'zone_config': dict(DEFAULT_GLOBAL_ZONE_CONFIG),
                 'last_config': {},
                 'ota_status': default_ota_status(),
@@ -690,6 +1018,9 @@ def get_command_readiness_error(topic, require_full_editor=True):
     device = get_device_by_topic(topic)
     if not device:
         return 'Device is no longer in the discovered inventory; refresh and retry'
+    with device_list_lock:
+        if inventory_topics is not None and topic not in inventory_topics:
+            return 'Device is excluded from the Zigbee2MQTT inventory; refresh and retry'
     if require_full_editor and not device_supports_full_editor(topic):
         return 'Full configuration is not supported for this model yet'
 
@@ -988,6 +1319,14 @@ def emit_backend_status(room=None):
     )
 
 
+def emit_radar_display_height(room=None):
+    socketio.emit(
+        'radar_display_height',
+        get_radar_display_height_snapshot(),
+        room=room,
+    )
+
+
 def _pending_write_key(sid, request_id):
     return f"{sid}:{request_id}"
 
@@ -1009,7 +1348,7 @@ def remove_pending_write(sid, request_id):
     return entry
 
 
-def expire_pending_write(sid, request_id):
+def expire_pending_write(sid, request_id, message=None):
     entry = remove_pending_write(sid, request_id)
     if not entry:
         return None
@@ -1029,7 +1368,7 @@ def expire_pending_write(sid, request_id):
             'confirmed_fields': confirmed_fields,
             'unresolved_fields': unresolved_fields,
         },
-        message='Device did not confirm every requested value'
+        message=message or 'Device or Zigbee2MQTT did not confirm every requested value'
     )
     return entry
 
@@ -1045,6 +1384,8 @@ def register_pending_write(sid, request_id, topic, action, expected):
         'topic': topic,
         'action': action,
         'expected': copy.deepcopy(expected),
+        'option_fields': {name for name in expected if schema_service.field_map.get(name, {}).get('source') == 'options'},
+        'options_transaction': uuid.uuid4().hex,
         'observed': {},
         'confirmed_fields': set(),
         'created_at': time.monotonic(),
@@ -1082,7 +1423,7 @@ def clear_pending_writes_for_sid(sid):
         _cancel_pending_timer(entry)
 
 
-def reconcile_pending_writes(topic, config_payload):
+def reconcile_pending_writes(topic, config_payload, options_transaction=None):
     if not topic or not isinstance(config_payload, dict):
         return
 
@@ -1092,10 +1433,15 @@ def reconcile_pending_writes(topic, config_payload):
         for key, entry in list(pending_writes.items()):
             if entry.get('topic') != topic:
                 continue
+            if options_transaction is not None and entry.get('options_transaction') != options_transaction:
+                continue
 
             newly_confirmed = []
             confirmation_changed = False
             for param, expected_value in entry.get('expected', {}).items():
+                is_option = param in entry.get('option_fields', set())
+                if is_option != (options_transaction is not None):
+                    continue
                 if param not in config_payload:
                     continue
                 observed_value = config_payload.get(param)
@@ -1132,7 +1478,7 @@ def reconcile_pending_writes(topic, config_payload):
             topic=entry.get('topic'),
             request_id=entry.get('request_id'),
             payload=copy.deepcopy(entry.get('expected', {})),
-            message='Device confirmed requested values'
+            message='Requested values confirmed'
         )
 
     for entry in partial:
@@ -1149,6 +1495,99 @@ def reconcile_pending_writes(topic, config_payload):
                 'unresolved_fields': sorted(expected_fields - confirmed_fields),
             }
         )
+
+
+def publish_parameter_changes(sid, request_id, topic, action, changes):
+    """Device exposes and bridge options have separate transports and acknowledgements."""
+    with pending_writes_lock:
+        entry = pending_writes.get(_pending_write_key(sid, request_id))
+        if entry is None:
+            return False, None
+        option_fields = set(entry['option_fields'])
+        transaction = entry['options_transaction']
+    parameters = {key: value for key, value in changes.items() if key not in option_fields}
+    options = {key: value for key, value in changes.items() if key in option_fields}
+    if parameters:
+        ok, rc = publish_json(f'{topic}/set', parameters, origin=action, sid=sid)
+        if not ok:
+            return ok, rc
+    if options:
+        return publish_json(
+            f'{MQTT_BASE_TOPIC}/bridge/request/device/options',
+            {'id': topic[len(MQTT_BASE_TOPIC) + 1:], 'options': options, 'transaction': transaction},
+            origin=action, sid=sid,
+        )
+    return True, 0
+
+
+def known_runtime_options(options):
+    if not isinstance(options, dict):
+        return {}
+    return {
+        key: copy.deepcopy(value) for key, value in options.items()
+        if schema_service.field_map.get(key, {}).get('source') == 'options'
+    }
+
+
+def cache_runtime_options(topic, options):
+    values = known_runtime_options(options)
+    with device_list_lock:
+        for device in device_list.values():
+            if device.get('topic') == topic:
+                config = device.setdefault('last_config', {})
+                values = {
+                    **{key: None for key in config if schema_service.field_map.get(key, {}).get('source') == 'options'},
+                    **values,
+                }
+                config.update(values)
+                break
+        else:
+            return
+    socketio.emit('device_config', {'topic': topic, 'payload': values})
+
+
+def hydrate_runtime_options():
+    with device_list_lock:
+        updates = [
+            (device['topic'], {
+                **device_options_cache.get('*', {}),
+                **device_options_cache.get(device.get('ieee_address'), {}),
+                **device_options_cache.get(name, {}),
+            })
+            for name, device in device_list.items()
+        ]
+    for topic, options in updates:
+        cache_runtime_options(topic, options)
+
+
+def handle_runtime_options_response(payload):
+    transaction = payload.get('transaction')
+    if not isinstance(transaction, str):
+        return
+    with pending_writes_lock:
+        entry = next((dict(item) for item in pending_writes.values()
+                      if item.get('options_transaction') == transaction and item.get('option_fields')), None)
+    if entry is None:
+        return
+    if payload.get('status') == 'error':
+        expire_pending_write(entry['sid'], entry['request_id'],
+                             f"Zigbee2MQTT rejected runtime options: {payload.get('error') or 'Unknown error'}")
+        return
+    data = payload.get('data')
+    if payload.get('status') != 'ok' or not isinstance(data, dict) or not isinstance(data.get('to'), dict):
+        return
+    # The bridge echoes the identifier submitted in the request. Never let a
+    # response for another device settle this batch, even with a matching token.
+    if data.get('id') != entry['topic'][len(MQTT_BASE_TOPIC) + 1:]:
+        return
+    options = known_runtime_options(data['to'])
+    with device_list_lock:
+        device_options_cache[data['id']] = options
+        effective_options = {**device_options_cache.get('*', {}), **options}
+    cache_runtime_options(entry['topic'], effective_options)
+    reconcile_pending_writes(entry['topic'], options, options_transaction=transaction)
+    if data.get('restart_required') is True:
+        socketio.emit('runtime_options_restart_required', {'topic': entry['topic']}, room=entry['sid'])
 
 
 def default_ota_status():
@@ -1591,6 +2030,26 @@ def emit_device_list(room=None):
     emit_device_delta('device_list', {'devices': devices}, room=room)
 
 
+ZONE_REPORT_FIELDS = {
+    'interference_zones': 'mmwave_interference_areas',
+    'detection_zones': 'mmwave_detection_areas',
+    'stay_zones': 'mmwave_stay_areas',
+}
+
+
+def cache_raw_zone_report(device, cache_key, zones):
+    """Keep selection snapshots consistent when raw and structured reports alternate."""
+    device[cache_key] = copy.deepcopy(zones)
+    device.setdefault('last_config', {})[ZONE_REPORT_FIELDS[cache_key]] = {
+        zone.get('area_id', f'area{index + 1}'): {
+            'width_min': zone['x_min'], 'width_max': zone['x_max'],
+            'depth_min': zone['y_min'], 'depth_max': zone['y_max'],
+            'height_min': zone['z_min'], 'height_max': zone['z_max'],
+        }
+        for index, zone in enumerate(zones)
+    }
+
+
 def build_device_snapshot(topic):
     device_data = get_device_by_topic(topic)
     if not device_data:
@@ -1601,9 +2060,9 @@ def build_device_snapshot(topic):
     payload = {
         'friendly_name': device_data.get('friendly_name'),
         'zone_config': device_data.get('zone_config'),
-        'interference_zones': device_data.get('interference_zones', []),
-        'detection_zones': device_data.get('detection_zones', []),
-        'stay_zones': device_data.get('stay_zones', []),
+        'interference_zones': device_data.get('interference_zones'),
+        'detection_zones': device_data.get('detection_zones'),
+        'stay_zones': device_data.get('stay_zones'),
         'last_config': device_data.get('last_config', {}),
         'last_seen': device_data.get('last_seen'),
         'ota_status': ota_status,
@@ -1736,7 +2195,7 @@ def on_connect_fail(client, userdata):
     update_mqtt_state(False, 'MQTT broker unavailable', zigbee2mqtt_connected=None, inventory_ready=False)
 
 def on_message(client, userdata, msg):
-    global device_list
+    global device_list, inventory_topics
     try:
         topic = msg.topic
         payload_str = msg.payload.decode().strip()
@@ -1768,6 +2227,22 @@ def on_message(client, userdata, msg):
                     zigbee2mqtt_connected=is_online,
                     reason='Connected' if is_online else 'Zigbee2MQTT is offline'
                 )
+            return
+
+        if topic == f'{MQTT_BASE_TOPIC}/bridge/response/device/options' and isinstance(payload, dict):
+            handle_runtime_options_response(payload)
+            return
+        if topic == f'{MQTT_BASE_TOPIC}/bridge/info' and isinstance(payload, dict):
+            config = payload.get('config')
+            if isinstance(config, dict):
+                devices = config.get('devices')
+                if isinstance(devices, dict):
+                    with device_list_lock:
+                        device_options_cache.clear()
+                        device_options_cache['*'] = known_runtime_options(config.get('device_options'))
+                        for identifier, options in devices.items():
+                            device_options_cache[identifier] = known_runtime_options(options)
+                    hydrate_runtime_options()
             return
 
         if is_availability_topic:
@@ -1803,13 +2278,17 @@ def on_message(client, userdata, msg):
         if topic == bridge_devices_topic and isinstance(payload, list):
             initial_queries = []
             inventory_names = set()
+            with device_list_lock:
+                inventory_topics = set()
             for entry in payload:
                 if not isinstance(entry, dict):
                     continue
                 if (
                     entry.get('disabled') is True
                     or entry.get('supported') is False
-                    or entry.get('interview_completed') is False
+                    or (str(entry.get('interview_state')).upper() != 'SUCCESSFUL'
+                        if entry.get('interview_state') is not None
+                        else entry.get('interview_completed') is False)
                 ):
                     continue
                 definition = entry.get('definition') if isinstance(entry.get('definition'), dict) else {}
@@ -1831,6 +2310,9 @@ def on_message(client, userdata, msg):
                     inventory_present=True,
                 )
                 if discovered_topic:
+                    with device_list_lock:
+                        inventory_topics.add(discovered_topic)
+                        device_list[str(friendly_name)]['ieee_address'] = entry.get('ieee_address')
                     discovered_device = get_device_by_topic(discovered_topic)
                     query_payload = get_initial_control_query(discovered_device)
                     if query_payload:
@@ -1855,6 +2337,7 @@ def on_message(client, userdata, msg):
                 inventory_ready=True,
             )
             emit_device_list()
+            hydrate_runtime_options()
             if client is not None:
                 for discovered_topic, query_data in initial_queries:
                     try:
@@ -2012,21 +2495,21 @@ def on_message(client, userdata, msg):
                     if cmd_id == 2:
                         with device_list_lock:
                             if fname in device_list:
-                                device_list[fname]['interference_zones'] = zones
+                                cache_raw_zone_report(device_list[fname], 'interference_zones', zones)
                         socketio.emit('interference_zones', {'topic': device_topic, 'payload': zones})
                         emit_device_delta('interference_zones', zones, topic=device_topic)
                         print(f"Interference Zones Updated: {zones}", flush=True)
                     elif cmd_id == 3:
                         with device_list_lock:
                             if fname in device_list:
-                                device_list[fname]['detection_zones'] = zones
+                                cache_raw_zone_report(device_list[fname], 'detection_zones', zones)
                         socketio.emit('detection_zones', {'topic': device_topic, 'payload': zones})
                         emit_device_delta('detection_zones', zones, topic=device_topic)
                         print(f"Detection Zones Updated: {zones}", flush=True)
                     elif cmd_id == 4:
                         with device_list_lock:
                             if fname in device_list:
-                                device_list[fname]['stay_zones'] = zones
+                                cache_raw_zone_report(device_list[fname], 'stay_zones', zones)
                         socketio.emit('stay_zones', {'topic': device_topic, 'payload': zones})
                         emit_device_delta('stay_zones', zones, topic=device_topic)
                         print(f"Stay Zones Updated: {zones}", flush=True)
@@ -2035,7 +2518,8 @@ def on_message(client, userdata, msg):
                     print(f"Warning: Zone packet offset mismatch: {parse_error}", flush=True)
         
         # --- STANDARD STATE UPDATE ---
-        config_payload = {k: v for k, v in payload.items() if not k.isdigit()}
+        config_payload = {k: v for k, v in payload.items()
+                          if not k.isdigit() and schema_service.field_map.get(k, {}).get('source') != 'options'}
         basic_control_mapping = get_basic_control_mapping(get_device_by_topic(device_topic))
         state_property = basic_control_mapping.get('state')
         brightness_property = basic_control_mapping.get('brightness')
@@ -2060,6 +2544,10 @@ def on_message(client, userdata, msg):
                     if not isinstance(device_data.get('last_config'), dict):
                         device_data['last_config'] = {}
                     device_data['last_config'].update(config_payload)
+                    for cache_key, field in ZONE_REPORT_FIELDS.items():
+                        if field in config_payload:
+                            # A newer structured report supersedes the older raw cache.
+                            device_data[cache_key] = None
                     capabilities = device_data.setdefault('capabilities', {})
                     # Signature-only discovery starts conservatively because its
                     # first sparse report may omit load controls. Later explicit
@@ -2199,6 +2687,7 @@ def handle_socket_connect(auth=None):
     set_session_reporting_auto_off(request.sid, False)
     emit_schema_model(room=request.sid)
     emit_backend_status(room=request.sid)
+    emit_radar_display_height(room=request.sid)
 
 
 @socketio.on('disconnect')
@@ -2235,6 +2724,7 @@ def handle_socket_disconnect(reason=None):
                 )
 
     clear_command_rate_limit(sid)
+    clear_radar_display_write_limit(sid)
 
     print(f"WebSocket disconnected: sid={request.sid}", flush=True)
 
@@ -2247,6 +2737,128 @@ def handle_request_devices():
 @socketio.on('request_schema')
 def handle_request_schema():
     emit_schema_model(room=request.sid)
+
+
+@socketio.on('request_radar_display_height')
+def handle_request_radar_display_height():
+    emit_radar_display_height(room=request.sid)
+
+
+@socketio.on('set_radar_display_height')
+def handle_set_radar_display_height(data):
+    sid = request.sid
+    envelope_error = validate_command_payload(data)
+    if envelope_error:
+        socketio.emit(
+            'radar_display_height_result',
+            {
+                'status': 'error',
+                'error_code': 'invalid_settings',
+                'message': envelope_error,
+                'snapshot': get_radar_display_height_snapshot(),
+            },
+            room=sid,
+        )
+        return
+    if not isinstance(data, dict):
+        socketio.emit(
+            'radar_display_height_result',
+            {
+                'status': 'error',
+                'error_code': 'invalid_settings',
+                'message': 'Shared height request must be an object.',
+                'snapshot': get_radar_display_height_snapshot(),
+            },
+            room=sid,
+        )
+        return
+
+    request_id, request_error = normalize_command_request_id(data, 'radar-height')
+    if request_error:
+        socketio.emit(
+            'radar_display_height_result',
+            {
+                'status': 'error',
+                'error_code': 'invalid_settings',
+                'message': request_error,
+                'request_id': data.get('request_id'),
+                'snapshot': get_radar_display_height_snapshot(),
+            },
+            room=sid,
+        )
+        return
+
+    if_unset = data.get('if_unset', False)
+    if not isinstance(if_unset, bool):
+        result = {
+            'status': 'error',
+            'error_code': 'invalid_settings',
+            'message': 'if_unset must be true or false.',
+            'snapshot': get_radar_display_height_snapshot(),
+        }
+    else:
+        expected_revision = data.get('expected_revision')
+        if (
+            not if_unset
+            and (
+                isinstance(expected_revision, bool)
+                or not isinstance(expected_revision, int)
+                or expected_revision < 0
+                or expected_revision > 9007199254740991
+                or not isinstance(data.get('expected_epoch'), str)
+                or not data.get('expected_epoch')
+            )
+        ):
+            result = {
+                'status': 'error',
+                'error_code': 'invalid_settings',
+                'message': 'The shared height revision is missing or invalid.',
+                'snapshot': get_radar_display_height_snapshot(),
+            }
+        else:
+            normalized_bounds = normalize_radar_display_height(data.get('z_min'), data.get('z_max'))
+            if normalized_bounds is None:
+                result = {
+                    'status': 'error',
+                    'error_code': 'invalid_settings',
+                    'message': '3D height bounds must be between -600 and 600 cm with at least 20 cm between them.',
+                    'snapshot': get_radar_display_height_snapshot(),
+                }
+            else:
+                allowed, retry_after = consume_radar_display_write_limit(sid)
+                if not allowed:
+                    server_busy = retry_after is None
+                    retry_after_ms = None if server_busy else max(100, int(math.ceil(retry_after * 1000)))
+                    result = {
+                        'status': 'error',
+                        'error_code': 'server_busy' if server_busy else 'rate_limited',
+                        'retryable': True,
+                        'message': (
+                            'The settings service is busy; wait and retry'
+                            if server_busy else
+                            f'Too many setting changes; retry in about {retry_after_ms} ms'
+                        ),
+                        'snapshot': get_radar_display_height_snapshot(),
+                    }
+                    if retry_after_ms is not None:
+                        result['retry_after_ms'] = retry_after_ms
+                else:
+                    result = set_radar_display_height(
+                        normalized_bounds['z_min'],
+                        normalized_bounds['z_max'],
+                        if_unset=if_unset,
+                        expected_epoch=data.get('expected_epoch'),
+                        expected_revision=expected_revision,
+                    )
+
+    response = {
+        **result,
+        'request_id': request_id,
+        'ts': time.time(),
+    }
+    socketio.emit('radar_display_height_result', response, room=sid)
+    if result.get('status') == 'saved':
+        socketio.emit('radar_display_height', result['snapshot'])
 
 @socketio.on('change_device')
 def handle_change_device(new_topic):
@@ -2291,12 +2903,12 @@ def handle_change_device(new_topic):
     if device_data:
         if 'zone_config' in device_data: 
             socketio.emit('zone_config', {'topic': resolved_topic, 'payload': device_data['zone_config']}, room=request.sid)
-        if 'interference_zones' in device_data: 
-            socketio.emit('interference_zones', {'topic': resolved_topic, 'payload': device_data['interference_zones']}, room=request.sid)
-        if 'detection_zones' in device_data:
-            socketio.emit('detection_zones', {'topic': resolved_topic, 'payload': device_data['detection_zones']}, room=request.sid)
-        if 'stay_zones' in device_data:
-            socketio.emit('stay_zones', {'topic': resolved_topic, 'payload': device_data['stay_zones']}, room=request.sid)
+        if isinstance(device_data.get('interference_zones'), list):
+            socketio.emit('interference_zones', {'topic': resolved_topic, 'payload': device_data['interference_zones'], 'snapshot': True}, room=request.sid)
+        if isinstance(device_data.get('detection_zones'), list):
+            socketio.emit('detection_zones', {'topic': resolved_topic, 'payload': device_data['detection_zones'], 'snapshot': True}, room=request.sid)
+        if isinstance(device_data.get('stay_zones'), list):
+            socketio.emit('stay_zones', {'topic': resolved_topic, 'payload': device_data['stay_zones'], 'snapshot': True}, room=request.sid)
 
 
 @socketio.on('set_reporting_auto_off')
@@ -2601,7 +3213,7 @@ def handle_update_parameter(data):
         control_payload
     ):
         return
-    ok, rc = publish_json(f"{current_topic}/set", control_payload, origin='update_parameter', sid=request.sid)
+    ok, rc = publish_parameter_changes(request.sid, request_id, current_topic, 'update_parameter', control_payload)
     if not ok:
         remove_pending_write(request.sid, request_id)
     emit_command_result(
@@ -2706,7 +3318,7 @@ def handle_apply_parameters(data):
     if not enforce_command_rate_limit_or_emit(
         request.sid,
         'apply_parameters',
-        cost=1,
+        cost=len({schema_service.field_map.get(key, {}).get('source') == 'options' for key in normalized_changes}),
         topic=current_topic,
         request_id=request_id,
     ):
@@ -2719,12 +3331,7 @@ def handle_apply_parameters(data):
         normalized_changes
     ):
         return
-    ok, rc = publish_json(
-        f"{current_topic}/set",
-        normalized_changes,
-        origin='apply_parameters',
-        sid=request.sid
-    )
+    ok, rc = publish_parameter_changes(request.sid, request_id, current_topic, 'apply_parameters', normalized_changes)
     if not ok:
         remove_pending_write(request.sid, request_id)
 
@@ -2795,9 +3402,9 @@ def handle_force_sync(data=None):
     device_data = get_device_by_topic(current_topic)
     if device_data:
         if 'zone_config' in device_data: socketio.emit('zone_config', {'topic': current_topic, 'payload': device_data['zone_config']}, room=request.sid)
-        if 'interference_zones' in device_data: socketio.emit('interference_zones', {'topic': current_topic, 'payload': device_data['interference_zones']}, room=request.sid)
-        if 'detection_zones' in device_data: socketio.emit('detection_zones', {'topic': current_topic, 'payload': device_data['detection_zones']}, room=request.sid)
-        if 'stay_zones' in device_data: socketio.emit('stay_zones', {'topic': current_topic, 'payload': device_data['stay_zones']}, room=request.sid)
+        for cache_key in ZONE_REPORT_FIELDS:
+            if isinstance(device_data.get(cache_key), list):
+                socketio.emit(cache_key, {'topic': current_topic, 'payload': device_data[cache_key], 'snapshot': True}, room=request.sid)
 
     # 2. Trigger Z2M read.
     ok_get, rc_get = publish_json(f"{current_topic}/get", payload, origin='force_sync_get', sid=request.sid)
@@ -2830,20 +3437,31 @@ def handle_force_sync(data=None):
 
 
 @socketio.on('send_command')
-def handle_command(cmd_action):
-    if not validate_command_envelope_or_emit(request.sid, 'send_command', cmd_action):
+def handle_command(data):
+    if not validate_command_envelope_or_emit(request.sid, 'send_command', data):
         return
-    current_topic, topic_error = resolve_ready_command_topic(request.sid)
+    if not isinstance(data, dict) or not isinstance(data.get('topic'), str) or not data['topic'].strip():
+        emit_command_result(request.sid, action='send_command', status='error',
+                            message='Maintenance commands require an explicit device topic')
+        return
+    request_id, request_error = normalize_command_request_id(data, 'maintenance')
+    if request_error:
+        emit_command_result(request.sid, action='send_command', status='error', message=request_error)
+        return
+    current_topic, topic_error = resolve_ready_command_topic(request.sid, data)
     if not current_topic:
         emit_command_result(
             request.sid,
             action='send_command',
             status='error',
+            topic=data['topic'],
+            request_id=request_id,
             message=topic_error
         )
         return
 
     action_map = { 0: "reset_mmwave_module", 1: "set_interference", 2: "query_areas", 3: "clear_interference", 4: "reset_detection_area", 5: "clear_stay_areas" }
+    cmd_action = data.get('action_id')
     try:
         if isinstance(cmd_action, bool):
             raise ValueError
@@ -2858,6 +3476,7 @@ def handle_command(cmd_action):
             action='send_command',
             status='error',
             topic=current_topic,
+            request_id=request_id,
             message='Invalid command action'
         )
         return
@@ -2870,6 +3489,7 @@ def handle_command(cmd_action):
             'send_command',
             cost=1,
             topic=current_topic,
+            request_id=request_id,
         ):
             return
         ok, rc = publish_json(
@@ -2883,6 +3503,7 @@ def handle_command(cmd_action):
             action='send_command',
             status='sent' if ok else 'error',
             topic=current_topic,
+            request_id=request_id,
             payload={'action_id': cmd_action_int, 'controlID': cmd_string},
             rc=rc,
             message=None if ok else 'MQTT publish failed'
@@ -2893,6 +3514,7 @@ def handle_command(cmd_action):
             action='send_command',
             status='error',
             topic=current_topic,
+            request_id=request_id,
             payload={'action_id': cmd_action_int},
             message='Unknown command action'
         )

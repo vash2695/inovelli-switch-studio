@@ -62,6 +62,7 @@
     let latestTargets = [];
     let historyLength = 15;
     let lastCommandId = null;
+    let pendingCommandContext = null;
     let pendingCommandTimer = null;
     let pendingCommandTimeoutMs = 15000;
     let pendingCommandStateListener = null;
@@ -433,6 +434,7 @@
         }
         const changed = lastCommandId !== null;
         lastCommandId = null;
+        pendingCommandContext = null;
         if (changed) notifyPendingCommandState();
     }
 
@@ -445,10 +447,11 @@
         showToast('error', message, 3200);
     }
 
-    function setPendingCommand(actionId) {
+    function setPendingCommand(actionId, context = null) {
         const parsedId = Number(actionId);
         if (!Number.isFinite(parsedId) || lastCommandId !== null) return false;
         lastCommandId = parsedId;
+        pendingCommandContext = context;
 
         const labelMap = {
             1: 'Auto-Config Interference',
@@ -478,6 +481,11 @@
     function handleCommandResult(result) {
         if (!result || !result.action) return;
         if (result.action !== 'send_command') return;
+        if (lastCommandId === null) return;
+        if (pendingCommandContext && (
+            result.topic !== pendingCommandContext.topic ||
+            result.request_id !== pendingCommandContext.request_id
+        )) return;
 
         const payload = result.payload || {};
         const controlID = payload.controlID || 'unknown_command';

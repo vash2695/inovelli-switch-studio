@@ -452,7 +452,7 @@
         if (state === getActiveState()) {
             hydrateActiveUi();
             setPacketStatus('confirmed', 'Changes confirmed');
-            showToast('saved', 'Device confirmed the changes.', 1800);
+            showToast('saved', 'Changes confirmed.', 1800);
         }
     }
 
@@ -523,7 +523,7 @@
                 state.batches.has(result.request_id) &&
                 state === getActiveState()
             ) {
-                setPacketStatus('sending', 'Waiting for device confirmation…');
+                setPacketStatus('sending', 'Waiting for confirmation…');
                 updateDirtyUi();
             }
             return;

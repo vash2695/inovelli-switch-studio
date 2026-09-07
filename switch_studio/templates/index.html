@@ -1327,12 +1327,22 @@
         .radar-display-range-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         .radar-display-range-actions { display: grid; gap: 6px; margin-top: 5px; }
         .radar-display-range-actions .cmd-btn { margin-top: 0; }
-        .radar-display-range-apply-all {
-            background: rgba(13, 212, 192, 0.08);
-            border-color: rgba(13, 212, 192, 0.38);
-            color: var(--accent);
-        }
         .radar-display-range-help { margin-top: 6px; }
+        .radar-range-group {
+            min-width: 0;
+            margin: 10px 0 0;
+            padding: 10px;
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+        }
+        .radar-range-group legend {
+            padding: 0 5px;
+            color: var(--text-secondary);
+            font-size: 0.78rem;
+            font-weight: 700;
+        }
+        .radar-range-group[aria-busy="true"] { opacity: 0.78; }
+        .radar-shared-height-status { min-height: 1.25em; }
         .zone-input-group { display: flex; flex-direction: column; gap: 2px; }
         .zone-input-group label { font-size: 0.75em; color: var(--text-muted); }
         .zone-input-group input { width: 100%; box-sizing: border-box; font-family: monospace; color: var(--accent); font-weight: bold;}
@@ -3242,7 +3252,7 @@
                         <button class="radar-reset-view" id="radarResetView" type="button" hidden>Reset view</button>
                     </div>
                 </div>
-                <p class="visually-hidden" id="radarViewDescription">The live radar uses a full-size top-down Cartesian map in 2D and a fixed-center perspective camera in 3D. Zone drawing and editing stay in the Cartesian 2D view. The 3D height axis uses the selected device's display range and expands when needed to show complete zones. The informational sensor field-of-view envelopes span the visible scene height; configured detection, stay, and interference zones retain their exact heights. On phones, choose Explore 3D before rotating or zooming the scene, then choose Done to resume page scrolling.</p>
+                <p class="visually-hidden" id="radarViewDescription">The live radar uses a full-size top-down Cartesian map in 2D and a fixed-center perspective camera in 3D. Zone drawing and editing stay in the Cartesian 2D view. The 3D height axis uses this add-on's shared display range and expands when needed to show complete zones. The informational sensor field-of-view envelopes span the visible scene height; configured detection, stay, and interference zones retain their exact heights. On phones, choose Explore 3D before rotating or zooming the scene, then choose Done to resume page scrolling.</p>
                 <div class="config-content">
                     <div class="chart-canvas-wrap">
                         <div id="chart" role="img" aria-label="Two-dimensional live presence radar map. Exact target coordinates are listed in the table below."></div>
@@ -3493,20 +3503,31 @@
                     </div>
                     
                     <div class="config-title" style="margin-top: 15px; border-top: 1px solid #444; padding-top: 5px;">Radar Display Range (cm)</div>
-                    <div class="panel-lede">Display only; does not change zones. X/Y affect both views. Z affects 3D and uses the switch as 0 cm (negative below, positive above). The 3D view expands when needed to keep every zone whole. Saved per device in this browser.</div>
-                    <div class="zone-data-grid radar-display-range-grid">
-                        <div class="zone-input-group"><label for="vizXMin">Width min (X)</label><input type="number" id="vizXMin" value="-650"></div>
-                        <div class="zone-input-group"><label for="vizXMax">Width max (X)</label><input type="number" id="vizXMax" value="650"></div>
-                        <div class="zone-input-group"><label for="vizYMin">Depth min (Y)</label><input type="number" id="vizYMin" value="-50"></div>
-                        <div class="zone-input-group"><label for="vizYMax">Depth max (Y)</label><input type="number" id="vizYMax" value="650"></div>
-                        <div class="zone-input-group"><label for="vizZMin">Height min (Z)</label><input type="number" id="vizZMin" min="-600" max="600" step="1" value="-600"></div>
-                        <div class="zone-input-group"><label for="vizZMax">Height max (Z)</label><input type="number" id="vizZMax" min="-600" max="600" step="1" value="600"></div>
-                    </div>
-                    <div class="radar-display-range-actions">
-                        <button class="cmd-btn btn-full radar-display-range-apply" id="btnApplyRadarDisplayRange" type="button" onclick="updateRadarScale()" style="background: #00bcd4; color: #1a1a1a;">Apply Display Range</button>
-                        <button class="cmd-btn btn-full radar-display-range-apply-all" id="btnApplyRadarHeightToAll" type="button" aria-describedby="radarHeightApplyAllHelp" onclick="applyRadarHeightToAllDevices()">Apply Height to All Switches</button>
-                    </div>
-                    <div class="panel-lede radar-display-range-help" id="radarHeightApplyAllHelp">Copies only Height min/max to every currently discovered switch with a 3D radar view in this browser. Switches discovered later keep their own range.</div>
+                    <div class="panel-lede">Display only; does not change switch zones. Width and depth affect both views and are saved in this browser. Height affects 3D and is one shared setting for this Switch Studio add-on. The 3D view expands when needed to keep every zone whole.</div>
+                    <fieldset class="radar-range-group">
+                        <legend>Width &amp; depth — this browser</legend>
+                        <div class="zone-data-grid radar-display-range-grid">
+                            <div class="zone-input-group"><label for="vizXMin">Width min (X)</label><input type="number" id="vizXMin" value="-650"></div>
+                            <div class="zone-input-group"><label for="vizXMax">Width max (X)</label><input type="number" id="vizXMax" value="650"></div>
+                            <div class="zone-input-group"><label for="vizYMin">Depth min (Y)</label><input type="number" id="vizYMin" value="-50"></div>
+                            <div class="zone-input-group"><label for="vizYMax">Depth max (Y)</label><input type="number" id="vizYMax" value="650"></div>
+                        </div>
+                        <div class="radar-display-range-actions">
+                            <button class="cmd-btn btn-full radar-display-range-apply" id="btnApplyRadarWidthDepth" type="button" onclick="updateRadarWidthDepth()" style="background: #00bcd4; color: #1a1a1a;">Apply Width &amp; Depth</button>
+                        </div>
+                    </fieldset>
+                    <fieldset class="radar-range-group" id="radarSharedHeightFieldset" aria-busy="true" disabled>
+                        <legend>3D height — shared</legend>
+                        <div class="zone-data-grid radar-display-range-grid">
+                            <div class="zone-input-group"><label for="vizZMin">Height min (Z)</label><input type="number" id="vizZMin" min="-600" max="600" step="1" value="-600" aria-describedby="radarSharedHeightHelp radarSharedHeightStatus"></div>
+                            <div class="zone-input-group"><label for="vizZMax">Height max (Z)</label><input type="number" id="vizZMax" min="-600" max="600" step="1" value="600" aria-describedby="radarSharedHeightHelp radarSharedHeightStatus"></div>
+                        </div>
+                        <div class="radar-display-range-actions">
+                            <button class="cmd-btn btn-full" id="btnSaveRadarSharedHeight" type="button" aria-describedby="radarSharedHeightHelp radarSharedHeightStatus" onclick="saveSharedRadarHeight()">Save Shared Height</button>
+                        </div>
+                        <div class="panel-lede radar-display-range-help" id="radarSharedHeightHelp">0 cm is the switch; negative values are below and positive values are above. Saving makes this the 3D height range for every switch and browser using this add-on. Valid range: −600 to 600 cm, with at least 20 cm between the limits. No switch or MQTT setting is changed.</div>
+                        <div class="panel-lede radar-shared-height-status" id="radarSharedHeightStatus" role="status" aria-live="polite"></div>
+                    </fieldset>
                 </div>
             </section>
             </div>
@@ -3735,6 +3756,9 @@
         const vizYMax = document.getElementById('vizYMax');
         const vizZMin = document.getElementById('vizZMin');
         const vizZMax = document.getElementById('vizZMax');
+        const radarSharedHeightFieldset = document.getElementById('radarSharedHeightFieldset');
+        const btnSaveRadarSharedHeight = document.getElementById('btnSaveRadarSharedHeight');
+        const radarSharedHeightStatus = document.getElementById('radarSharedHeightStatus');
         const chart3dElement = document.getElementById('chart3d');
         const chartCanvasWrap = document.querySelector('#chartContainer .chart-canvas-wrap');
         const radarView2d = document.getElementById('radarView2d');
@@ -3858,7 +3882,7 @@
             const pill = document.getElementById(`area${areaIndex}Pill`);
             const pillState = document.getElementById(`area${areaIndex}PillState`);
             const active = isDetected === true;
-            const stateText = active ? 'DETECTED' : 'CLEAR';
+            const stateText = active ? 'DETECTED' : isDetected === false ? 'CLEAR' : 'UNKNOWN';
 
             if (badge) {
                 badge.innerText = stateText;
@@ -4528,6 +4552,19 @@
             }, 180);
         }
 
+        function restoreFailedBasicControl(previousState, confirmedFields) {
+            const stateApi = window.SwitchStudioState;
+            Object.keys(previousState.expected || {}).forEach((field) => {
+                if (confirmedFields.has(field)) return;
+                const latest = stateApi && typeof stateApi.getLatestValue === 'function'
+                    ? stateApi.getLatestValue(field, previousState.topic)
+                    : undefined;
+                const value = latest === undefined ? previousState[field] : latest;
+                if (field === 'state') basicControlLastKnown.state = parseBasicStateValue(value);
+                if (field === 'brightness') basicControlLastKnown.brightness = clampBrightnessRaw(value);
+            });
+        }
+
         function syncBasicControlsFromConfig(config) {
             if (!config || typeof config !== 'object') return;
 
@@ -4774,6 +4811,8 @@
         }
 
         function resetWorkspaceForDeviceChange(nextTopic) {
+            if (zoneModule && typeof zoneModule.clearPendingCommand === 'function') zoneModule.clearPendingCommand();
+            lastCommandId = null;
             resetBasicControlsForDeviceChange();
             resetFirmwareStateForDeviceChange(nextTopic);
             if (window.SwitchStudioLed && typeof window.SwitchStudioLed.resetForDeviceChange === 'function') {
@@ -4789,7 +4828,7 @@
             occupancyState = { global: null, area1: null, area2: null, area3: null, area4: null };
             setTargetReportingState(false, 'Disable');
             targetReportingPending.clear();
-            for (let i = 1; i <= 4; i++) setAreaStatusIndicators(i, false);
+            for (let i = 1; i <= 4; i++) setAreaStatusIndicators(i, null);
             setMapStandbyState(false);
             if (zoneModule && typeof zoneModule.resetHistory === 'function') zoneModule.resetHistory();
             else targetHistory = {};
@@ -4885,19 +4924,23 @@
             activeDeviceFriendlyName = requestedDevice && requestedDevice.friendly_name
                 ? requestedDevice.friendly_name
                 : getDeviceDisplayName(normalizedNext);
-            loadRadarDisplayHeightBounds(normalizedNext);
             if (window.SwitchStudioLed && typeof window.SwitchStudioLed.setActiveDevice === 'function') {
                 window.SwitchStudioLed.setActiveDevice(normalizedNext);
             }
             if (radar3dModule && typeof radar3dModule.setActiveDevice === 'function') {
                 radar3dModule.setActiveDevice(normalizedNext);
             }
+            if (radarDisplayHeightState.configured) clearActiveLegacyRadarDisplayHeight();
+            else maybeOfferLegacyRadarDisplayHeight(normalizedNext);
             refreshRadar3dScene();
             if (window.SwitchStudioState && typeof window.SwitchStudioState.setActiveDevice === 'function') {
                 window.SwitchStudioState.setActiveDevice(normalizedNext);
                 window.SwitchStudioState.setPacketStatus('info', 'Awaiting fresh device data…');
             }
             showWorkspaceView(normalizedNext);
+            if (window.SwitchStudioLoadDimming && typeof window.SwitchStudioLoadDimming.activateDevice === 'function') {
+                window.SwitchStudioLoadDimming.activateDevice();
+            }
             restoreRetryableZoneDraft(normalizedNext);
             if (window.SwitchStudioTabs && typeof window.SwitchStudioTabs.setActiveTab === 'function') {
                 window.SwitchStudioTabs.setActiveTab('zones');
@@ -6466,6 +6509,18 @@
         let chartYMax = 650;
         let chartZMin = -600;
         let chartZMax = 600;
+        let radarDisplayHeightState = {
+            epoch: null,
+            revision: -1,
+            configured: false,
+            readOnly: false,
+            hydrated: false,
+            connectionGeneration: 0,
+            acceptedConnectionGeneration: -1,
+        };
+        let radarDisplayHeightPending = null;
+        let radarDisplayHeightDraftDirty = false;
+        const radarDisplayHeightLegacyOffers = new Set();
 
         // Init Settings from LocalStorage
         try {
@@ -6521,89 +6576,276 @@
         vizZMin.value = chartZMin;
         vizZMax.value = chartZMax;
 
-        function setRadarDisplayHeightInputs() {
-            if (vizZMin) vizZMin.value = chartZMin;
-            if (vizZMax) vizZMax.value = chartZMax;
-        }
-
-        function loadRadarDisplayHeightBounds(topic) {
-            const loaded = radar3dModule && typeof radar3dModule.loadDisplayHeightBounds === 'function'
-                ? radar3dModule.loadDisplayHeightBounds(topic)
-                : { zMin: -600, zMax: 600 };
-            chartZMin = loaded.zMin;
-            chartZMax = loaded.zMax;
-            setRadarDisplayHeightInputs();
-            return loaded;
+        function setRadarDisplayHeightInputs(bounds = null) {
+            const next = bounds || { zMin: chartZMin, zMax: chartZMax };
+            if (vizZMin) vizZMin.value = next.zMin;
+            if (vizZMax) vizZMax.value = next.zMax;
         }
 
         function getRequestedRadarDisplayHeightBounds() {
-            return radar3dModule && typeof radar3dModule.normalizeDisplayHeightBounds === 'function'
-                ? radar3dModule.normalizeDisplayHeightBounds(vizZMin.value, vizZMax.value)
-                : null;
+            if (radar3dModule && typeof radar3dModule.normalizeDisplayHeightBounds === 'function') {
+                return radar3dModule.normalizeDisplayHeightBounds(vizZMin.value, vizZMax.value);
+            }
+            if (!vizZMin.value.trim() || !vizZMax.value.trim()) return null;
+            const rawMin = Number(vizZMin.value);
+            const rawMax = Number(vizZMax.value);
+            if (!Number.isFinite(rawMin) || !Number.isFinite(rawMax)) return null;
+            const zMin = Math.min(rawMin, rawMax);
+            const zMax = Math.max(rawMin, rawMax);
+            if (zMin < -600 || zMax > 600 || (zMax - zMin) < 20) return null;
+            return { zMin, zMax };
         }
 
-        function showRadarDisplayHeightError() {
+        function setRadarSharedHeightStatus(message) {
+            if (radarSharedHeightStatus) radarSharedHeightStatus.textContent = String(message || '');
+        }
+
+        function updateRadarSharedHeightControlState() {
+            const available = socket.connected === true
+                && radarDisplayHeightState.hydrated
+                && !radarDisplayHeightState.readOnly;
+            const busy = !radarDisplayHeightState.hydrated || radarDisplayHeightPending !== null;
+            if (radarSharedHeightFieldset) {
+                radarSharedHeightFieldset.disabled = !available || radarDisplayHeightPending !== null;
+                radarSharedHeightFieldset.setAttribute('aria-busy', busy ? 'true' : 'false');
+            }
+            if (btnSaveRadarSharedHeight) {
+                btnSaveRadarSharedHeight.textContent = radarDisplayHeightPending ? 'Saving…' : 'Save Shared Height';
+            }
+        }
+
+        function showRadarDisplayHeightError({ preserveDraft = true } = {}) {
             if (window.SwitchStudioState && typeof window.SwitchStudioState.showToast === 'function') {
                 window.SwitchStudioState.showToast('error', '3D height bounds must be between -600 and 600 cm with at least 20 cm between them.', 3200);
             }
-            setRadarDisplayHeightInputs();
+            vizZMin.setAttribute('aria-invalid', 'true');
+            vizZMax.setAttribute('aria-invalid', 'true');
+            setRadarSharedHeightStatus('Enter limits from −600 to 600 cm with at least 20 cm between them.');
+            if (!preserveDraft) setRadarDisplayHeightInputs();
+            vizZMin.focus();
         }
 
-        function getRadarDisplayHeightTargetTopics() {
-            const devices = window.SwitchStudioDevices && typeof window.SwitchStudioDevices.getDevices === 'function'
-                ? window.SwitchStudioDevices.getDevices()
-                : [];
-            const topics = (Array.isArray(devices) ? devices : [])
-                .filter((device) => device && device.topic && (!device.capabilities || device.capabilities.full_editor !== false))
-                .map((device) => String(device.topic).trim())
-                .filter(Boolean);
-            return Array.from(new Set(topics.filter(Boolean)));
+        function normalizeRadarDisplayHeightSnapshot(snapshot) {
+            if (!snapshot || snapshot.schema_version !== 1) return null;
+            if (typeof snapshot.epoch !== 'string' || !snapshot.epoch) return null;
+            if (!Number.isSafeInteger(snapshot.revision) || snapshot.revision < 0) return null;
+            if (typeof snapshot.configured !== 'boolean') return null;
+            if (typeof snapshot.z_min !== 'number' || typeof snapshot.z_max !== 'number') return null;
+            const zMin = snapshot.z_min;
+            const zMax = snapshot.z_max;
+            if (!Number.isFinite(zMin) || !Number.isFinite(zMax)) return null;
+            if (zMin < -600 || zMax > 600 || zMin >= zMax || (zMax - zMin) < 20) return null;
+            return {
+                epoch: snapshot.epoch,
+                revision: snapshot.revision,
+                configured: snapshot.configured,
+                readOnly: snapshot.read_only === true,
+                zMin,
+                zMax,
+            };
         }
 
-        function applyRadarHeightToAllDevices() {
+        function clearActiveLegacyRadarDisplayHeight() {
+            if (
+                activeDeviceTopic
+                && radar3dModule
+                && typeof radar3dModule.clearLegacyDisplayHeightBounds === 'function'
+            ) {
+                radar3dModule.clearLegacyDisplayHeightBounds(activeDeviceTopic);
+            }
+        }
+
+        function acceptRadarDisplayHeightSnapshot(rawSnapshot, options = {}) {
+            const snapshot = normalizeRadarDisplayHeightSnapshot(rawSnapshot);
+            if (!snapshot) return false;
+            const firstForConnection = radarDisplayHeightState.acceptedConnectionGeneration
+                !== radarDisplayHeightState.connectionGeneration;
+            if (!firstForConnection) {
+                if (snapshot.epoch !== radarDisplayHeightState.epoch) {
+                    socket.emit('request_radar_display_height');
+                    return false;
+                }
+                if (snapshot.revision < radarDisplayHeightState.revision) return false;
+                if (
+                    snapshot.revision === radarDisplayHeightState.revision
+                    && (
+                        snapshot.zMin !== chartZMin
+                        || snapshot.zMax !== chartZMax
+                        || snapshot.configured !== radarDisplayHeightState.configured
+                    )
+                ) return false;
+            }
+
+            const wasHydrated = radarDisplayHeightState.hydrated;
+            const previousRevision = radarDisplayHeightState.revision;
+            const rangeChanged = chartZMin !== snapshot.zMin || chartZMax !== snapshot.zMax;
+            radarDisplayHeightState = {
+                ...radarDisplayHeightState,
+                epoch: snapshot.epoch,
+                revision: snapshot.revision,
+                configured: snapshot.configured,
+                readOnly: snapshot.readOnly,
+                hydrated: true,
+                acceptedConnectionGeneration: radarDisplayHeightState.connectionGeneration,
+            };
+            chartZMin = snapshot.zMin;
+            chartZMax = snapshot.zMax;
+            if (!radarDisplayHeightDraftDirty || options.replaceDraft === true) {
+                setRadarDisplayHeightInputs();
+                radarDisplayHeightDraftDirty = false;
+                vizZMin.removeAttribute('aria-invalid');
+                vizZMax.removeAttribute('aria-invalid');
+            }
+            if (rangeChanged && controllerInitialized) refreshRadar3dScene();
+            if (snapshot.configured) clearActiveLegacyRadarDisplayHeight();
+            updateRadarSharedHeightControlState();
+
+            const isRemoteUpdate = wasHydrated
+                && snapshot.revision > previousRevision
+                && !radarDisplayHeightPending;
+            if (isRemoteUpdate) {
+                setRadarSharedHeightStatus(
+                    radarDisplayHeightDraftDirty
+                        ? 'Shared height changed in another browser. Your unsaved values are preserved; review and save again.'
+                        : `Shared 3D height changed to ${snapshot.zMin} to ${snapshot.zMax} cm in another browser.`,
+                );
+            } else if (!radarDisplayHeightPending) {
+                if (snapshot.readOnly) {
+                    setRadarSharedHeightStatus(
+                        radarDisplayHeightDraftDirty
+                            ? 'The saved shared-height setting could not be loaded safely and is read-only. Your unsaved values are preserved but cannot be saved.'
+                            : 'The saved shared-height setting could not be loaded safely and is read-only.',
+                    );
+                } else if (radarDisplayHeightDraftDirty) {
+                    setRadarSharedHeightStatus(
+                        `Shared 3D height is ${snapshot.zMin} to ${snapshot.zMax} cm. Your unsaved values are preserved.`,
+                    );
+                } else {
+                    setRadarSharedHeightStatus(
+                        snapshot.configured
+                            ? `Shared 3D height: ${snapshot.zMin} to ${snapshot.zMax} cm.`
+                            : 'Using the default shared height until a range is saved.',
+                    );
+                }
+            }
+            if (!snapshot.configured && !snapshot.readOnly && activeDeviceTopic) {
+                maybeOfferLegacyRadarDisplayHeight(activeDeviceTopic);
+            }
+            return true;
+        }
+
+        function createRadarDisplayHeightRequestId(prefix) {
+            return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+        }
+
+        function emitRadarDisplayHeightSave(bounds) {
+            if (radarDisplayHeightPending || socket.connected !== true || !radarDisplayHeightState.hydrated) {
+                return false;
+            }
+            const requestId = createRadarDisplayHeightRequestId('radar-height');
+            radarDisplayHeightPending = {
+                requestId,
+                connectionGeneration: radarDisplayHeightState.connectionGeneration,
+                bounds: { ...bounds },
+            };
+            socket.emit('set_radar_display_height', {
+                request_id: requestId,
+                expected_epoch: radarDisplayHeightState.epoch,
+                expected_revision: radarDisplayHeightState.revision,
+                if_unset: false,
+                z_min: bounds.zMin,
+                z_max: bounds.zMax,
+            });
+            setRadarSharedHeightStatus('Saving shared height…');
+            updateRadarSharedHeightControlState();
+            return true;
+        }
+
+        function maybeOfferLegacyRadarDisplayHeight(topic) {
+            const normalizedTopic = String(topic || '').trim();
+            if (
+                !normalizedTopic
+                || !radarDisplayHeightState.hydrated
+                || radarDisplayHeightState.configured
+                || radarDisplayHeightState.readOnly
+                || radarDisplayHeightPending
+                || radarDisplayHeightDraftDirty
+                || radarDisplayHeightLegacyOffers.has(normalizedTopic)
+                || !radar3dModule
+                || typeof radar3dModule.loadLegacyDisplayHeightBounds !== 'function'
+            ) return false;
+            radarDisplayHeightLegacyOffers.add(normalizedTopic);
+            const legacy = radar3dModule.loadLegacyDisplayHeightBounds(normalizedTopic);
+            if (!legacy) return false;
+            if (legacy.zMin === -600 && legacy.zMax === 600) {
+                radar3dModule.clearLegacyDisplayHeightBounds(normalizedTopic);
+                return false;
+            }
+            setRadarDisplayHeightInputs(legacy);
+            radarDisplayHeightDraftDirty = true;
+            setRadarSharedHeightStatus(
+                `A previous browser-only height (${legacy.zMin} to ${legacy.zMax} cm) was found. Review it, then choose Save Shared Height to use it everywhere.`,
+            );
+            return true;
+        }
+
+        function saveSharedRadarHeight() {
             const nextHeightBounds = getRequestedRadarDisplayHeightBounds();
             if (!nextHeightBounds) {
                 showRadarDisplayHeightError();
                 return false;
             }
-            const topics = getRadarDisplayHeightTargetTopics();
-            if (!topics.length) {
+            if (!radarDisplayHeightState.hydrated || socket.connected !== true) {
+                setRadarSharedHeightStatus('Reconnect before saving the shared height.');
                 if (window.SwitchStudioState && typeof window.SwitchStudioState.showToast === 'function') {
-                    window.SwitchStudioState.showToast('error', 'No compatible switches are currently available.', 2600);
+                    window.SwitchStudioState.showToast('error', 'Reconnect before saving the shared height.', 2800);
                 }
                 return false;
             }
-            const saved = radar3dModule && typeof radar3dModule.saveDisplayHeightBoundsForDevices === 'function'
-                ? radar3dModule.saveDisplayHeightBoundsForDevices(topics, nextHeightBounds.zMin, nextHeightBounds.zMax)
-                : null;
-            if (!saved || !saved.deviceKeys.length) {
-                if (window.SwitchStudioState && typeof window.SwitchStudioState.showToast === 'function') {
-                    window.SwitchStudioState.showToast('error', 'This browser could not save the height range. No switches were changed.', 3200);
-                }
-                setRadarDisplayHeightInputs();
+            if (radarDisplayHeightState.readOnly) {
+                setRadarSharedHeightStatus('The saved shared-height setting could not be loaded safely and is read-only.');
                 return false;
             }
-            const activeWasSaved = saved.deviceKeys.includes(String(activeDeviceTopic || '').trim());
-            if (activeWasSaved) {
-                chartZMin = saved.bounds.zMin;
-                chartZMax = saved.bounds.zMax;
-                setRadarDisplayHeightInputs();
-                refreshRadar3dScene();
+            vizZMin.removeAttribute('aria-invalid');
+            vizZMax.removeAttribute('aria-invalid');
+            return emitRadarDisplayHeightSave(nextHeightBounds);
+        }
+
+        function handleRadarDisplayHeightResult(result) {
+            if (!result || !radarDisplayHeightPending) return false;
+            if (result.request_id !== radarDisplayHeightPending.requestId) return false;
+            if (radarDisplayHeightPending.connectionGeneration !== radarDisplayHeightState.connectionGeneration) {
+                radarDisplayHeightPending = null;
+                updateRadarSharedHeightControlState();
+                return false;
+            }
+            radarDisplayHeightPending = null;
+            const status = String(result.status || 'error');
+
+            if (status === 'saved' || status === 'unchanged') {
+                radarDisplayHeightDraftDirty = false;
+                acceptRadarDisplayHeightSnapshot(result.snapshot, { replaceDraft: true });
+                clearActiveLegacyRadarDisplayHeight();
+                const message = `Shared 3D height saved: ${chartZMin} to ${chartZMax} cm.`;
+                setRadarSharedHeightStatus(message);
+                if (window.SwitchStudioState && typeof window.SwitchStudioState.showToast === 'function') {
+                    window.SwitchStudioState.showToast('success', message, 2800);
+                }
+            } else if (status === 'conflict') {
+                radarDisplayHeightDraftDirty = true;
+                acceptRadarDisplayHeightSnapshot(result.snapshot);
+                setRadarSharedHeightStatus('Shared height changed before this save. Your values are preserved; review and save again.');
+                if (window.SwitchStudioState && typeof window.SwitchStudioState.showToast === 'function') {
+                    window.SwitchStudioState.showToast('error', 'Shared height changed in another browser. Review the current shared range and try again.', 3600);
+                }
             } else {
-                setRadarDisplayHeightInputs();
-            }
-            if (window.SwitchStudioState && typeof window.SwitchStudioState.showToast === 'function') {
-                const noun = saved.deviceKeys.length === 1 ? 'switch' : 'switches';
-                if (saved.failedDeviceKeys && saved.failedDeviceKeys.length) {
-                    window.SwitchStudioState.showToast(
-                        'error',
-                        `Height range saved for ${saved.deviceKeys.length} ${noun}; ${saved.failedDeviceKeys.length} could not be saved.`,
-                        3600,
-                    );
-                } else {
-                    window.SwitchStudioState.showToast('success', `Height range applied to ${saved.deviceKeys.length} ${noun}.`, 2600);
+                acceptRadarDisplayHeightSnapshot(result.snapshot);
+                setRadarSharedHeightStatus(result.message || 'Shared height could not be saved. The previous shared range is still active.');
+                if (window.SwitchStudioState && typeof window.SwitchStudioState.showToast === 'function') {
+                    window.SwitchStudioState.showToast('error', result.message || 'Shared height could not be saved.', 3400);
                 }
             }
+            updateRadarSharedHeightControlState();
             return true;
         }
 
@@ -6643,7 +6885,7 @@
             refreshRadar3dScene();
         }
         
-        function updateRadarScale() {
+        function updateRadarWidthDepth() {
             const requested = [vizXMin.value, vizXMax.value, vizYMin.value, vizYMax.value]
                 .map((value) => getFiniteRadarValue(value));
             if (requested.some((value) => value === null)) {
@@ -6654,7 +6896,6 @@
                 vizXMax.value = chartXMax;
                 vizYMin.value = chartYMin;
                 vizYMax.value = chartYMax;
-                setRadarDisplayHeightInputs();
                 return false;
             }
             const [nextXMin, nextXMax] = requested.slice(0, 2).sort((left, right) => left - right);
@@ -6667,29 +6908,16 @@
                 vizXMax.value = chartXMax;
                 vizYMin.value = chartYMin;
                 vizYMax.value = chartYMax;
-                setRadarDisplayHeightInputs();
-                return false;
-            }
-            const nextHeightBounds = getRequestedRadarDisplayHeightBounds();
-            if (!nextHeightBounds) {
-                showRadarDisplayHeightError();
-                vizXMin.value = chartXMin;
-                vizXMax.value = chartXMax;
-                vizYMin.value = chartYMin;
-                vizYMax.value = chartYMax;
                 return false;
             }
             chartXMin = nextXMin;
             chartXMax = nextXMax;
             chartYMin = nextYMin;
             chartYMax = nextYMax;
-            chartZMin = nextHeightBounds.zMin;
-            chartZMax = nextHeightBounds.zMax;
             vizXMin.value = chartXMin;
             vizXMax.value = chartXMax;
             vizYMin.value = chartYMin;
             vizYMax.value = chartYMax;
-            setRadarDisplayHeightInputs();
             
             try {
                 localStorage.setItem('vizXMin', chartXMin);
@@ -6698,9 +6926,6 @@
                 localStorage.setItem('vizYMax', chartYMax);
             } catch (error) {
                 console.log('Storage access error', error);
-            }
-            if (radar3dModule && typeof radar3dModule.saveDisplayHeightBounds === 'function') {
-                radar3dModule.saveDisplayHeightBounds(activeDeviceTopic, chartZMin, chartZMax);
             }
             layout.xaxis.range = [chartXMin, chartXMax];
             layout.yaxis.range = [chartYMin, chartYMax];
@@ -6721,6 +6946,14 @@
         }
 
         // Attach Listeners
+        [vizZMin, vizZMax].forEach((input) => {
+            if (!input) return;
+            input.addEventListener('input', () => {
+                radarDisplayHeightDraftDirty = true;
+                input.removeAttribute('aria-invalid');
+                setRadarSharedHeightStatus('Unsaved shared height values.');
+            });
+        });
         if (vizToggleInterference) vizToggleInterference.addEventListener('change', (e) => { showInterference = e.target.checked; localStorage.setItem('vizShowInterference', showInterference); applyVizSettings(); });
         if (vizToggleDetection) vizToggleDetection.addEventListener('change', (e) => { showDetection = e.target.checked; localStorage.setItem('vizShowDetection', showDetection); applyVizSettings(); });
         if (vizToggleStay) vizToggleStay.addEventListener('change', (e) => { showStay = e.target.checked; localStorage.setItem('vizShowStay', showStay); applyVizSettings(); });
@@ -7264,7 +7497,8 @@
                 5: 'Clear Stay Zones'
             };
             const actionLabel = actionLabels[Number(actionId)] || `Command ${actionId}`;
-            const deviceName = getDeviceDisplayName(activeDeviceTopic);
+            const commandTopic = activeDeviceTopic;
+            const deviceName = getDeviceDisplayName(commandTopic);
             const approved = zoneModule && typeof zoneModule.confirmZoneMaintenanceCommand === 'function'
                 ? zoneModule.confirmZoneMaintenanceCommand(actionId, deviceName, window.confirm.bind(window))
                 : Number(actionId) === 1 || window.confirm(`${actionLabel} for ${deviceName}? This changes saved sensor zones and cannot be undone from Switch Studio.`);
@@ -7278,14 +7512,19 @@
                 return;
             }
 
+            const command = {
+                action_id: Number(actionId),
+                topic: commandTopic,
+                request_id: `maintenance-${Date.now()}-${basicControlRequestCounter++}`
+            };
             if (zoneModule && typeof zoneModule.setPendingCommand === 'function') {
-                zoneModule.setPendingCommand(actionId);
+                zoneModule.setPendingCommand(actionId, command);
             } else {
                 lastCommandId = Number(actionId);
             }
 
             updateZoneMaintenanceCommandState();
-            socket.emit('send_command', actionId);
+            socket.emit('send_command', command);
 
             // Fallback expectation
             if ((!zoneModule || typeof zoneModule.setPendingCommand !== 'function') && (actionId === 1 || actionId === 3)) {
@@ -7333,9 +7572,16 @@
         socket.on('connect', () => {
             serverSelectedTopic = null;
             mqttInventoryReady = false;
+            radarDisplayHeightState.connectionGeneration += 1;
+            radarDisplayHeightState.acceptedConnectionGeneration = -1;
+            radarDisplayHeightState.hydrated = false;
+            radarDisplayHeightPending = null;
             setConnectionState(true, null);
             socket.emit('request_devices');
             socket.emit('request_schema');
+            socket.emit('request_radar_display_height');
+            setRadarSharedHeightStatus('Loading shared 3D height…');
+            updateRadarSharedHeightControlState();
             syncTargetReportingAutoOffPreference();
             if (activeDeviceTopic && dashboardView && dashboardView.hidden) {
                 if (window.SwitchStudioState) {
@@ -7352,6 +7598,9 @@
             basicControlPending.clear();
             basicControlFinished.clear();
             targetReportingPending.clear();
+            radarDisplayHeightPending = null;
+            setRadarSharedHeightStatus('Disconnected. The last shared height remains active; reconnect to save changes.');
+            updateRadarSharedHeightControlState();
             const interruptedZoneWrites = zoneWriteTracker
                 ? zoneWriteTracker.failPending('disconnected')
                 : [];
@@ -7386,12 +7635,21 @@
                 zoneModule.clearPendingCommand();
                 updateZoneMaintenanceCommandState();
             }
+            radarDisplayHeightPending = null;
+            setRadarSharedHeightStatus('Unable to connect. The last shared height remains active; reconnect to save changes.');
+            updateRadarSharedHeightControlState();
             setConnectionState(false, null);
         });
         socket.on('backend_status', (status) => {
             const mqttStatus = status && status.mqtt ? status.mqtt : {};
             mqttInventoryReady = mqttStatus.inventory_ready === true;
             setConnectionState(socket.connected === true, mqttStatus.connected === true, mqttStatus.reason);
+        });
+        socket.on('radar_display_height', (snapshot) => {
+            acceptRadarDisplayHeightSnapshot(snapshot);
+        });
+        socket.on('radar_display_height_result', (result) => {
+            handleRadarDisplayHeightResult(result);
         });
 
         socket.on('schema_model', function(schema) {
@@ -7403,6 +7661,7 @@
 
         socket.on('command_result', function(result) {
             if (!result || !result.status) return;
+            if (result.action === 'send_command' && result.topic && result.topic !== activeDeviceTopic) return;
             const dashboardControlHandled = !!(
                 window.SwitchStudioDevices &&
                 typeof window.SwitchStudioDevices.handleControlResult === 'function' &&
@@ -7480,8 +7739,7 @@
                         const confirmedFields = result.status === 'not_confirmed' && result.payload && Array.isArray(result.payload.confirmed_fields)
                             ? new Set(result.payload.confirmed_fields)
                             : new Set();
-                        if (!confirmedFields.has('state')) basicControlLastKnown.state = previousState.state;
-                        if (!confirmedFields.has('brightness')) basicControlLastKnown.brightness = previousState.brightness;
+                        restoreFailedBasicControl(previousState, confirmedFields);
                         applyBasicControlUiState();
                     }
                     if (window.SwitchStudioState) {
@@ -7676,7 +7934,7 @@
             requestDeviceSelection(this.value);
         });
 
-        socket.on('device_snapshot', function(msg) {
+        function handleDeviceSnapshot(msg) {
             if (!msg || !msg.topic || !msg.payload) return;
             if (window.SwitchStudioDevices && typeof window.SwitchStudioDevices.mergeSnapshot === 'function') {
                 window.SwitchStudioDevices.mergeSnapshot(msg);
@@ -7684,15 +7942,14 @@
 
             const snapshotConfig = msg.payload.last_config;
             if (snapshotConfig && typeof snapshotConfig === 'object') {
-                if (window.SwitchStudioState && typeof window.SwitchStudioState.syncConfig === 'function') {
-                    window.SwitchStudioState.syncConfig(msg.topic, snapshotConfig);
-                }
+                hydrateDeviceConfig({ topic: msg.topic, payload: snapshotConfig, ts: msg.ts }, { snapshot: true });
             }
             if (msg.topic !== activeDeviceTopic) return;
-
-            if (snapshotConfig && typeof snapshotConfig === 'object') {
-                syncBasicControlsFromConfig(snapshotConfig);
-            }
+            Object.entries({ interference_zones: 'mmwave_interference_areas', detection_zones: 'mmwave_detection_areas', stay_zones: 'mmwave_stay_areas' })
+                .forEach(([key, category]) => {
+                    if (Array.isArray(msg.payload[key])) applyRawZoneSnapshot(category, msg.payload[key]);
+                });
+            refreshRadar2dZoneLayoutIfVisible();
             const snapshotFirmware = msg.payload.firmware || msg.payload.ota_status;
             if (snapshotFirmware && typeof snapshotFirmware === 'object') {
                 applyFirmwareStateUpdate(
@@ -7700,7 +7957,8 @@
                     { reset: true, topic: msg.topic }
                 );
             }
-        });
+        }
+        socket.on('device_snapshot', handleDeviceSnapshot);
 
         socket.on('firmware_status', function(msg) {
             if (!msg || !msg.topic) return;
@@ -7747,12 +8005,12 @@
         }
 
         // --- FULL DEVICE CONFIGURATION & SENSORS ---
-        socket.on('device_config', function(msg) {
+        function hydrateDeviceConfig(msg, options = {}) {
             // Unpack wrapper
-            if (!msg.topic || !msg.payload) return;
+            if (!msg || !msg.topic || !msg.payload) return;
             const config = msg.payload;
 
-            if (window.SwitchStudioDevices && typeof window.SwitchStudioDevices.mergeConfig === 'function') {
+            if (!options.snapshot && window.SwitchStudioDevices && typeof window.SwitchStudioDevices.mergeConfig === 'function') {
                 window.SwitchStudioDevices.mergeConfig(msg.topic, config, msg.ts);
             }
             if (window.SwitchStudioState && typeof window.SwitchStudioState.syncConfig === 'function') {
@@ -7772,7 +8030,7 @@
                 { devicePayload: true, topic: msg.topic }
             );
 
-            updateTimestamp(); 
+            if (!options.snapshot) updateTimestamp();
 
             // 1. PARSE ZONES FOR VISUALIZATION
             const globalZoneFieldMap = {
@@ -7815,7 +8073,7 @@
                 const pendingCommandId = zoneModule && typeof zoneModule.getPendingCommandId === 'function'
                     ? zoneModule.getPendingCommandId()
                     : lastCommandId;
-                if (pendingCommandId === 3 && (!config.mmwave_interference_areas || Object.keys(config.mmwave_interference_areas).length === 0)) {
+                if (!options.snapshot && pendingCommandId === 3 && (!config.mmwave_interference_areas || Object.keys(config.mmwave_interference_areas).length === 0)) {
                     if (window.SwitchStudioState) {
                         window.SwitchStudioState.setPacketStatus('saved', 'Interference cleared');
                     } else {
@@ -7918,6 +8176,13 @@
                 }
             }
             syncCompositeSchemaInputs(config);
+        }
+
+        socket.on('device_config', hydrateDeviceConfig);
+        socket.on('runtime_options_restart_required', function(msg) {
+            if (msg && msg.topic === activeDeviceTopic && window.SwitchStudioState) {
+                window.SwitchStudioState.showToast('info', 'Options saved. Restart Zigbee2MQTT to apply them.', 6000);
+            }
         });
 
         // --- PLOTLY INIT ---
@@ -8002,6 +8267,8 @@
                 sceneModel: buildRadar3dSceneModel(),
                 onModeChange: (mode, details) => syncRadarShellForMode(mode, details)
             });
+            if (radarDisplayHeightState.configured) clearActiveLegacyRadarDisplayHeight();
+            else if (activeDeviceTopic) maybeOfferLegacyRadarDisplayHeight(activeDeviceTopic);
         }
         
         // Initial Visualizer Settings Apply
@@ -8057,6 +8324,7 @@
             applyRawZoneSnapshot('mmwave_interference_areas', zones);
 
             refreshRadar2dZoneLayoutIfVisible();
+            if (msg.snapshot) return;
 
             const pendingInterferenceCommand = zoneModule && typeof zoneModule.getPendingCommandId === 'function'
                 ? zoneModule.getPendingCommandId()
@@ -8091,6 +8359,7 @@
 
             applyRawZoneSnapshot('mmwave_detection_areas', zones);
             refreshRadar2dZoneLayoutIfVisible();
+            if (msg.snapshot) return;
             if (
                 zoneModule &&
                 typeof zoneModule.getPendingCommandId === 'function' &&
@@ -8109,6 +8378,7 @@
 
             applyRawZoneSnapshot('mmwave_stay_areas', zones);
             refreshRadar2dZoneLayoutIfVisible();
+            if (msg.snapshot) return;
             if (
                 zoneModule &&
                 typeof zoneModule.getPendingCommandId === 'function' &&

@@ -4,21 +4,23 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-function loadLoadDimmingModule() {
+function makeElement() {
+    return {
+        children: [], style: {}, className: '', textContent: '',
+        appendChild(child) { this.children.push(child); },
+        addEventListener() {},
+        set innerHTML(value) { this.children = []; },
+    };
+}
+
+function loadLoadDimmingModule(returnModule = false) {
     const scriptPath = path.resolve(__dirname, '../../switch_studio/static/js/app_load_dimming.js');
     const source = fs.readFileSync(scriptPath, 'utf8');
 
     const context = {
         window: {},
         document: {
-            createElement: () => ({
-                appendChild() {},
-                addEventListener() {},
-                className: '',
-                textContent: '',
-                children: [],
-                style: {},
-            }),
+            createElement: makeElement,
         },
         console,
     };
@@ -26,8 +28,34 @@ function loadLoadDimmingModule() {
 
     vm.createContext(context);
     vm.runInContext(source, context, { filename: scriptPath });
-    return context.window.SwitchStudioLoadDimming.__test__;
+    return returnModule ? context.window.SwitchStudioLoadDimming : context.window.SwitchStudioLoadDimming.__test__;
 }
+
+test('device activation builds controls after dashboard selection and rehydrates on device changes', () => {
+    const api = loadLoadDimmingModule(true);
+    const container = makeElement();
+    let selected = false;
+    let values = { dimmingSpeedUpRemote: 32 };
+    const allNodes = (node) => [node, ...node.children.flatMap(allNodes)];
+    const sliders = () => allNodes(container).filter((node) => node.type === 'range');
+    api.init({ containerEl: container, isDeviceSelected: () => selected,
+        stateApi: { getLatestValue: (field) => values[field] },
+        schemaModel: { fields: [{ name: 'dimmingSpeedUpRemote' }] } });
+    assert.equal(sliders().length, 0);
+    api.resetForDeviceChange();
+    selected = true;
+    api.activateDevice();
+    assert.ok(sliders().length > 0);
+    assert.equal(sliders()[0].value, '32');
+    api.resetForDeviceChange();
+    values = { dimmingSpeedUpRemote: 55 };
+    api.activateDevice();
+    assert.equal(sliders()[0].value, '55');
+    api.resetForDeviceChange();
+    values = {};
+    api.activateDevice();
+    assert.equal(sliders()[0].value, '25', 'missing values on a new device must not reuse the previous device');
+});
 
 test('load dimming timing helpers resolve sync-chain values', () => {
     const api = loadLoadDimmingModule();

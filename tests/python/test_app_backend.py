@@ -1,5 +1,7 @@
+import copy
 import json
 import os
+import tempfile
 import threading
 import unittest
 from types import SimpleNamespace
@@ -97,9 +99,12 @@ def _raw_zone_packet(command_id, zones):
 
 class AppBackendTests(unittest.TestCase):
     def setUp(self):
+        app_module._reset_radar_display_height_state_for_tests()
         with app_module.device_list_lock:
             app_module.device_list.clear()
             app_module.device_availability_cache.clear()
+            app_module.inventory_topics = None
+            app_module.device_options_cache.clear()
             for name in ("device_a", "device_b", "device_shared"):
                 topic = f"zigbee2mqtt/{name}"
                 app_module.device_list[name] = _make_device(name, topic)
@@ -130,6 +135,7 @@ class AppBackendTests(unittest.TestCase):
                 client.disconnect()
             except Exception:
                 pass
+        app_module._reset_radar_display_height_state_for_tests()
 
     def _client(self):
         return self._client_from_peer("127.0.0.1")
@@ -156,6 +162,14 @@ class AppBackendTests(unittest.TestCase):
             results = [result for result in results if result.get("action") == action]
         return results
 
+    @staticmethod
+    def _radar_display_events(client, event_name):
+        return [
+            event["args"][0]
+            for event in client.get_received()
+            if event["name"] == event_name
+        ]
+
     def test_as_int_or_none_parsing(self):
         self.assertEqual(app_module._as_int_or_none(10), 10)
         self.assertEqual(app_module._as_int_or_none(10.9), 10)
@@ -163,6 +177,439 @@ class AppBackendTests(unittest.TestCase):
         self.assertEqual(app_module._as_int_or_none("12.7"), 12)
         self.assertIsNone(app_module._as_int_or_none(""))
         self.assertIsNone(app_module._as_int_or_none("nan-value"))
+
+    def test_radar_display_height_defaults_then_loads_one_addon_wide_pair(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            settings_path = os.path.join(temp_dir, "radar-display.json")
+            with patch.object(app_module, "RADAR_DISPLAY_SETTINGS_PATH", settings_path):
+                app_module._reset_radar_display_height_state_for_tests()
+                default_snapshot = app_module.get_radar_display_height_snapshot()
+                self.assertEqual(default_snapshot["schema_version"], 1)
+                self.assertEqual(default_snapshot["epoch"], app_module.RADAR_DISPLAY_SETTINGS_EPOCH)
+                self.assertEqual(default_snapshot["revision"], 0)
+                self.assertFalse(default_snapshot["configured"])
+                self.assertEqual(default_snapshot["z_min"], -600)
+                self.assertEqual(default_snapshot["z_max"], 600)
+                self.assertFalse(os.path.exists(settings_path), "reading defaults must not create a settings file")
+
+                with open(settings_path, "w", encoding="utf-8") as settings_file:
+                    json.dump({
+                        "schema_version": 1,
+                        "revision": 7,
+                        "configured": True,
+                        "z_min": -175,
+                        "z_max": 425,
+                    }, settings_file)
+                app_module._reset_radar_display_height_state_for_tests()
+                persisted_snapshot = app_module.get_radar_display_height_snapshot()
+
+            self.assertEqual(persisted_snapshot["revision"], 7)
+            self.assertTrue(persisted_snapshot["configured"])
+            self.assertEqual(persisted_snapshot["z_min"], -175)
+            self.assertEqual(persisted_snapshot["z_max"], 425)
+            self.assertNotIn("topic", persisted_snapshot)
+
+    def test_radar_display_height_invalid_storage_is_safe_and_future_schema_is_read_only(self):
+        invalid_documents = (
+            b"{broken-json",
+            json.dumps({
+                "schema_version": 0,
+                "revision": 2,
+                "configured": True,
+                "z_min": -180,
+                "z_max": 420,
+            }).encode("utf-8"),
+            json.dumps({
+                "schema_version": 1,
+                "revision": 2,
+                "configured": True,
+                "z_min": -601,
+                "z_max": 200,
+            }).encode("utf-8"),
+            b"x" * (app_module.RADAR_DISPLAY_SETTINGS_MAX_BYTES + 1),
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            settings_path = os.path.join(temp_dir, "radar-display.json")
+            with patch.object(app_module, "RADAR_DISPLAY_SETTINGS_PATH", settings_path):
+                for document in invalid_documents:
+                    with open(settings_path, "wb") as settings_file:
+                        settings_file.write(document)
+                    app_module._reset_radar_display_height_state_for_tests()
+                    snapshot = app_module.get_radar_display_height_snapshot()
+                    self.assertEqual(
+                        (snapshot["revision"], snapshot["configured"], snapshot["z_min"], snapshot["z_max"]),
+                        (0, False, -600, 600),
+                    )
+                    self.assertTrue(
+                        snapshot["read_only"],
+                        "an existing unusable file must fail closed so no settings client can overwrite it",
+                    )
+                    with open(settings_path, "rb") as settings_file:
+                        before_invalid_seed = settings_file.read()
+                    rejected_seed = app_module.set_radar_display_height(-180, 420, if_unset=True)
+                    with open(settings_path, "rb") as settings_file:
+                        after_invalid_seed = settings_file.read()
+                    self.assertEqual(rejected_seed["status"], "error")
+                    self.assertEqual(rejected_seed["error_code"], "unsupported_settings_version")
+                    self.assertEqual(after_invalid_seed, before_invalid_seed)
+
+                future_document = {
+                    "schema_version": 2,
+                    "revision": 99,
+                    "configured": True,
+                    "z_min": -120,
+                    "z_max": 220,
+                    "future_field": "must survive",
+                }
+                with open(settings_path, "w", encoding="utf-8") as settings_file:
+                    json.dump(future_document, settings_file)
+                app_module._reset_radar_display_height_state_for_tests()
+                with open(settings_path, "rb") as settings_file:
+                    before = settings_file.read()
+                result = app_module.set_radar_display_height(-200, 300, if_unset=True)
+                with open(settings_path, "rb") as settings_file:
+                    after = settings_file.read()
+
+            self.assertEqual(result["status"], "error")
+            self.assertEqual(result["error_code"], "unsupported_settings_version")
+            self.assertEqual(result["snapshot"]["z_min"], -600)
+            self.assertEqual(result["snapshot"]["z_max"], 600)
+            self.assertTrue(result["snapshot"]["read_only"])
+            self.assertEqual(after, before, "a downgraded app must not overwrite an unknown future schema")
+
+        with patch("builtins.open", side_effect=PermissionError("denied")):
+            unreadable = app_module._load_radar_display_height_state("denied-settings.json")
+        self.assertEqual(unreadable["revision"], 0)
+        self.assertFalse(unreadable["configured"])
+        self.assertTrue(unreadable["read_only"])
+        self.assertEqual((unreadable["z_min"], unreadable["z_max"]), (-600, 600))
+
+    def test_radar_display_height_manual_saves_persist_atomically_with_monotonic_revisions(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            settings_path = os.path.join(temp_dir, "radar-display.json")
+            with (
+                patch.object(app_module, "RADAR_DISPLAY_SETTINGS_PATH", settings_path),
+                patch.object(app_module, "publish_json") as publish_mock,
+            ):
+                app_module._reset_radar_display_height_state_for_tests()
+                initial = app_module.get_radar_display_height_snapshot()
+                first = app_module.set_radar_display_height(
+                    420,
+                    -180,
+                    expected_epoch=initial["epoch"],
+                    expected_revision=initial["revision"],
+                )
+                second = app_module.set_radar_display_height(
+                    -240,
+                    360,
+                    expected_epoch=first["snapshot"]["epoch"],
+                    expected_revision=first["snapshot"]["revision"],
+                )
+                unchanged = app_module.set_radar_display_height(
+                    -240,
+                    360,
+                    expected_epoch=second["snapshot"]["epoch"],
+                    expected_revision=second["snapshot"]["revision"],
+                )
+                with open(settings_path, "r", encoding="utf-8") as settings_file:
+                    stored = json.load(settings_file)
+                app_module._reset_radar_display_height_state_for_tests()
+                reloaded = app_module.get_radar_display_height_snapshot()
+
+            publish_mock.assert_not_called()
+            self.assertEqual(first["status"], "saved")
+            self.assertEqual(
+                (first["snapshot"]["revision"], first["snapshot"]["z_min"], first["snapshot"]["z_max"]),
+                (1, -180, 420),
+            )
+            self.assertEqual(second["status"], "saved")
+            self.assertEqual(second["snapshot"]["revision"], 2)
+            self.assertEqual(unchanged["status"], "unchanged")
+            self.assertEqual(unchanged["snapshot"]["revision"], 2)
+            self.assertEqual(stored, {
+                "schema_version": 1,
+                "revision": 2,
+                "configured": True,
+                "z_min": -240,
+                "z_max": 360,
+            })
+            self.assertEqual(reloaded["revision"], 2)
+            self.assertEqual((reloaded["z_min"], reloaded["z_max"]), (-240, 360))
+
+    def test_radar_display_height_if_unset_write_is_compare_and_set_once(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            settings_path = os.path.join(temp_dir, "radar-display.json")
+            with patch.object(app_module, "RADAR_DISPLAY_SETTINGS_PATH", settings_path):
+                app_module._reset_radar_display_height_state_for_tests()
+                first_seed = app_module.set_radar_display_height(-160, 440, if_unset=True)
+                competing_seed = app_module.set_radar_display_height(-300, 300, if_unset=True)
+                authoritative = app_module.get_radar_display_height_snapshot()
+
+            self.assertEqual(first_seed["status"], "saved")
+            self.assertEqual(first_seed["snapshot"]["revision"], 1)
+            self.assertEqual(competing_seed["status"], "conflict")
+            self.assertEqual(competing_seed["error_code"], "already_configured")
+            self.assertEqual(authoritative["revision"], 1)
+            self.assertEqual((authoritative["z_min"], authoritative["z_max"]), (-160, 440))
+
+    def test_radar_display_height_manual_save_rejects_a_stale_revision_without_overwrite(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            settings_path = os.path.join(temp_dir, "radar-display.json")
+            with patch.object(app_module, "RADAR_DISPLAY_SETTINGS_PATH", settings_path):
+                app_module._reset_radar_display_height_state_for_tests()
+                initial = app_module.get_radar_display_height_snapshot()
+                first = app_module.set_radar_display_height(
+                    -180,
+                    420,
+                    expected_epoch=initial["epoch"],
+                    expected_revision=initial["revision"],
+                )
+                stale = app_module.set_radar_display_height(
+                    -300,
+                    300,
+                    expected_epoch=initial["epoch"],
+                    expected_revision=initial["revision"],
+                )
+                authoritative = app_module.get_radar_display_height_snapshot()
+
+            self.assertEqual(first["status"], "saved")
+            self.assertEqual(stale["status"], "conflict")
+            self.assertEqual(stale["error_code"], "revision_conflict")
+            self.assertEqual(stale["snapshot"], authoritative)
+            self.assertEqual(authoritative["revision"], 1)
+            self.assertEqual((authoritative["z_min"], authoritative["z_max"]), (-180, 420))
+
+    def test_radar_display_height_invalid_values_and_replace_failure_retain_prior_state(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            settings_path = os.path.join(temp_dir, "radar-display.json")
+            with patch.object(app_module, "RADAR_DISPLAY_SETTINGS_PATH", settings_path):
+                app_module._reset_radar_display_height_state_for_tests()
+                initial = app_module.get_radar_display_height_snapshot()
+                for raw_min, raw_max in (
+                    (True, 300),
+                    ("-200", 300),
+                    (10 ** 400, 300),
+                    (-100, -81),
+                    (-601, 300),
+                    (-200, float("inf")),
+                ):
+                    rejected = app_module.set_radar_display_height(
+                        raw_min,
+                        raw_max,
+                        expected_epoch=initial["epoch"],
+                        expected_revision=initial["revision"],
+                    )
+                    self.assertEqual(rejected["status"], "error")
+                    self.assertEqual(rejected["error_code"], "invalid_settings")
+                self.assertFalse(os.path.exists(settings_path))
+
+                saved = app_module.set_radar_display_height(
+                    -180,
+                    420,
+                    expected_epoch=initial["epoch"],
+                    expected_revision=initial["revision"],
+                )
+                with open(settings_path, "rb") as settings_file:
+                    before_file = settings_file.read()
+                before_snapshot = app_module.get_radar_display_height_snapshot()
+                with patch.object(app_module.os, "replace", side_effect=OSError("replace denied")):
+                    failed = app_module.set_radar_display_height(
+                        -240,
+                        360,
+                        expected_epoch=saved["snapshot"]["epoch"],
+                        expected_revision=saved["snapshot"]["revision"],
+                    )
+                with open(settings_path, "rb") as settings_file:
+                    after_file = settings_file.read()
+                after_snapshot = app_module.get_radar_display_height_snapshot()
+                leftovers = [name for name in os.listdir(temp_dir) if name != "radar-display.json"]
+
+            self.assertEqual(failed["status"], "error")
+            self.assertEqual(failed["error_code"], "persistence_failed")
+            self.assertEqual(failed["snapshot"], before_snapshot)
+            self.assertEqual(after_snapshot, before_snapshot)
+            self.assertEqual(after_file, before_file)
+            self.assertEqual(leftovers, [], "failed atomic writes must clean up their temporary file")
+
+    def test_radar_display_height_socket_snapshot_and_save_are_global_without_mqtt(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            settings_path = os.path.join(temp_dir, "radar-display.json")
+            with patch.object(app_module, "RADAR_DISPLAY_SETTINGS_PATH", settings_path):
+                app_module._reset_radar_display_height_state_for_tests()
+                writer = self._client()
+                observer = self._client()
+                writer_connect_events = writer.get_received()
+                observer_connect_events = observer.get_received()
+                writer_initial = next(
+                    event["args"][0]
+                    for event in writer_connect_events
+                    if event["name"] == "radar_display_height"
+                )
+                observer_initial = next(
+                    event["args"][0]
+                    for event in observer_connect_events
+                    if event["name"] == "radar_display_height"
+                )
+                self.assertEqual(writer_initial, observer_initial)
+
+                writer.emit("request_radar_display_height")
+                requested = self._radar_display_events(writer, "radar_display_height")
+                self.assertEqual(requested, [writer_initial])
+
+                with app_module.command_rate_limits_lock:
+                    command_buckets_before = copy.deepcopy(app_module.command_rate_limits)
+                    command_global_before = copy.deepcopy(app_module.command_rate_global)
+                with patch.object(app_module, "publish_json") as publish_mock:
+                    writer.emit("set_radar_display_height", {
+                        "request_id": "shared-height-1",
+                        "expected_epoch": writer_initial["epoch"],
+                        "expected_revision": writer_initial["revision"],
+                        "z_min": -180,
+                        "z_max": 420,
+                    })
+                with app_module.command_rate_limits_lock:
+                    command_buckets_after = copy.deepcopy(app_module.command_rate_limits)
+                    command_global_after = copy.deepcopy(app_module.command_rate_global)
+                writer_events = writer.get_received()
+                observer_events = observer.get_received()
+
+            publish_mock.assert_not_called()
+            self.assertEqual(
+                command_buckets_after,
+                command_buckets_before,
+                "visualization settings must not consume per-session MQTT command capacity",
+            )
+            self.assertEqual(
+                command_global_after,
+                command_global_before,
+                "visualization settings must not consume global MQTT command capacity",
+            )
+            writer_results = [event["args"][0] for event in writer_events if event["name"] == "radar_display_height_result"]
+            writer_broadcasts = [event["args"][0] for event in writer_events if event["name"] == "radar_display_height"]
+            observer_results = [event for event in observer_events if event["name"] == "radar_display_height_result"]
+            observer_broadcasts = [event["args"][0] for event in observer_events if event["name"] == "radar_display_height"]
+            self.assertEqual(len(writer_results), 1)
+            self.assertEqual(writer_results[0]["status"], "saved")
+            self.assertEqual(writer_results[0]["request_id"], "shared-height-1")
+            self.assertEqual(len(writer_broadcasts), 1)
+            self.assertEqual(observer_results, [])
+            self.assertEqual(observer_broadcasts, writer_broadcasts)
+            self.assertEqual((writer_broadcasts[0]["z_min"], writer_broadcasts[0]["z_max"]), (-180, 420))
+            self.assertEqual(writer_broadcasts[0]["revision"], 1)
+            self.assertNotIn("topic", writer_results[0])
+            self.assertNotIn("topic", writer_broadcasts[0])
+
+    def test_radar_display_height_socket_errors_are_writer_only_and_do_not_broadcast(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            settings_path = os.path.join(temp_dir, "radar-display.json")
+            with patch.object(app_module, "RADAR_DISPLAY_SETTINGS_PATH", settings_path):
+                app_module._reset_radar_display_height_state_for_tests()
+                writer = self._client()
+                observer = self._client()
+                initial = next(
+                    event["args"][0]
+                    for event in writer.get_received()
+                    if event["name"] == "radar_display_height"
+                )
+                observer.get_received()
+
+                writer.emit("set_radar_display_height", {
+                    "request_id": "invalid-height",
+                    "expected_epoch": initial["epoch"],
+                    "expected_revision": initial["revision"],
+                    "z_min": -100,
+                    "z_max": -81,
+                })
+                invalid_events = writer.get_received()
+                self.assertEqual(observer.get_received(), [])
+
+                with patch.object(app_module, "_write_radar_display_height_state", side_effect=OSError("disk full")):
+                    writer.emit("set_radar_display_height", {
+                        "request_id": "failed-height",
+                        "expected_epoch": initial["epoch"],
+                        "expected_revision": initial["revision"],
+                        "z_min": -180,
+                        "z_max": 420,
+                    })
+                failed_events = writer.get_received()
+                observer_events = observer.get_received()
+                authoritative = app_module.get_radar_display_height_snapshot()
+
+            invalid_results = [event["args"][0] for event in invalid_events if event["name"] == "radar_display_height_result"]
+            failed_results = [event["args"][0] for event in failed_events if event["name"] == "radar_display_height_result"]
+            self.assertEqual(len(invalid_results), 1)
+            self.assertEqual(invalid_results[0]["error_code"], "invalid_settings")
+            self.assertFalse(any(event["name"] == "radar_display_height" for event in invalid_events))
+            self.assertEqual(len(failed_results), 1)
+            self.assertEqual(failed_results[0]["error_code"], "persistence_failed")
+            self.assertFalse(any(event["name"] == "radar_display_height" for event in failed_events))
+            self.assertEqual(observer_events, [])
+            self.assertEqual(
+                (authoritative["revision"], authoritative["configured"], authoritative["z_min"], authoritative["z_max"]),
+                (0, False, -600, 600),
+            )
+
+    def test_radar_display_height_has_a_dedicated_write_limit_and_disconnect_cleanup(self):
+        allowed, retry_after = app_module.consume_radar_display_write_limit("settings-browser", now=10.0)
+        self.assertTrue(allowed)
+        self.assertEqual(retry_after, 0.0)
+        allowed, retry_after = app_module.consume_radar_display_write_limit("settings-browser", now=10.1)
+        self.assertFalse(allowed)
+        self.assertAlmostEqual(retry_after, 0.4)
+        self.assertTrue(app_module.consume_radar_display_write_limit("other-browser", now=10.1)[0])
+        app_module.clear_radar_display_write_limit("settings-browser")
+        self.assertTrue(app_module.consume_radar_display_write_limit("settings-browser", now=10.1)[0])
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            settings_path = os.path.join(temp_dir, "radar-display.json")
+            with patch.object(app_module, "RADAR_DISPLAY_SETTINGS_PATH", settings_path):
+                app_module._reset_radar_display_height_state_for_tests()
+                client = self._client()
+                sid = self._server_sid(client)
+                initial = next(
+                    event["args"][0]
+                    for event in client.get_received()
+                    if event["name"] == "radar_display_height"
+                )
+                client.emit("set_radar_display_height", {
+                    "request_id": "limited-height-1",
+                    "expected_epoch": initial["epoch"],
+                    "expected_revision": initial["revision"],
+                    "z_min": -180,
+                    "z_max": 420,
+                })
+                first_events = client.get_received()
+                first_result = next(
+                    event["args"][0]
+                    for event in first_events
+                    if event["name"] == "radar_display_height_result"
+                )
+                client.emit("set_radar_display_height", {
+                    "request_id": "limited-height-2",
+                    "expected_epoch": first_result["snapshot"]["epoch"],
+                    "expected_revision": first_result["snapshot"]["revision"],
+                    "z_min": -240,
+                    "z_max": 360,
+                })
+                limited_events = client.get_received()
+                limited_result = next(
+                    event["args"][0]
+                    for event in limited_events
+                    if event["name"] == "radar_display_height_result"
+                )
+                with app_module.radar_display_write_limits_lock:
+                    self.assertIn(sid, app_module.radar_display_write_limits)
+                client.disconnect()
+                with app_module.radar_display_write_limits_lock:
+                    self.assertNotIn(sid, app_module.radar_display_write_limits)
+
+            self.assertEqual(first_result["status"], "saved")
+            self.assertEqual(limited_result["status"], "error")
+            self.assertEqual(limited_result["error_code"], "rate_limited")
+            self.assertGreaterEqual(limited_result["retry_after_ms"], 100)
+            self.assertFalse(any(event["name"] == "radar_display_height" for event in limited_events))
+            self.assertEqual(limited_result["snapshot"]["revision"], 1)
+            self.assertEqual((limited_result["snapshot"]["z_min"], limited_result["snapshot"]["z_max"]), (-180, 420))
 
     def test_values_equal_allows_expected_nested_subset(self):
         self.assertTrue(app_module._values_equal(
@@ -1999,7 +2446,7 @@ class AppBackendTests(unittest.TestCase):
             ("update_parameter", {"param": "mmWaveHoldTime", "value": 30, "request_id": "ready-param"}),
             ("apply_parameters", {"changes": {"mmWaveHoldTime": 30}, "request_id": "ready-apply"}),
             ("force_sync", {"request_id": "ready-sync"}),
-            ("send_command", 2),
+            ("send_command", {"action_id": 2, "topic": "zigbee2mqtt/device_a", "request_id": "ready-maintenance"}),
         ]
         with patch.object(app_module, "publish_json") as publish_mock:
             for event_name, payload in commands:
@@ -2159,7 +2606,7 @@ class AppBackendTests(unittest.TestCase):
                 1,
             ),
             ("force_sync", {"request_id": "limited-sync"}, "force_sync", 2),
-            ("send_command", 2, "send_command", 1),
+            ("send_command", {"action_id": 2, "topic": "zigbee2mqtt/device_a", "request_id": "limited-maintenance"}, "send_command", 1),
         )
         with patch.object(app_module, "enforce_command_rate_limit_or_emit", return_value=False) as enforce_mock:
             with patch.object(app_module, "publish_json") as publish_mock:
